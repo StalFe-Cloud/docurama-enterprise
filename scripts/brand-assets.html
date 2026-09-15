@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { margin:0; padding:0; }
+  body { font-family: 'Geist', system-ui, -apple-system, sans-serif; background:#ffffff; }
+  .row { display:flex; gap:24px; padding:20px; align-items:center; }
+  .cell { text-align:center; }
+  svg.mark { width:96px; height:96px; }
+  .dark-cell svg.mark { --brand-ink:#ffffff; --brand-doc:#12211b; --brand-line:#3d554a; --brand-emerald:#4fd1a1; }
+  .dark-cell { background:#0b1714; padding:20px; border-radius:8px; color:#fff; }
+</style>
+</head>
+<body>
+  <div class="row">
+    <div class="cell">
+      <svg class="mark" viewBox="0 0 64 64" role="img" aria-label="Docurama">
+        <rect x="3.5" y="3.5" width="57" height="57" rx="13" fill="#ffffff" stroke="#1A1A1A" stroke-width="7"/>
+        <path d="M43 7.5 L54.5 19 L43 19 Z" fill="#6B66A3"/>
+        <g fill="#D1D1D1">
+          <rect x="12" y="15.5" width="24" height="4.6" rx="2.3"/>
+          <rect x="12" y="24" width="28" height="4.6" rx="2.3"/>
+          <rect x="12" y="32.5" width="21" height="4.6" rx="2.3"/>
+        </g>
+        <path d="M8.5 47.5 C11.5 38.5 15 34.5 18 41.5 C21 48.5 24 45.5 27 41.5 C30 37.5 33.5 43.5 38.5 46.5 C44 49.8 52 48 57.5 41"
+              fill="none" stroke="#0F7A5A" stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <div class="cell dark-cell">
+      <svg class="mark" viewBox="0 0 64 64" role="img" aria-label="Docurama">
+        <rect x="3.5" y="3.5" width="57" height="57" rx="13" fill="var(--brand-doc,#fff)" stroke="var(--brand-ink,#1a1a1a)" stroke-width="7"/>
+        <path d="M43 7.5 L54.5 19 L43 19 Z" fill="#6B66A3"/>
+        <g fill="var(--brand-line,#d1d1d1)">
+          <rect x="12" y="15.5" width="24" height="4.6" rx="2.3"/>
+          <rect x="12" y="24" width="28" height="4.6" rx="2.3"/>
+          <rect x="12" y="32.5" width="21" height="4.6" rx="2.3"/>
+        </g>
+        <path d="M8.5 47.5 C11.5 38.5 15 34.5 18 41.5 C21 48.5 24 45.5 27 41.5 C30 37.5 33.5 43.5 38.5 46.5 C44 49.8 52 48 57.5 41"
+              fill="none" stroke="var(--brand-emerald,#0f7a5a)" stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+  </div>
+</body>
+</html>

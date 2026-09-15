@@ -1,0 +1,85 @@
+{
+  "brand": {
+    "name": "Docurama",
+    "tagline": "Sign, Seal, Verify",
+    "legalName": "Docurama SAS",
+    "address": "1 Rue Marguerin, 75014 Paris, France",
+    "euDataResidency": "EU data residency. Paris, France."
+  },
+  "nav": {
+    "product": "Product",
+    "examples": "Examples",
+    "compliance": "Compliance",
+    "pricing": "Pricing",
+    "developers": "Developers",
+    "faq": "FAQ",
+    "templates": "Contract Templates",
+    "docs": "Documentation",
+    "status": "Status",
+    "security": "Security",
+    "signIn": "Sign in",
+    "startTrial": "Start free trial",
+    "verifyDocument": "Verify a document"
+  },
+  "hero": {
+    "title": "Every document, signed and sealed under EU law",
+    "subtitle": "The enterprise e-signature portal with PAdES cryptographic sealing, RFC 3161 timestamps and an audit trail built for review.",
+    "startFree": "Start free trial",
+    "verifyDoc": "Verify a document",
+    "caption": "The StålFe demo workspace replayed end to end: a mill certificate goes to the foundry, is signed, sealed and proven with cryptographic evidence."
+  },
+  "trust": {
+    "summary": "EU data residency. GDPR, eIDAS-aligned and 21 CFR Part 11 workflows. Public status at status.docurama.eu, platform security at security.docurama.eu."
+  },
+  "features": {
+    "bentoTitle": "A complete evidence pipeline, not just a signature in a corner",
+    "bentoSubtitle": "Docurama binds identity, document bytes and cryptographic time into a single PAdES-sealed PDF that verifies offline without calling our servers.",
+    "sendAndSign": "Send and eSign",
+    "sendAndSignDesc": "Multi-signer envelopes with routing order, carbon copies and reminders. Signers never need an account.",
+    "certsAndSealing": "Certificates and sealing",
+    "certsAndSealingDesc": "One-click RSA-2048 signing certificates per workspace. Seal with PAdES conformance from B-B to B-LTA.",
+    "timestamps": "RFC 3161 timestamps",
+    "timestampsDesc": "Every signature anchored to an independent Timestamp Authority. Presets for DigiCert, Sectigo, GlobalSign, or your own TSA."
+  },
+  "pricing": {
+    "title": "Predictable pricing with no envelope surprise bills",
+    "subtitle": "Every plan includes unlimited signers, live verification and certificate management. Upgrade when you need higher volumes or regulated compliance modes.",
+    "starter": "Starter",
+    "business": "Business",
+    "enterprise": "Enterprise",
+    "starterBlurb": "For small teams sending their first envelopes.",
+    "businessBlurb": "For growing operations that live in documents.",
+    "enterpriseBlurb": "For regulated teams with audit obligations.",
+    "perMonth": "/mo",
+    "popular": "Most popular",
+    "startTrial": "Start 14-day trial",
+    "contactSales": "Contact enterprise sales"
+  },
+  "compliance": {
+    "title": "Built for regulated European enterprises",
+    "subtitle": "Docurama SAS is governed by French and EU law. We never transfer your documents across borders.",
+    "eidas": "eIDAS Compliance",
+    "gdpr": "GDPR / RGPD",
+    "part11": "21 CFR Part 11",
+    "legalHub": "Compliance & Legal Hub",
+    "frenchTemplates": "French Legal Templates"
+  },
+  "common": {
+    "language": "Language",
+    "english": "English",
+    "french": "Français",
+    "save": "Save",
+    "cancel": "Cancel",
+    "close": "Close",
+    "confirm": "Confirm",
+    "search": "Search",
+    "sendForSignature": "Send for signature",
+    "uploadPdf": "Upload PDF document",
+    "download": "Download",
+    "status": "Status",
+    "completed": "Completed",
+    "draft": "Draft",
+    "sent": "Sent",
+    "partiallySigned": "Partially signed"
+  }
+}

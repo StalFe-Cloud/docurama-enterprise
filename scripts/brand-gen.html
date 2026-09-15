@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: 'Geist', system-ui, -apple-system, 'Segoe UI', sans-serif; }
+  /* apple-icon: 180x180 mark centered on white */
+  #apple-icon {
+    width:180px; height:180px; background:#ffffff;
+    display:flex; align-items:center; justify-content:center;
+  }
+  #apple-icon svg { width:132px; height:132px; }
+  /* og-image: 1200x630 brand card */
+  #og {
+    width:1200px; height:630px;
+    background:linear-gradient(135deg,#0b1714 0%,#0f2419 55%,#0f7a5a 165%);
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:28px;
+    position:relative; overflow:hidden; color:#fff;
+  }
+  #og .glow1 { position:absolute; right:-160px; top:-160px; width:520px; height:520px; border-radius:50%;
+    background:rgba(79,209,161,0.16); filter:blur(70px); }
+  #og .glow2 { position:absolute; left:-140px; bottom:-180px; width:480px; height:480px; border-radius:50%;
+    background:rgba(15,122,90,0.25); filter:blur(70px); }
+  #og .lockup { display:flex; align-items:center; gap:30px; position:relative; }
+  #og .mark { width:128px; height:128px; --brand-ink:#ffffff; --brand-doc:#12211b; --brand-line:#3d554a; --brand-emerald:#4fd1a1; }
+  #og .word { font-size:88px; font-weight:600; letter-spacing:-0.03em; color:#fff; line-height:1; }
+  #og .word span { color:#4fd1a1; }
+  #og .tagline { position:relative; font-size:21px; font-weight:500; letter-spacing:0.42em; text-transform:uppercase; color:rgba(255,255,255,0.66); }
+  #og .legal { position:absolute; bottom:34px; font-size:16px; color:rgba(255,255,255,0.5); letter-spacing:0.02em; }
+</style>
+</head>
+<body>
+  <div id="apple-icon">
+    <svg viewBox="0 0 64 64" role="img" aria-label="Docurama">
+      <rect x="3.5" y="3.5" width="57" height="57" rx="13" fill="#ffffff" stroke="#1A1A1A" stroke-width="7"/>
+      <path d="M43 7.5 L54.5 19 L43 19 Z" fill="#6B66A3"/>
+      <g fill="#D1D1D1">
+        <rect x="12" y="15.5" width="24" height="4.6" rx="2.3"/>
+        <rect x="12" y="24" width="28" height="4.6" rx="2.3"/>
+        <rect x="12" y="32.5" width="21" height="4.6" rx="2.3"/>
+      </g>
+      <path d="M8.5 47.5 C11.5 38.5 15 34.5 18 41.5 C21 48.5 24 45.5 27 41.5 C30 37.5 33.5 43.5 38.5 46.5 C44 49.8 52 48 57.5 41"
+            fill="none" stroke="#0F7A5A" stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+  </div>
+  <div id="og">
+    <div class="glow1"></div><div class="glow2"></div>
+    <div class="lockup">
+      <svg class="mark" viewBox="0 0 64 64" role="img" aria-label="Docurama">
+        <rect x="3.5" y="3.5" width="57" height="57" rx="13" fill="var(--brand-doc,#fff)" stroke="var(--brand-ink,#1a1a1a)" stroke-width="7"/>
+        <path d="M43 7.5 L54.5 19 L43 19 Z" fill="#6B66A3"/>
+        <g fill="var(--brand-line,#d1d1d1)">
+          <rect x="12" y="15.5" width="24" height="4.6" rx="2.3"/>
+          <rect x="12" y="24" width="28" height="4.6" rx="2.3"/>
+          <rect x="12" y="32.5" width="21" height="4.6" rx="2.3"/>
+        </g>
+        <path d="M8.5 47.5 C11.5 38.5 15 34.5 18 41.5 C21 48.5 24 45.5 27 41.5 C30 37.5 33.5 43.5 38.5 46.5 C44 49.8 52 48 57.5 41"
+              fill="none" stroke="var(--brand-emerald,#0f7a5a)" stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <div class="word">Docu<span>rama</span></div>
+    </div>
+    <div class="tagline">Sign&nbsp;&bull;&nbsp;Seal&nbsp;&bull;&nbsp;Verify</div>
+    <div class="legal">Docurama SAS — 1 Rue Marguerin, 75014 Paris, France · eIDAS &amp; ESIGN compliant · EU data residency</div>
+  </div>
+</body>
+</html>

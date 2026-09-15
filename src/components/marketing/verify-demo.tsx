@@ -64,7 +64,7 @@ export function VerifyDemo() {
   return (
     <div ref={viewRef} className="demo-root">
       <DemoCanvas
-        w={W} h={H} minScale={0.6}
+        w={W} h={H}
         label="Live example of the public verification portal: a sealed document's code is entered, and the result shows its title, SHA-256 digest, signers and seal level, without an account and without exposing the file."
       >
         <div style={{ position: "absolute", inset: 0, background: WORKSPACE, opacity: st.exit ? 0 : 1, transition: "opacity .4s ease" }}>

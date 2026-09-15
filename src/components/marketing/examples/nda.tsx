@@ -87,7 +87,7 @@ export function ExampleNda() {
   return (
     <div ref={viewRef} className="demo-root">
       <DemoCanvas
-        w={W} h={H} minScale={0.62}
+        w={W} h={H}
         label="Live example: a mutual NDA between StålFe and Gusswerk Rheinland routes through two signers in order. StålFe signs first, the turn passes to Gusswerk, and the envelope completes when both parties have signed."
       >
         <div style={{ position: "absolute", inset: 0, background: "#fafaf9" }}>

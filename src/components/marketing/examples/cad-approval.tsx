@@ -119,7 +119,7 @@ export function ExampleCadApproval() {
   return (
     <div ref={viewRef} className="demo-root">
       <DemoCanvas
-        w={W} h={H} minScale={0.62}
+        w={W} h={H}
         label="Live example: engineering drawing DR-2210 for the GB-48 housing draws itself, dimensions and title block included, and the design engineer's approval signature is bound to that exact revision."
       >
         <div style={{ position: "absolute", inset: 0, background: "#fafaf9", opacity: st.exit ? 0 : 1, transition: "opacity .4s ease" }}>

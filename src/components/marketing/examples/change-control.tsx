@@ -77,7 +77,7 @@ export function ExampleChangeControl() {
   return (
     <div ref={viewRef} className="demo-root">
       <DemoCanvas
-        w={W} h={H} minScale={0.62}
+        w={W} h={H}
         label="Live example: engineering change request ECR-1042 for the GB-48 housing casting moves through prepare, review and approval. Every step is recorded with the signer's identity and a timestamp."
       >
         <div style={{ position: "absolute", inset: 0, background: "#fafaf9", opacity: st.exit ? 0 : 1, transition: "opacity .4s ease" }}>

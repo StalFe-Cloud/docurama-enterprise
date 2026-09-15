@@ -80,7 +80,7 @@ export function ExampleSupplyAgreement() {
   return (
     <div ref={viewRef} className="demo-root">
       <DemoCanvas
-        w={W} h={H} minScale={0.62}
+        w={W} h={H}
         label="Live example: the annual supply agreement is sent from a template in one pass. Title and both signers come prefilled, both parties sign in sequence, and the sealed copy carries a public verification code."
       >
         <div style={{ position: "absolute", inset: 0, background: "#fff" }}>

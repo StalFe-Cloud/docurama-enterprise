@@ -85,7 +85,7 @@ export function TableDemo() {
   return (
     <div ref={viewRef} className="demo-root">
       <DemoCanvas
-        w={W} h={H} minScale={0.6}
+        w={W} h={H}
         label="Live view of the StålFe documents workspace: envelopes move from draft to sent to completed, progress bars fill, reminders go out, and evidence digests appear as documents seal."
       >
         <div style={{ position: "absolute", inset: 0, background: "#fff", opacity: st.exit ? 0 : 1, transition: "opacity .4s ease" }}>

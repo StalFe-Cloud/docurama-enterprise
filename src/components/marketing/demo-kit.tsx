@@ -98,9 +98,11 @@ export function DemoCanvas({
     const measure = () => {
       const cw = el.clientWidth;
       if (cw === 0) return;
+      // Fit to container width, capped at 1.0 (natural size)
       let scale = Math.min(cw / w, 1);
       if (maxH) scale = Math.min(scale, maxH / h);
-      if (minScale) scale = Math.max(scale, minScale);
+      // Only enforce minScale if container width allows it, avoiding forced horizontal overflow
+      if (minScale && cw >= w * minScale) scale = Math.max(scale, minScale);
       setDim({ scale, iw: w * scale, ih: h * scale });
     };
     measure();
@@ -114,7 +116,7 @@ export function DemoCanvas({
       ref={outerRef}
       role="img"
       aria-label={label}
-      className={cn("w-full overflow-x-auto overflow-y-hidden", className)}
+      className={cn("w-full overflow-hidden", className)}
     >
       <div style={{ position: "relative", width: dim.iw, height: dim.ih, marginInline: "auto" }}>
         <div

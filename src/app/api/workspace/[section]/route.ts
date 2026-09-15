@@ -229,8 +229,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
             return jsonError(`Monthly envelope quota reached (${used}/${PLAN_LIMITS[tenant!.planCode]}). Upgrade your plan to send more.`, 402);
           }
 
-          // WS3: accept documentId for real page count and SHA-256
+          // WS3: accept documentId or templateId for real page count and SHA-256
           const documentId = typeof data.documentId === "string" ? data.documentId : undefined;
+          const templateId = typeof data.templateId === "string" ? data.templateId : undefined;
           let realPageCount = 1;
           let realSha256: string | undefined;
           if (documentId) {
@@ -238,6 +239,17 @@ export async function POST(req: NextRequest, ctx: Ctx) {
             if (!doc) return jsonError("Document not found in this workspace", 404);
             realPageCount = doc.pageCount;
             realSha256 = doc.sha256;
+          } else if (templateId) {
+            const tpl = await db.template.findFirst({
+              where: { id: templateId, OR: [{ tenantId: tenantId! }, { isBuiltIn: true }] },
+            });
+            if (tpl) {
+              realPageCount = tpl.pages;
+              await db.template.update({
+                where: { id: tpl.id },
+                data: { usageCount: { increment: 1 }, lastUsedAt: new Date() },
+              });
+            }
           }
 
           const code = `DOC-${randomBytes(4).toString("hex").toUpperCase()}`;

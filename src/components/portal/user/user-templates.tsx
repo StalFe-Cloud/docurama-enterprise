@@ -3,9 +3,10 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { LayoutTemplate, Plus, Trash2, PenLine, FolderOpen, FileUp } from "lucide-react";
+import { LayoutTemplate, Plus, Trash2, PenLine, FolderOpen, FileUp, Scale } from "lucide-react";
 import { apiGet, apiPost, ApiError } from "@/lib/client";
 import { ConfirmDialog, EmptyState, ErrorState, PageHeader, fmtRelative } from "@/components/portal/shared";
+import { pushPath } from "@/components/portal/portal-root";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -24,6 +25,7 @@ import {
 type Template = {
   id: string; name: string; description: string | null; category: string;
   folder: string; pages: number; usageCount: number; lastUsedAt: string | null; publicSlug: string;
+  isBuiltIn?: boolean; sourceNotes?: string | null;
 };
 
 const CATEGORIES = ["Legal", "HR", "Sales", "Operations", "Compliance", "General"];
@@ -41,10 +43,13 @@ export function UserTemplates() {
 
   const act = useMutation({
     mutationFn: (vars: { op: string; id?: string; data?: Record<string, unknown> }) =>
-      apiPost<{ ok: boolean; message: string }>("/api/workspace/templates", vars),
-    onSuccess: (res) => {
+      apiPost<{ ok: boolean; message: string; template?: any }>("/api/workspace/templates", vars),
+    onSuccess: (res, vars) => {
       toast.success(res.message);
       queryClient.invalidateQueries({ queryKey: ["workspace", "templates"] });
+      if (vars.op === "use" && vars.id) {
+        pushPath(`/documents?template=${vars.id}`);
+      }
     },
     onError: (err: ApiError) => toast.error(err.message),
   });
@@ -107,13 +112,29 @@ export function UserTemplates() {
               <CardContent className="flex flex-1 flex-col gap-3 p-5">
                 <div className="flex items-start justify-between gap-2">
                   <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary-soft">
-                    <LayoutTemplate className="h-5 w-5 text-primary" aria-hidden />
+                    {t.isBuiltIn ? (
+                      <Scale className="h-5 w-5 text-primary" aria-hidden />
+                    ) : (
+                      <LayoutTemplate className="h-5 w-5 text-primary" aria-hidden />
+                    )}
                   </span>
-                  <span className="rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">{t.category}</span>
+                  <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                    {t.isBuiltIn && (
+                      <span className="inline-flex items-center gap-1 rounded-md bg-primary/10 border border-primary/20 px-2 py-0.5 text-xs font-semibold text-primary">
+                        <Scale className="h-3 w-3" /> Droit Français
+                      </span>
+                    )}
+                    <span className="rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">{t.category}</span>
+                  </div>
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="truncate font-medium">{t.name}</p>
                   <p className="mt-0.5 line-clamp-2 min-h-[2rem] text-xs text-muted-foreground">{t.description ?? "No description"}</p>
+                  {t.sourceNotes && (
+                    <p className="mt-1 text-[11px] font-mono text-muted-foreground/80 truncate">
+                      Statut: {t.sourceNotes}
+                    </p>
+                  )}
                 </div>
                 <p className="text-xs text-muted-foreground">
                   {t.pages} pages · used {t.usageCount}× · last {fmtRelative(t.lastUsedAt)}
@@ -122,21 +143,23 @@ export function UserTemplates() {
                   <Button size="sm" className="h-11 flex-1" onClick={() => act.mutate({ op: "use", id: t.id })}>
                     <PenLine className="h-4 w-4" aria-hidden /> Use template
                   </Button>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="outline" size="icon" className="h-11 w-11" aria-label={`More actions for ${t.name}`}>
-                        ⋯
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem
-                        variant="destructive"
-                        onClick={() => act.mutate({ op: "delete", id: t.id })}
-                      >
-                        <Trash2 className="h-4 w-4" aria-hidden /> Delete template
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                  {!t.isBuiltIn && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" size="icon" className="h-11 w-11" aria-label={`More actions for ${t.name}`}>
+                          ⋯
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          variant="destructive"
+                          onClick={() => act.mutate({ op: "delete", id: t.id })}
+                        >
+                          <Trash2 className="h-4 w-4" aria-hidden /> Delete template
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
                 </div>
               </CardContent>
             </Card>

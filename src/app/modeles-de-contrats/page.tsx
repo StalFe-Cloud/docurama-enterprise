@@ -31,8 +31,11 @@ export default async function ModelesContratsPage() {
             <Button variant="ghost" size="sm" asChild>
               <Link href="/docs">Documentation</Link>
             </Button>
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/login?next=/templates">Se connecter</Link>
+            </Button>
             <Button size="sm" asChild>
-              <Link href="/sign-in">Commencer à signer</Link>
+              <Link href="/welcome?next=/templates">Essai gratuit 14 jours</Link>
             </Button>
           </div>
         </div>
@@ -87,15 +90,20 @@ export default async function ModelesContratsPage() {
                   )}
                 </div>
 
-                <div className="mt-6 pt-4 border-t flex items-center justify-between">
+                <div className="mt-6 pt-4 border-t flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <span className="text-xs text-muted-foreground">
                     {fieldsCount} champ{fieldsCount > 1 ? "s" : ""} de signature
                   </span>
-                  <Button size="sm" asChild>
-                    <Link href={`/sign-in?next=/templates`}>
-                      Utiliser ce modèle <ArrowRight className="h-3.5 w-3.5 ml-1" />
-                    </Link>
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Button variant="ghost" size="sm" className="text-xs" asChild>
+                      <Link href="/login?next=/templates">Connexion</Link>
+                    </Button>
+                    <Button size="sm" asChild>
+                      <Link href={`/welcome?template=${t.publicSlug || t.id}&next=/templates`}>
+                        Utiliser ce modèle <ArrowRight className="h-3.5 w-3.5 ml-1" />
+                      </Link>
+                    </Button>
+                  </div>
                 </div>
               </div>
             );

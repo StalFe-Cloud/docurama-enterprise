@@ -37,7 +37,6 @@ const NAV = [
   { href: "#examples", labelKey: "nav.examples", fallback: "Examples" },
   { href: "#compliance", labelKey: "nav.compliance", fallback: "Compliance" },
   { href: "#pricing", labelKey: "nav.pricing", fallback: "Pricing" },
-  { href: "/modeles-de-contrats", labelKey: "nav.templates", fallback: "Templates" },
   { href: "/docs", labelKey: "nav.docs", fallback: "Docs" },
   { href: "/developers", labelKey: "nav.developers", fallback: "Developers" },
   { href: "#faq", labelKey: "nav.faq", fallback: "FAQ" },
@@ -66,7 +65,13 @@ const BENTO_FEATURES = [
 const ALSO_INCLUDED = [
   { icon: BellRing, title: "Smart reminders", body: "Manual nudges, per-envelope jobs or platform schedules with quiet hours and SMS escalation." },
   { icon: MessageSquare, title: "SMS and WhatsApp alerts", body: "Fourteen researched providers, from WhatsApp Cloud API's free tier to EU-hosted gateways." },
-  { icon: ScrollText, title: "Templates", body: "Turn any repeatedly signed document into a template with usage tracking and folders." },
+  {
+    icon: ScrollText,
+    title: "Templates & Legal Contracts",
+    body: "Turn repeatedly signed documents into templates, or start instantly from our statutory French legal contracts.",
+    href: "/modeles-de-contrats",
+    linkText: "Explore French legal templates →",
+  },
   { icon: BadgeCheck, title: "Sending domains", body: "Send from your own domain after live DNS verification over DNS-over-HTTPS." },
 ];
 
@@ -336,6 +341,14 @@ export function MarketingPage() {
                 <div>
                   <h3 className="text-sm font-semibold">{f.title}</h3>
                   <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{f.body}</p>
+                  {"href" in f && f.href && (
+                    <a
+                      href={f.href}
+                      className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                    >
+                      {("linkText" in f && f.linkText) || "Learn more →"}
+                    </a>
+                  )}
                 </div>
               </div>
             ))}
@@ -532,7 +545,7 @@ export function MarketingPage() {
           <nav aria-label="Product">
             <p className="mb-4 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Product</p>
             <ul className="space-y-2.5 text-sm">
-              {[["Features", "#product"], ["Live examples", "#examples"], ["Compliance", "#compliance"], ["Pricing", "#pricing"], ["Developers", "/developers"], ["Verify a document", "/verify"], ["Documentation", "/docs"], ["Create account", "/welcome"]].map(([l, h]) => (
+              {[["Features", "#product"], ["Live examples", "#examples"], ["Compliance", "#compliance"], ["Pricing", "#pricing"], ["Contract templates", "/modeles-de-contrats"], ["Developers", "/developers"], ["Verify a document", "/verify"], ["Documentation", "/docs"], ["Create account", "/welcome"]].map(([l, h]) => (
                 <li key={l}><a className="text-muted-foreground transition-colors hover:text-foreground" href={h}>{l}</a></li>
               ))}
             </ul>
@@ -552,6 +565,7 @@ export function MarketingPage() {
               <li><a className="text-muted-foreground transition-colors hover:text-foreground" href="/docs#legal">Privacy Policy</a></li>
               <li><a className="text-muted-foreground transition-colors hover:text-foreground" href="/docs#legal">Data Processing Agreement</a></li>
               <li><a className="text-muted-foreground transition-colors hover:text-foreground" href="/docs#legal">Subprocessor list</a></li>
+              <li><a className="text-muted-foreground transition-colors hover:text-foreground" href="/modeles-de-contrats">French legal templates</a></li>
               <li><a className="text-muted-foreground transition-colors hover:text-foreground" href="/security">Security policy</a></li>
               <li><a className="text-muted-foreground transition-colors hover:text-foreground" href="/status">Platform status</a></li>
               <li><a className="text-muted-foreground transition-colors hover:text-foreground" href="/.well-known/security.txt">security.txt</a></li>

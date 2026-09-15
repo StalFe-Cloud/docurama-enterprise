@@ -1,13 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Bell, Ban, Eye, FileSignature, Send, Plus, Trash2, UploadCloud, FileText, Loader2 } from "lucide-react";
+import { Bell, Ban, Eye, FileSignature, Send, Plus, Trash2, UploadCloud, FileText, Loader2, Scale } from "lucide-react";
 import { apiGet, apiPost, apiUpload, ApiError } from "@/lib/client";
 import {
   Column, ConfirmDialog, CopyableCode, DataTable, PageHeader, StatusBadge, fmtDate, fmtRelative,
 } from "@/components/portal/shared";
+import { pushPath } from "@/components/portal/portal-root";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -40,10 +41,37 @@ export function UserDocuments() {
   const [status, setStatus] = useState("ALL");
   const [detailId, setDetailId] = useState<string | null>(null);
   const [sendOpen, setSendOpen] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] = useState<{ id: string; name: string; pages: number; category: string } | null>(null);
   const [uploadedDoc, setUploadedDoc] = useState<{ id: string; filename: string; pageCount: number; byteSize: number } | null>(null);
   const [uploading, setUploading] = useState(false);
   const [form, setForm] = useState({ title: "", message: "", recipients: [{ name: "", email: "" }, { name: "", email: "" }] });
   const queryClient = useQueryClient();
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const sp = new URLSearchParams(window.location.search);
+    const templateId = sp.get("template");
+    if (!templateId) return;
+
+    apiGet<{ rows: { id: string; name: string; pages: number; category: string; publicSlug?: string }[] }>("/api/workspace/templates")
+      .then((res) => {
+        const match = (res.rows ?? []).find((t) => t.id === templateId || t.publicSlug === templateId);
+        if (match) {
+          setSelectedTemplate({ id: match.id, name: match.name, pages: match.pages, category: match.category });
+          setForm((prev) => ({
+            ...prev,
+            title: match.name,
+            message: `Please review and sign ${match.name}.`,
+          }));
+          setSendOpen(true);
+          toast.success(`Loaded template: ${match.name}`);
+        }
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        pushPath("/documents");
+      });
+  }, []);
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["workspace", "envelopes", page, search, status],
@@ -103,6 +131,7 @@ export function UserDocuments() {
         title: form.title,
         message: form.message,
         documentId: uploadedDoc?.id,
+        templateId: selectedTemplate?.id,
         recipients: form.recipients.filter((r) => r.email.trim()),
       },
     }),
@@ -110,6 +139,7 @@ export function UserDocuments() {
       toast.success(res.message);
       setSendOpen(false);
       setUploadedDoc(null);
+      setSelectedTemplate(null);
       setForm({ title: "", message: "", recipients: [{ name: "", email: "" }, { name: "", email: "" }] });
       invalidate();
     },
@@ -362,6 +392,31 @@ export function UserDocuments() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
+            {/* Selected template context if opened from templates catalog */}
+            {selectedTemplate && (
+              <div className="flex items-center justify-between rounded-lg border border-primary/20 bg-primary/5 p-3">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                    <Scale className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-primary">{selectedTemplate.name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      Modèle officiel · {selectedTemplate.pages} page{selectedTemplate.pages > 1 ? "s" : ""} · {selectedTemplate.category}
+                    </p>
+                  </div>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 text-xs text-muted-foreground hover:text-foreground"
+                  onClick={() => setSelectedTemplate(null)}
+                >
+                  Détacher
+                </Button>
+              </div>
+            )}
+
             {/* Document upload step */}
             <div className="space-y-1.5">
               <Label>Document file (PDF)</Label>

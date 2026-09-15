@@ -12,7 +12,7 @@
  * instant while every path still renders the full app on a hard load.
  */
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { apiGet } from "@/lib/client";
@@ -46,10 +46,20 @@ const USER_KEYS = USER_SECTIONS.map((s) => s.key) as string[];
 
 export function pushPath(path: string) {
   window.history.pushState({}, "", path);
+  window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
 function Portal({ user }: { user: SessionUser }) {
-  const pathname = usePathname() || "/";
+  const nextPathname = usePathname() || "/";
+  const [navPath, setNavPath] = useState<string | null>(null);
+  const pathname = navPath ?? nextPathname;
+
+  useEffect(() => {
+    const onPop = () => setNavPath(window.location.pathname);
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
   const isAdmin = user.role === "PLATFORM_ADMIN";
 
   // ── Derive the active section from the URL (single source of truth) ──

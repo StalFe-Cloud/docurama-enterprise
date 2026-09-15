@@ -38,10 +38,22 @@ function subdomain(host: string): string {
 }
 
 export function middleware(req: NextRequest) {
+  const { pathname, search } = req.nextUrl;
+
+  // Vanity / legacy auth redirects so /sign-in and /sign-up never 404
+  if (pathname === "/sign-in" || pathname === "/signin") {
+    const url = req.nextUrl.clone();
+    url.pathname = "/login";
+    return NextResponse.redirect(url, 307);
+  }
+  if (pathname === "/sign-up" || pathname === "/signup") {
+    const url = req.nextUrl.clone();
+    url.pathname = "/welcome";
+    return NextResponse.redirect(url, 307);
+  }
+
   const label = subdomain(req.headers.get("host") ?? "");
   if (!label) return NextResponse.next();
-
-  const { pathname, search } = req.nextUrl;
 
   // Never intercept infrastructure paths on any host.
   if (

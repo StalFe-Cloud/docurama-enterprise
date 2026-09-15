@@ -101,10 +101,9 @@ export function ExampleQuotation() {
               boxShadow: "0 8px 24px -12px rgba(26,26,26,.18)",
               display: "flex", flexDirection: "column",
               padding: "16px 16px",
-              opacity: st.paper ? 1 : 0,
+              opacity: st.exit ? 0 : (st.paper ? 1 : 0),
               transform: st.paper ? "none" : "translateY(10px) scale(.99)",
-              transition: "opacity .4s ease, transform .5s cubic-bezier(.22,1,.36,1)",
-              ...exitStyle,
+              transition: st.exit ? "opacity .4s ease" : "opacity .4s ease, transform .5s cubic-bezier(.22,1,.36,1)",
             }}
           >
             {/* Header */}

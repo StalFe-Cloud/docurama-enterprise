@@ -39,6 +39,7 @@
   "exclude": [
     "node_modules",
     "Archieve - Do not touch",
+    "skills",
     ".next"
   ]
 }

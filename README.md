@@ -25,7 +25,8 @@
 9. [Deployment Tiers: Platform, Enterprise & Self-Hosted](#9-deployment-tiers-platform-enterprise--self-hosted)
 10. [Recent Implementations & Platform Enhancements (v1.2.0)](#10-recent-implementations--platform-enhancements-v120)
 11. [Key Decisions for Your Confirmation](#11-key-decisions-for-your-confirmation)
-12. [Operational Runbooks & Commands](#12-operational-runbooks--commands)
+12. [Action Items & Operator Tasks Checklist (Tasks to Do for You)](#12-action-items--operator-tasks-checklist-tasks-to-do-for-you)
+13. [Operational Runbooks & Commands](#13-operational-runbooks--commands)
 
 ---
 
@@ -422,7 +423,134 @@ For two-factor signing verification and OTP delivery, Docurama integrates 14 car
 
 ---
 
-## 12. Operational Runbooks & Commands
+## 12. Action Items & Operator Tasks Checklist (Tasks to Do for You)
+
+The following checklist details the operational and configuration tasks that require action from the domain owner / infrastructure administrator to finalize full production readiness:
+
+### 12.1 DNS Records & Subdomain Routing (Cloudflare / Registrar)
+
+Configure the following records in your DNS manager (Cloudflare or domain registrar):
+
+- [ ] **Apex & Subdomain Routing Records:**
+  - `docurama.eu` → **A Record** pointing to server IP `51.75.124.20` (or Cloudflare proxied)
+  - `www.docurama.eu` → **CNAME** pointing to `docurama.eu`
+  - `app.docurama.eu` → **A Record** `51.75.124.20` (or CNAME to `docurama.eu`)
+  - `admin.docurama.eu` → **A Record** `51.75.124.20` (or CNAME to `docurama.eu`)
+  - `verify.docurama.eu` → **A Record** `51.75.124.20` (or CNAME to `docurama.eu`)
+  - `docs.docurama.eu` → **A Record** `51.75.124.20` (or CNAME to `docurama.eu`)
+  - `security.docurama.eu` → **A Record** `51.75.124.20` (or CNAME to `docurama.eu`)
+  - `status.docurama.eu` → **A Record** `51.75.124.20` (or CNAME to `docurama.eu`)
+  - `api.docurama.eu` → **A Record** `51.75.124.20` (or CNAME to `docurama.eu`)
+  - `mail.docurama.eu` → **A Record** `51.75.124.20` (or CNAME to `docurama.eu`)
+  - `mta-sts.docurama.eu` → **A Record** `51.75.124.20` (or CNAME to `docurama.eu`)
+  - `docurama.stalfe.com` → **A Record** `51.75.124.20` (or CNAME pointing to VPS for the dedicated Enterprise stack)
+
+- [ ] **Email Deliverability & Authentication Records:**
+  - **SPF Record (TXT):**
+    ```dns
+    docurama.eu. IN TXT "v=spf1 include:_spf.docurama.eu ip4:51.75.124.20 -all"
+    ```
+  - **DKIM Record (TXT):**
+    ```dns
+    docurama2026._domainkey.docurama.eu. IN TXT "v=DKIM1; k=rsa; p=<YOUR_PUBLIC_KEY>"
+    ```
+  - **DMARC Policy (TXT):**
+    ```dns
+    _dmarc.docurama.eu. IN TXT "v=DMARC1; p=reject; sp=reject; pct=100; rua=mailto:dmarc@docurama.eu; ruf=mailto:abuse@docurama.eu; fo=1; aspf=r; adkim=r"
+    ```
+  - **MX Records:**
+    ```dns
+    docurama.eu. IN MX 10 mail.docurama.eu.
+    ```
+  - **MTA-STS Policy (TXT):**
+    ```dns
+    _mta-sts.docurama.eu. IN TXT "v=STSv1; id=20260916T080000Z"
+    ```
+
+---
+
+### 12.2 Production Email System & Mailbox Setup
+
+Set up the following mailboxes and inbound routing at your email host (e.g. Google Workspace, Brevo, OVH, or Proton):
+
+- [ ] **Transactional Outbound SMTP Mailbox:**
+  - Create `notifications@docurama.eu` on your mail server.
+  - Add SMTP credentials into `/opt/docurama-cloud/.env` and `/opt/docurama-enterprise/.env` on `nexa-vps`:
+    ```env
+    SMTP_HOST=mail.docurama.eu
+    SMTP_PORT=587
+    SMTP_USER=notifications@docurama.eu
+    SMTP_PASSWORD=<YOUR_STRONG_SMTP_PASSWORD>
+    SMTP_FROM="Docurama <notifications@docurama.eu>"
+    ```
+  - *Effect:* Enables live delivery of envelope signing invitations, signer OTP verification codes, and password reset links.
+
+- [ ] **Inbound Routing & Aliases:**
+  - `admin@docurama.eu` → Forward to your primary executive inbox (e.g. `docurama@voiria.com`)
+  - `support@docurama.eu` → Forward to customer support helpdesk
+  - `sales@docurama.eu` & `billing@docurama.eu` → Forward to finance / sales lead
+  - `privacy@docurama.eu` → Forward to designated Data Protection Officer (DPO) for GDPR Article 15–20 DSAR intake
+  - `legal@docurama.eu` → Forward to legal counsel
+  - `security@docurama.eu` → Forward to security incident response team (RFC 9116)
+  - `abuse@docurama.eu` & `postmaster@docurama.eu` → Forward to server administrators for bounce/abuse monitoring
+
+---
+
+### 12.3 Credentials & Secret Key Rotation
+
+Rotate initial demonstration credentials for production deployment:
+
+- [ ] **Rotate Platform Superadmin Passwords:**
+  - Change default password for `admin@docurama.eu` and `ops@docurama.eu` (default was `admin1234`) via [https://admin.docurama.eu](https://admin.docurama.eu) or direct `/reset-password`.
+  - Configure TOTP Two-Factor Authentication (Google Authenticator / 1Password) on the platform operator account.
+- [ ] **Rotate StålFe Dedicated Enterprise Passwords:**
+  - Change initial passwords for `alex@stalfe.example`, `marco@stalfe.example`, and `sofia@stalfe.example` (default was `demo1234`) via [https://docurama.stalfe.com/login](https://docurama.stalfe.com/login).
+- [ ] **Rotate Production Environment Encryption Salts:**
+  - Verify `/opt/docurama-cloud/.env` and `/opt/docurama-enterprise/.env` on `nexa-vps` have unique, random 64-character hex values for `SESSION_SECRET`, `ENCRYPTION_KEY`, and `NEXTAUTH_SECRET`.
+
+---
+
+### 12.4 Commercial Certificates, Authorities & Carrier Integrations
+
+To enable legally binding eIDAS seals and two-factor SMS OTPs:
+
+- [ ] **Upload Official X.509 PAdES Sealing Certificate (AATL / eIDAS QES):**
+  - Obtain an organization seal certificate (e.g. from CertEurope, QuoVadis, DigiCert, or SwissSign) in PKCS#12 (`.p12` / `.pfx`) format.
+  - Upload under **Settings → eSign → Custom Certificate** or via Platform Admin for the StålFe tenant.
+- [ ] **Connect Commercial RFC 3161 Timestamp Authority (TSA):**
+  - Current default is FreeTSA (`https://freetsa.org/tsr`).
+  - If contractually requiring qualified timestamps, configure DigiCert (`http://timestamp.digicert.com`), Sectigo, or GlobalSign credentials in **Settings → eSign**.
+- [ ] **Configure SMS / WhatsApp Carrier API Key:**
+  - Select your preferred carrier (e.g. Brevo, Twilio, WhatsApp Cloud API, or OVHcloud SMS).
+  - Enter the API key in **Settings → Channels & Messaging** to activate live SMS OTP delivery for signers.
+
+---
+
+### 12.5 Payment Gateway & Corporate Domain Whitelisting
+
+- [ ] **Stripe Live Billing Credentials:**
+  - Replace test Stripe keys with Live Stripe API keys in `/opt/docurama-cloud/.env`:
+    ```env
+    STRIPE_SECRET_KEY=sk_live_...
+    STRIPE_WEBHOOK_SECRET=whsec_...
+    NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_live_...
+    ```
+  - Verify webhook endpoint is configured in Stripe Dashboard pointing to `https://docurama.eu/api/billing/webhook`.
+- [ ] **Whitelist Additional Client Corporate Domains:**
+  - In **Platform Admin (`admin.docurama.eu`) → Allowed Domains**, register enterprise customer email domains (like `@singa.fr`) to enable instant zero-billing onboarding for their team members.
+
+---
+
+### 12.6 Legal Entity & Compliance Finalization
+
+- [ ] **Confirm Official Corporate Identifiers:**
+  - Verify that SIRET/SIREN, RCS Paris registration number, and VAT numbers in [`src/lib/compliance-library/`](file:///d:/Dev/Under-Development/Docurama/src/lib/compliance-library/) and the website footer match your registered French SAS company details.
+- [ ] **Formalize DPO Notification with CNIL:**
+  - Submit the official Data Protection Officer designation form to CNIL referencing `privacy@docurama.eu`.
+
+---
+
+## 13. Operational Runbooks & Commands
 
 ### Local Development
 

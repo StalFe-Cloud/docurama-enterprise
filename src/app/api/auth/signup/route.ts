@@ -62,32 +62,54 @@ export async function POST(req: NextRequest) {
   const ip = req.headers.get("x-forwarded-for")?.split(",")[0].trim() ?? "127.0.0.1";
   const userAgent = req.headers.get("user-agent")?.slice(0, 250) ?? null;
 
-  // ── Tenant: fresh organization, or the invited one ──
+  // ── Tenant: invited workspace, company domain match, or fresh organization ──
   let tenantId: string;
   let membershipRole: string;
   let tenantNameForLog: string;
+  let isAutoJoin = false;
+
   if (invitation) {
     tenantId = invitation.tenantId;
     membershipRole = invitation.role;
     const t = await db.tenant.findUnique({ where: { id: tenantId } });
     tenantNameForLog = t?.name ?? "workspace";
   } else {
-    if (!organization) return jsonError("Organization name is required");
-    if (organization.length > 80) return jsonError("Organization name must be 80 characters or fewer");
-    const slug = `${organization.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "org"}-${Math.random().toString(36).slice(2, 8)}`;
-    const trialDays = (await db.platformSetting.findUnique({ where: { id: "singleton" } }))?.trialLengthDays ?? 14;
-    const tenant = await db.tenant.create({
-      data: {
-        name: organization,
-        slug,
-        planCode: "STARTER",
-        status: "TRIAL",
-        trialEndsAt: new Date(Date.now() + trialDays * 24 * 3600_000),
-      },
-    });
-    tenantId = tenant.id;
-    membershipRole = "OWNER";
-    tenantNameForLog = organization;
+    // Check if user's corporate email domain matches an approved company workspace
+    const emailDomain = email.split("@")[1]?.trim().toLowerCase();
+    const matchedDomain = emailDomain
+      ? await db.domain.findFirst({
+          where: {
+            domain: emailDomain,
+            status: "VERIFIED",
+            purpose: { in: ["AUTO_JOIN", "JOIN"] },
+          },
+          include: { tenant: true },
+        })
+      : null;
+
+    if (matchedDomain) {
+      tenantId = matchedDomain.tenantId;
+      membershipRole = "MEMBER";
+      tenantNameForLog = matchedDomain.tenant.name;
+      isAutoJoin = true;
+    } else {
+      if (!organization) return jsonError("Organization name is required");
+      if (organization.length > 80) return jsonError("Organization name must be 80 characters or fewer");
+      const slug = `${organization.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "org"}-${Math.random().toString(36).slice(2, 8)}`;
+      const trialDays = (await db.platformSetting.findUnique({ where: { id: "singleton" } }))?.trialLengthDays ?? 14;
+      const tenant = await db.tenant.create({
+        data: {
+          name: organization,
+          slug,
+          planCode: "STARTER",
+          status: "TRIAL",
+          trialEndsAt: new Date(Date.now() + trialDays * 24 * 3600_000),
+        },
+      });
+      tenantId = tenant.id;
+      membershipRole = "OWNER";
+      tenantNameForLog = organization;
+    }
   }
 
   const user = await db.user.create({
@@ -132,18 +154,28 @@ export async function POST(req: NextRequest) {
   await recordAudit({
     actor: `${firstName} ${lastName}`,
     actorRole: "MEMBER",
-    action: invitation ? "user.signup.invited" : "user.signup.selfserve",
+    action: invitation
+      ? "user.signup.invited"
+      : isAutoJoin
+      ? "user.company_domain.auto_join"
+      : "user.signup.selfserve",
     resource: `user:${email}`,
     ip,
     tenantName: tenantNameForLog,
     detail: invitation
       ? `Joined ${tenantNameForLog} via invitation as ${membershipRole}`
+      : isAutoJoin
+      ? `Auto-joined shared workspace ${tenantNameForLog} via approved company domain @${email.split("@")[1]}`
       : `Created organization ${tenantNameForLog} (STARTER trial)`,
   });
   await db.securityEvent.create({
     data: {
       type: "SIGNUP", severity: "INFO", actor: email, ip, blocked: false,
-      detail: invitation ? `Signup via invitation to ${tenantNameForLog}` : "Self-serve signup with new organization",
+      detail: invitation
+        ? `Signup via invitation to ${tenantNameForLog}`
+        : isAutoJoin
+        ? `Signup via corporate domain auto-join into ${tenantNameForLog}`
+        : "Self-serve signup with new organization",
     },
   });
 

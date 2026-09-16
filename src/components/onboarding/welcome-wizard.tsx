@@ -368,6 +368,36 @@ function AccountStep({ invite, inviteTokenRef, onDone }: { invite: InviteInfo | 
     consent: false,
   });
 
+  const [corporateDomain, setCorporateDomain] = useState<{
+    autoJoin: boolean;
+    domain?: string;
+    tenantName?: string;
+  } | null>(null);
+
+  useEffect(() => {
+    if (viaInvite) return;
+    const parts = form.email.split("@");
+    const timer = setTimeout(() => {
+      if (parts.length === 2 && parts[1].includes(".")) {
+        apiGet<{ autoJoin: boolean; domain?: string; tenantName?: string }>(
+          `/api/auth/check-domain?email=${encodeURIComponent(form.email)}`
+        )
+          .then((res) => {
+            if (res.autoJoin && res.tenantName) {
+              setCorporateDomain(res);
+              setForm((prev) => ({ ...prev, organization: res.tenantName || prev.organization }));
+            } else {
+              setCorporateDomain(null);
+            }
+          })
+          .catch(() => setCorporateDomain(null));
+      } else {
+        setCorporateDomain(null);
+      }
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [form.email, viaInvite]);
+
   const signup = useMutation({
     mutationFn: (payload: Record<string, unknown>) =>
       fetch("/api/auth/signup", {
@@ -383,7 +413,11 @@ function AccountStep({ invite, inviteTokenRef, onDone }: { invite: InviteInfo | 
     onSuccess: (body) => {
       if (body.token) setSessionToken(body.token);
       qc.invalidateQueries({ queryKey: ["onboarding"] });
-      toast.success("Account created - let's set up your workspace");
+      toast.success(
+        corporateDomain?.autoJoin
+          ? `Welcome to ${corporateDomain.tenantName}! Your account has been activated.`
+          : "Account created - let's set up your workspace"
+      );
       onDone();
     },
     onError: (err: ApiError) => toast.error(err.message),
@@ -396,7 +430,7 @@ function AccountStep({ invite, inviteTokenRef, onDone }: { invite: InviteInfo | 
       lastName: form.lastName,
       email: form.email,
       password: form.password,
-      organization: form.organization,
+      organization: corporateDomain?.autoJoin ? corporateDomain.tenantName : form.organization,
       consent: form.consent,
       ...(viaInvite ? { inviteToken: inviteTokenRef.current } : {}),
     });
@@ -404,10 +438,18 @@ function AccountStep({ invite, inviteTokenRef, onDone }: { invite: InviteInfo | 
 
   return (
     <StepPanel
-      title={viaInvite ? `Join ${invite?.org.name} on Docurama` : "Create your account"}
+      title={
+        viaInvite
+          ? `Join ${invite?.org.name} on Docurama`
+          : corporateDomain?.autoJoin
+          ? `Join ${corporateDomain.tenantName}`
+          : "Create your account"
+      }
       description={
         viaInvite
           ? "Your teammates are already here - create your login with the invited email address."
+          : corporateDomain?.autoJoin
+          ? `Welcome to ${corporateDomain.tenantName}. Your corporate domain @${corporateDomain.domain} gives you direct access to your company workspace.`
           : "You'll be the owner of a new organization on a 14-day trial of the Starter plan. No credit card required."
       }
     >
@@ -432,6 +474,21 @@ function AccountStep({ invite, inviteTokenRef, onDone }: { invite: InviteInfo | 
             placeholder="you@company.com" className="h-11" />
           {viaInvite && <p className="text-xs text-muted-foreground">Locked to the invited address - this invitation belongs to {invite?.email}.</p>}
         </div>
+
+        {corporateDomain?.autoJoin && (
+          <div className="flex items-start gap-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3.5 text-sm">
+            <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
+            <div className="space-y-0.5">
+              <p className="font-medium text-emerald-950 dark:text-emerald-100">
+                Approved company workspace: {corporateDomain.tenantName}
+              </p>
+              <p className="text-xs text-emerald-800 dark:text-emerald-300">
+                Your email domain (@{corporateDomain.domain}) is registered. You will join the shared company workspace directly with no individual billing or payment required.
+              </p>
+            </div>
+          </div>
+        )}
+
         <div className="space-y-1.5">
           <Label htmlFor="su-password">Password</Label>
           <Input id="su-password" type="password" autoComplete="new-password" required value={form.password}
@@ -439,7 +496,7 @@ function AccountStep({ invite, inviteTokenRef, onDone }: { invite: InviteInfo | 
             className="h-11" minLength={10} />
           <p className="text-xs text-muted-foreground">Minimum 10 characters with at least one letter and one number.</p>
         </div>
-        {!viaInvite && (
+        {!viaInvite && !corporateDomain?.autoJoin && (
           <div className="space-y-1.5">
             <Label htmlFor="su-org">Organization name</Label>
             <Input id="su-org" required maxLength={80} value={form.organization}

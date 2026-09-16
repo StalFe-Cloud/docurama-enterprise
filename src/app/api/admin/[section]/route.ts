@@ -162,11 +162,21 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       }
 
       case "domains": {
-        const [rows, joins] = await Promise.all([
-          db.domain.findMany({ include: { tenant: { select: { name: true, planCode: true } } }, orderBy: { requestedAt: "desc" } }),
-          db.domain.findMany({ where: { status: "JOIN_REQUESTED" }, include: { tenant: { select: { name: true } } } }),
+        const [rows, joins, allTenants] = await Promise.all([
+          db.domain.findMany({ include: { tenant: { select: { id: true, name: true, planCode: true } } }, orderBy: { requestedAt: "desc" } }),
+          db.domain.findMany({ where: { status: "JOIN_REQUESTED" }, include: { tenant: { select: { id: true, name: true } } } }),
+          db.tenant.findMany({ select: { id: true, name: true, slug: true, planCode: true }, orderBy: { name: "asc" } }),
         ]);
-        return jsonOk({ rows: isos(rows).map((r, i) => ({ ...r, tenantName: rows[i].tenant.name, planCode: rows[i].tenant.planCode })), joins: isos(joins).map((r, i) => ({ ...r, tenantName: joins[i].tenant.name })) });
+        return jsonOk({
+          rows: isos(rows).map((r, i) => ({
+            ...r,
+            tenantName: rows[i].tenant.name,
+            planCode: rows[i].tenant.planCode,
+            autoJoin: rows[i].purpose === "AUTO_JOIN" || rows[i].purpose === "JOIN",
+          })),
+          joins: isos(joins).map((r, i) => ({ ...r, tenantName: joins[i].tenant.name })),
+          allTenants: isos(allTenants),
+        });
       }
 
       case "legal": {
@@ -511,6 +521,99 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
       // ── Domains ──
       case "domains": {
+        if (op === "add") {
+          let domainName = String(data.domain ?? "").trim().toLowerCase().replace(/^@+/, "");
+          const tenantId = String(data.tenantId ?? "").trim();
+          const autoJoin = Boolean(data.autoJoin ?? true);
+
+          if (!domainName || !domainName.includes(".")) {
+            return jsonError("A valid domain name (e.g. singa.fr) is required");
+          }
+          if (!tenantId) {
+            return jsonError("A target company workspace is required");
+          }
+
+          const tenant = await db.tenant.findUnique({ where: { id: tenantId } });
+          if (!tenant) return jsonError("Workspace not found", 404);
+
+          const existing = await db.domain.findFirst({ where: { domain: domainName } });
+          if (existing) {
+            return jsonError(`Domain ${domainName} is already assigned to a workspace`);
+          }
+
+          const dom = await db.domain.create({
+            data: {
+              tenantId,
+              domain: domainName,
+              method: "TXT",
+              status: "VERIFIED",
+              token: `docu-verify-${Math.random().toString(16).slice(2, 10)}${Math.random().toString(16).slice(2, 10)}`,
+              purpose: autoJoin ? "AUTO_JOIN" : "JOIN",
+              verifiedAt: new Date(),
+            },
+          });
+
+          await recordAudit({
+            actor,
+            actorRole: "PLATFORM_ADMIN",
+            action: "domain.company_approved",
+            resource: `domain:${domainName}`,
+            severity: "INFO",
+            tenantName: tenant.name,
+            detail: `Approved corporate domain @${domainName} for workspace ${tenant.name} (auto-join: ${autoJoin ? "enabled" : "disabled"})`,
+          });
+
+          return jsonOk({
+            ok: true,
+            message: `Corporate domain @${domainName} approved for ${tenant.name}`,
+            domain: iso(dom),
+          });
+        }
+
+        if (op === "toggle-autojoin") {
+          const dom = await db.domain.findUnique({ where: { id }, include: { tenant: true } });
+          if (!dom) return jsonError("Domain not found", 404);
+
+          const nextPurpose = dom.purpose === "AUTO_JOIN" || dom.purpose === "JOIN" ? "SENDING" : "AUTO_JOIN";
+          await db.domain.update({
+            where: { id },
+            data: { purpose: nextPurpose },
+          });
+
+          await recordAudit({
+            actor,
+            actorRole: "PLATFORM_ADMIN",
+            action: "domain.autojoin_toggled",
+            resource: `domain:${dom.domain}`,
+            severity: "INFO",
+            tenantName: dom.tenant.name,
+            detail: `Toggled auto-join on @${dom.domain} to ${nextPurpose === "AUTO_JOIN" ? "ACTIVE" : "INACTIVE"}`,
+          });
+
+          return jsonOk({
+            ok: true,
+            message: `Auto-join ${nextPurpose === "AUTO_JOIN" ? "enabled" : "disabled"} for @${dom.domain}`,
+          });
+        }
+
+        if (op === "delete") {
+          const dom = await db.domain.findUnique({ where: { id }, include: { tenant: true } });
+          if (!dom) return jsonError("Domain not found", 404);
+
+          await db.domain.delete({ where: { id } });
+          await recordAudit({
+            actor,
+            actorRole: "PLATFORM_ADMIN",
+            action: "domain.deleted",
+            resource: `domain:${dom.domain}`,
+            severity: "WARNING",
+            tenantName: dom.tenant.name,
+            detail: `Removed domain @${dom.domain} from workspace ${dom.tenant.name}`,
+          });
+
+          return jsonOk({ ok: true, message: `Domain @${dom.domain} deleted` });
+        }
+
         if (op === "verify") {
           const dom = await db.domain.findUnique({ where: { id } });
           if (!dom) return jsonError("Domain not found", 404);

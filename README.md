@@ -14,12 +14,18 @@
 3. [Topology Overview & Network Infrastructure](#3-topology-overview--network-infrastructure)
 4. [Subdomain Matrix & Routing / Redirect Architecture](#4-subdomain-matrix--routing--redirect-architecture)
 5. [Account Logins & Credential Directory](#5-account-logins--credential-directory)
+   - [5.1 Dedicated Enterprise: https://docurama.stalfe.com](#51-dedicated-enterprise-httpsdocuramastalfecom)
+   - [5.2 Platform Administrators (Root Operators)](#52-platform-administrators-root-operators)
+   - [5.3 Enterprise Tenant Accounts Directory](#53-enterprise-tenant-accounts-directory)
+   - [5.4 Self-Service Password Reset System](#54-self-service-password-reset-system)
+   - [5.5 Corporate Domain Auto-Enrollment & Billing Bypass](#55-corporate-domain-auto-enrollment--billing-bypass)
 6. [Email System: Inboxes, Logic, Routing & Deliverability](#6-email-system-inboxes-logic-routing--deliverability)
 7. [Compliance Certificates, Approvals & Policy Library](#7-compliance-certificates-approvals--policy-library)
 8. [Signature Providers, Authorities & Technical Mechanics](#8-signature-providers-authorities--technical-mechanics)
 9. [Deployment Tiers: Platform, Enterprise & Self-Hosted](#9-deployment-tiers-platform-enterprise--self-hosted)
-10. [Key Decisions for Your Confirmation](#10-key-decisions-for-your-confirmation)
-11. [Operational Runbooks & Commands](#11-operational-runbooks--commands)
+10. [Recent Implementations & Platform Enhancements (v1.2.0)](#10-recent-implementations--platform-enhancements-v120)
+11. [Key Decisions for Your Confirmation](#11-key-decisions-for-your-confirmation)
+12. [Operational Runbooks & Commands](#12-operational-runbooks--commands)
 
 ---
 
@@ -32,6 +38,7 @@ Unlike generic signature tools that only insert rasterized signature stamps into
 - **RFC 3161 Trusted Time-stamps:** Digitally binds every signature step to an independent EU-recognized Timestamp Authority (TSA).
 - **Statutory French Contract Catalog:** Built-in repository of 8 statutory contracts (CDI, CDD, NDA, Bail Commercial, CGV, Prestation de services, Pacte d'associés, Accord de résiliation) draftable and signable in one click.
 - **Document Intelligence (DocIntel):** Deep inspection pipeline utilizing AcroForm extraction, text layer parsing, and bilingual OCR (French & English) to automatically place signature fields, detect risk clauses, and generate audit metadata.
+- **Corporate Auto-Enrollment (Billing Bypass):** Approved corporate email domains (e.g. `@singa.fr`, `@stalfe.com`) automatically route users into their company's shared workspace without requiring credit card details or passing through billing checkout.
 - **True European Data Sovereignty:** 100% processed and stored in Paris, France. Zero international data transfers, strictly governed by GDPR and the CNIL framework.
 
 ---
@@ -147,22 +154,40 @@ To prevent broken links across marketing assets, the middleware permanently hand
 
 ## 5. Account Logins & Credential Directory
 
-### Platform Administrators (Root Operators)
+### 5.1 Dedicated Enterprise: https://docurama.stalfe.com
 
-These accounts grant full access to `admin.docurama.eu` and `/admin/*` across all tenants, compliance settings, and audit logs:
+The dedicated enterprise deployment at **`https://docurama.stalfe.com`** provides an isolated tenant environment for **StålFe Industrial Heavy Engineering**:
 
-| Email | Role | Name | Initial Password | 2FA Status |
-|---|---|---|---|---|
-| `admin@docurama.eu` | `PLATFORM_ADMIN` | Elena Marchetti | `admin1234` | Enabled (TOTP) |
-| `ops@docurama.eu` | `PLATFORM_ADMIN` | Jonas Weber | `admin1234` | Enabled (TOTP) |
+| Login Email | Organization | Role | Plan Tier | Password | Capabilities |
+|---|---|---|---|---|---|
+| **`alex@stalfe.example`** | StålFe | `WORKSPACE_ADMIN` (Owner) | **ENTERPRISE** | `demo1234` | Full workspace governance, BYO certificate upload, team management, billing, signing |
+| **`marco@stalfe.example`** | StålFe | `MEMBER` (Admin) | **ENTERPRISE** | `demo1234` | Document authoring, template creation, audit log export, envelope sealing |
+| **`sofia@stalfe.example`** | StålFe | `MEMBER` (Signer) | **ENTERPRISE** | `demo1234` | Document review, cryptographic signing, certificate verification |
 
-### Enterprise Tenant Accounts (QA / Production-Ready)
+#### Direct Access Links:
+- **Sign In:** [`https://docurama.stalfe.com/login`](https://docurama.stalfe.com/login)
+- **Password Reset:** [`https://docurama.stalfe.com/login`](https://docurama.stalfe.com/login) (Click *"Forgot password?"*) or direct at [`https://docurama.stalfe.com/reset-password`](https://docurama.stalfe.com/reset-password)
+- **Corporate Registration:** [`https://docurama.stalfe.com/welcome`](https://docurama.stalfe.com/welcome) (Instant onboarding for approved company emails)
+
+---
+
+### 5.2 Platform Administrators (Root Operators)
+
+Platform administrators have root oversight across all tenants, global audit logs, and domain management at **`https://admin.docurama.eu`** or **`/admin`**:
+
+| Email | Role | Operator Name | Initial Password | 2FA Status | Permissions |
+|---|---|---|---|---|---|
+| **`admin@docurama.eu`** | `PLATFORM_ADMIN` | Elena Marchetti | `admin1234` | Enabled (TOTP) | Root Superadmin: tenant provisioning, domain whitelisting, compliance audits |
+| **`ops@docurama.eu`** | `PLATFORM_ADMIN` | Jonas Weber | `admin1234` | Enabled (TOTP) | Infrastructure Operations: telemetry, rate-limiting, TSA configuration |
+
+---
+
+### 5.3 Enterprise Tenant Accounts Directory
+
+Pre-configured tenant accounts across various subscription tiers for quality assurance and staging:
 
 | Email | Organization | Role | Plan | Initial Password |
 |---|---|---|---|---|
-| `alex@stalfe.example` | StålFe (Primary Anchor) | `WORKSPACE_ADMIN` (Owner) | **ENTERPRISE** | `demo1234` |
-| `marco@stalfe.example` | StålFe | `MEMBER` (Admin) | **ENTERPRISE** | `demo1234` |
-| `sofia@stalfe.example` | StålFe | `MEMBER` | **ENTERPRISE** | `demo1234` |
 | `pietro@aurora-legal.example` | Aurora Legal LLP | `WORKSPACE_ADMIN` (Owner) | **BUSINESS** | `demo1234` |
 | `hannah@helios-energy.example`| Helios Energy Group | `WORKSPACE_ADMIN` (Owner) | **ENTERPRISE** | `demo1234` |
 | `lucas@bayern-immo.example` | Bayern Immobilien AG | `MEMBER` (Admin) | **BUSINESS** | `demo1234` |
@@ -173,7 +198,44 @@ These accounts grant full access to `admin.docurama.eu` and `/admin/*` across al
 | `leila@verdant-agri.example` | Verdant Agriculture | `MEMBER` (Owner) | **STARTER** | `demo1234` |
 
 > [!NOTE]
-> All passwords in the database are hashed using SHA-256 with tenant salts. For custom production users, credentials can be set via Settings → Users or registered through `/welcome`.
+> All passwords in the database are hashed using SHA-256 with tenant-scoped cryptographic salts. Custom workspace users can be provisioned through **Settings → Team** or onboarded automatically via corporate domain matching.
+
+---
+
+### 5.4 Self-Service Password Reset System
+
+Docurama features a complete, secure password recovery pipeline accessible from `/login`:
+
+1. **Requesting a Reset:**
+   - On `/login`, users click **"Forgot password?"**.
+   - A modal allows the user to submit their registered email address.
+   - Endpoint: `POST /api/auth/forgot-password`.
+   - The server generates a high-entropy 32-byte hexadecimal token with a 1-hour expiration timestamp.
+   - A branded email is sent via `notifications@docurama.eu` with the secure link `https://docurama.eu/reset-password?token=<TOKEN>`.
+   - In staging/development environments, the recovery URL and token are also logged directly to the server terminal.
+2. **Setting the New Password:**
+   - The user opens `/reset-password?token=<TOKEN>`.
+   - The page provides a real-time password strength meter and confirm-password verification.
+   - Endpoint: `POST /api/auth/reset-password`.
+   - Validates that the token exists and has not expired, hashes the new password with SHA-256 and workspace salt, invalidates the token, and automatically redirects to `/login` with a success alert.
+
+---
+
+### 5.5 Corporate Domain Auto-Enrollment & Billing Bypass
+
+Organizations can enable seamless corporate onboarding where employees join the shared company workspace without entering credit card details or passing through the billing checkout.
+
+#### How It Works:
+1. **Platform Admin Whitelisting:**
+   - Under **Admin → Tenants → Allowed Domains**, the platform administrator registers approved corporate domains (e.g. `singa.fr`, `stalfe.com`) and links them to the designated tenant (e.g. StålFe).
+   - Flag: `autoJoin: true`, `bypassBilling: true`.
+2. **Real-Time Frontend Domain Detection:**
+   - When a user enters their email (e.g. `engineer@singa.fr`) on `/welcome` or `/login`, the frontend queries `GET /api/auth/check-domain?domain=singa.fr`.
+   - The UI immediately surfaces a verified enterprise badge:  
+     *"Recognized company domain: StålFe. You will join the shared company workspace without entering billing information."*
+3. **Zero-Billing Provisioning:**
+   - The registration wizard skips Step 2 (Plan Selection & Payment) completely.
+   - The user account is provisioned with role `MEMBER` directly inside the existing StålFe enterprise workspace.
 
 ---
 
@@ -326,7 +388,28 @@ For two-factor signing verification and OTP delivery, Docurama integrates 14 car
 
 ---
 
-## 10. Key Decisions for Your Confirmation
+## 10. Recent Implementations & Platform Enhancements (v1.2.0)
+
+1. **Homepage Hero Demo Viewport & Scaling Fix:**
+   - Eliminated rigid `.hero-fold` viewport constraint (`calc(100vh - 4rem)`) that compressed the demo canvas vertically on desktop displays.
+   - Refactored `HeroDemo` responsive canvas scaling from constrained dual-axis `Math.min(w/CANVAS_W, h/CANVAS_H, 1)` to proportional width-based scaling `scale = Math.min(w / CANVAS_W, 1)` with automatic dynamic aspect-ratio height (`fit.h = CANVAS_H * scale`).
+   - The interactive product movie now displays at full 1000px width on desktop and scales naturally across mobile and tablet devices without squishing.
+2. **Self-Service Password Reset Pipeline:**
+   - Implemented `POST /api/auth/forgot-password` with 32-byte cryptographic token generation and 1-hour expiration.
+   - Created dedicated `/reset-password` UI with real-time password strength indicators and confirmation validation.
+   - Implemented `POST /api/auth/reset-password` for secure token redemption, SHA-256 password rehashing, and automated token invalidation.
+   - Added direct "Forgot password?" modal triggers on `/login`.
+3. **Corporate Domain Auto-Enrollment & Billing Bypass:**
+   - Added real-time corporate domain lookup via `GET /api/auth/check-domain?domain=...`.
+   - Created Platform Admin Allowed Domains governance panel (`/admin` → Tenants / Domains) with `autoJoin` and `bypassBilling` toggles.
+   - Implemented `@singa.fr` demonstration corporate bypass allowing employees to directly join the StålFe workspace without entering payment details.
+4. **French Statutory Contract Integration in Templates Catalog:**
+   - Embedded all 8 statutory French contracts (CDI, CDD, NDA, Bail Commercial, CGV, Prestation, Pacte d'associés, Accord de résiliation) directly inside `/templates`.
+   - Added French legal system statutory badges (**Droit Français**), category filtering, and direct one-click drafting into the New Envelope wizard.
+
+---
+
+## 11. Key Decisions for Your Confirmation
 
 1. **Header Navigation Decluttering:**  
    "Contract Templates" was removed from the crowded top navigation bar and relocated into the marketing footer (under *Product* and *Legal & Trust*) as well as the homepage feature bento. This creates a clean, balanced enterprise header.
@@ -339,7 +422,7 @@ For two-factor signing verification and OTP delivery, Docurama integrates 14 car
 
 ---
 
-## 11. Operational Runbooks & Commands
+## 12. Operational Runbooks & Commands
 
 ### Local Development
 

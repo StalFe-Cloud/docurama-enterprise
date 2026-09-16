@@ -103,14 +103,16 @@ export function HeroDemo() {
     if (!el) return;
     const measure = () => {
       const w = el.clientWidth;
-      const h = el.clientHeight;
-      const scale = Math.min(w / CANVAS_W, h / CANVAS_H, 1);
+      if (w === 0) return;
+      const scale = Math.min(w / CANVAS_W, 1);
+      const scaledW = CANVAS_W * scale;
+      const scaledH = CANVAS_H * scale;
       setFit({
         scale,
-        ox: Math.max(0, (w - CANVAS_W * scale) / 2),
-        oy: Math.max(0, (h - CANVAS_H * scale) / 2),
-        w: CANVAS_W * scale,
-        h: CANVAS_H * scale,
+        ox: Math.max(0, (w - scaledW) / 2),
+        oy: 0,
+        w: scaledW,
+        h: scaledH,
       });
     };
     measure();
@@ -262,13 +264,14 @@ export function HeroDemo() {
       ref={wrapRef}
       role="img"
       aria-label="Product demo: an EN 10204 3.1 mill certificate from StålFe is sent to the foundry partner, signed with a drawn signature, sealed, and verified with cryptographic evidence."
-      className="relative h-full w-full"
+      className="relative w-full mx-auto"
+      style={{ height: fit.h, maxWidth: CANVAS_W }}
     >
       {/* Window frame: letterboxed, settle-entrance once */}
       <div
         className="hero-settle"
         style={{
-          position: "absolute", left: fit.ox, top: fit.oy, width: fit.w, height: fit.h,
+          position: "relative", width: fit.w, height: fit.h, marginInline: "auto",
           overflow: "hidden", borderRadius: 13,
           border: `1px solid ${HAIR}`,
           background: "#fff",

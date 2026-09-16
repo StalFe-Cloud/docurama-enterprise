@@ -226,10 +226,9 @@ export function MarketingPage() {
         )}
       </header>
 
-      {/* Hero: centered statement over the live product movie,
-           filling exactly the first viewport fold */}
-      <section id="top" className="hero-fold flex border-b">
-        <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col px-4 py-10 sm:px-6 sm:py-12">
+      {/* Hero: centered statement over the live product movie */}
+      <section id="top" className="border-b">
+        <div className="mx-auto w-full max-w-6xl px-4 py-12 sm:px-6 sm:py-16">
           <div className="text-center">
             <h1 className="hero-in mx-auto max-w-3xl text-4xl font-semibold leading-[1.06] tracking-tighter sm:text-5xl lg:text-6xl">
               {locale === "fr" ? (
@@ -256,12 +255,12 @@ export function MarketingPage() {
               </Button>
             </div>
           </div>
-          <figure className="relative mt-7 flex min-h-0 flex-1 flex-col">
+          <figure className="relative mt-8 sm:mt-10 w-full">
             <div aria-hidden className="pointer-events-none absolute -inset-x-8 -top-8 bottom-0 rounded-[32px]" style={{ background: "radial-gradient(60% 55% at 50% 30%, rgba(15,122,90,.06), transparent 70%)" }} />
-            <div className="relative min-h-[300px] w-full flex-1">
+            <div className="relative w-full">
               <HeroDemo />
             </div>
-            <figcaption className="mx-auto mt-4 max-w-2xl shrink-0 text-center text-xs leading-relaxed text-muted-foreground">
+            <figcaption className="mx-auto mt-4 max-w-2xl text-center text-xs leading-relaxed text-muted-foreground">
               {t("hero.caption", "The StålFe demo workspace replayed end to end: a mill certificate goes to the foundry, is signed, sealed and proven with cryptographic evidence.")}
             </figcaption>
           </figure>

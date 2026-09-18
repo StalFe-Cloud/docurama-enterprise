@@ -41,7 +41,7 @@ COPY --from=builder /app/prisma ./prisma
 # Prisma CLI for the entrypoint's idempotent schema push (migrations on boot).
 # Only the CLI + schema engine are carried; the app itself runs standalone.
 COPY --from=deps /app/node_modules/prisma ./node_modules/prisma
-COPY --from=deps /app/node_modules/@prisma/engines ./node_modules/@prisma/engines
+COPY --from=deps /app/node_modules/@prisma ./node_modules/@prisma
 COPY --from=deps /app/node_modules/.bin/prisma ./node_modules/.bin/prisma
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 

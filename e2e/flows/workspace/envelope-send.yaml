@@ -1,0 +1,59 @@
+# Workspace — core journey: template → send dialog → SENT envelope in table.
+# Writes are confined to the E2E tenant; the seed wipes them on each run.
+url: ${MAESTRO_BASE_URL}/login
+name: Send an envelope from a template end to end
+tags:
+  - e2e
+  - workspace
+  - envelope
+---
+- launchApp
+
+- extendedWaitUntil:
+    visible: Sign in to your portal
+    timeout: 30000
+
+- tapOn:
+    id: email
+- inputText: e2e@docurama.eu
+- tapOn:
+    id: password
+- inputText: "e2ePass1234!"
+- tapOn: " ?Sign in securely ?"
+- extendedWaitUntil:
+    visible: "Welcome back.*"
+    timeout: 15000
+
+# Templates catalog → open the send dialog pre-filled with a statutory template
+- tapOn: " ?Templates ?"
+- extendedWaitUntil:
+    visible: " ?Use template ?"
+    timeout: 10000
+- tapOn: " ?Use template ?"
+
+- extendedWaitUntil:
+    visible: Send a document for signature
+    timeout: 10000
+
+# Title + first recipient (inputs have stable ids — see e2e/README selector notes)
+- tapOn:
+    id: doc-title
+- eraseText: 100
+- inputText: E2E Maestro NDA
+- tapOn:
+    id: "recipient-1-name"
+- inputText: Jonas Weber
+- tapOn:
+    id: "recipient-1-email"
+- inputText: jonas.weber@example.com
+
+- tapOn: "Send for signature.*"
+
+# Toast confirmation then the row in the documents table
+- extendedWaitUntil:
+    visible: "Sent to 1 recipient.*"
+    timeout: 15000
+- tapOn: " ?Documents ?"
+- extendedWaitUntil:
+    visible: E2E Maestro NDA
+    timeout: 10000

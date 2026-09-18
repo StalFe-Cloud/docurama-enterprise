@@ -1,0 +1,131 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-docurama
+  labels:
+    {{- include "docurama.labels" . | nindent 4 }}
+spec:
+  # Exactly one replica: SQLite + in-process worker (see values.yaml).
+  {{- if .Values.replicaCount }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  strategy:
+    type: Recreate # PVC is RWO — no overlapping pods during rollout
+  selector:
+    matchLabels:
+      {{- include "docurama.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "docurama.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: docurama
+          image: {{ include "docurama.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: DATABASE_URL
+              value: file:/app/db/custom.db
+            - name: STORAGE_DIR
+              value: /app/storage
+            - name: NEXT_PUBLIC_DEMO_MODE
+              value: "false"
+            - name: ROOT_DOMAIN
+              value: {{ include "docurama.rootDomain" . | quote }}
+            {{- if .Values.skipDbPush }}
+            - name: DOCURAMA_SKIP_DB_PUSH
+              value: "1"
+            {{- end }}
+            {{- if .Values.smtp.existingSecret }}
+            - name: SMTP_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.smtp.existingSecret }}
+                  key: {{ .Values.smtp.secretKey }}
+            {{- end }}
+            {{- if .Values.s3.enabled }}
+            - name: S3_ENDPOINT
+              value: {{ .Values.s3.endpoint | quote }}
+            - name: S3_BUCKET
+              value: {{ .Values.s3.bucket | quote }}
+            - name: S3_REGION
+              value: {{ .Values.s3.region | quote }}
+            - name: S3_AUTO_CREATE_BUCKET
+              value: {{ ternary "1" "0" .Values.s3.autoCreateBucket | quote }}
+            {{- if .Values.s3.forcePathStyle }}
+            - name: S3_FORCE_PATH_STYLE
+              value: "1"
+            {{- end }}
+            {{- with .Values.s3.existingSecret }}
+            - name: S3_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: S3_ACCESS_KEY_ID
+            - name: S3_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: S3_SECRET_ACCESS_KEY
+            {{- end }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.extraEnvFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          volumeMounts:
+            {{- if .Values.persistence.enabled }}
+            - name: data
+              mountPath: /app/db
+              subPath: {{ .Values.persistence.dbSubPath }}
+            - name: data
+              mountPath: /app/storage
+              subPath: {{ .Values.persistence.storageSubPath }}
+            {{- end }}
+      volumes:
+        {{- if .Values.persistence.enabled }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-docurama
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

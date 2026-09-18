@@ -1,0 +1,22 @@
+# Auth — DEMO_MODE one-click buttons sign straight into the admin console.
+# Requires NEXT_PUBLIC_DEMO_MODE=true (the default in .env.example / CI).
+url: ${MAESTRO_BASE_URL}/login
+name: Demo one-click buttons enter the platform admin console
+tags:
+  - e2e
+  - auth
+  - demo
+---
+- launchApp
+
+- assertVisible: Demo accounts - one click to enter
+- assertVisible: Platform Admin - Docurama SAS
+
+# One click, no typing
+- tapOn: Platform Admin - Docurama SAS
+
+# PLATFORM_ADMIN lands in the admin shell (overview section)
+- extendedWaitUntil:
+    visible: Platform overview
+    timeout: 15000
+- assertVisible: Active tenants

@@ -1,0 +1,49 @@
+# Workspace — evidence pack export entry point on a completed envelope.
+# The byte-level integrity (ZIP parsing, manifest signature, artifact hashes)
+# is proven by e2e/evidence.test.ts; this flow proves the user-facing surface:
+# the sealed envelope's detail sheet offers the signed evidence pack.
+url: ${MAESTRO_BASE_URL}/login
+name: Sealed envelope detail offers the evidence pack export
+tags:
+  - e2e
+  - workspace
+  - evidence
+---
+- launchApp
+
+- extendedWaitUntil:
+    visible: Sign in to your portal
+    timeout: 30000
+
+- tapOn:
+    id: email
+- inputText: e2e@docurama.eu
+- tapOn:
+    id: password
+- inputText: "e2ePass1234!"
+- tapOn: " ?Sign in securely ?"
+- extendedWaitUntil:
+    visible: "Welcome back.*"
+    timeout: 15000
+
+- tapOn: " ?Documents ?"
+- extendedWaitUntil:
+    visible: " ?New envelope ?"
+    timeout: 10000
+
+# Open the seeded sealed fixture's detail sheet
+- tapOn: E2E Fixture — Supply Agreement (sealed)
+- extendedWaitUntil:
+    visible: Cryptographic evidence
+    timeout: 10000
+
+# The export entry point is present and testable.
+# (Note: the "(.zip)" text is split across a11y text nodes — only
+#  prefix-regex matches; the id selector is the robust assertion.)
+- assertVisible:
+    id: evidence-pack-download
+- assertVisible: ".*Evidence pack.*"
+
+# The evidence section states the seal facts it packs
+- assertVisible: Conformance
+- assertVisible: "SHA-256 digest"

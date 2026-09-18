@@ -6,6 +6,8 @@ import {
   computeOnboardingState, getOnboardingFlags, setOnboardingFlags,
   createInvitation, requestOrigin, SMTP_TRANSPORT_CONFIGURED,
 } from "@/lib/onboarding";
+import { seatCapacity } from "@/lib/billing";
+import { planDef } from "@/lib/plans";
 
 /**
  * GET  /api/onboarding - full wizard state for the signed-in user.
@@ -73,6 +75,16 @@ export async function POST(req: NextRequest) {
     if (member) {
       const already = await db.member.findFirst({ where: { userId: member.id, tenantId: me.tenantId } });
       if (already) return jsonError("This person is already a member of the workspace");
+    }
+    // Seat capacity: pending invitations hold a seat until accepted/revoked.
+    const cap = await seatCapacity(me.tenantId);
+    if (cap.remaining <= 0) {
+      return jsonError(
+        `All ${cap.seatLimit} seats on the ${planDef(cap.planCode).name} plan are in use ` +
+          `(${cap.members} member${cap.members === 1 ? "" : "s"} + ${cap.pendingInvites} pending invitation${cap.pendingInvites === 1 ? "" : "s"}). ` +
+          "Revoke an unused invitation or upgrade the plan to invite more.",
+        403,
+      );
     }
     await createInvitation({
       tenantId: me.tenantId, email, role,

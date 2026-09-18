@@ -10,6 +10,7 @@
  */
 
 import path from "path";
+import type { SKRSContext2D } from "@napi-rs/canvas";
 import type { ExtractResult, PageGeometry, TextItemBox } from "./types";
 
 /**
@@ -125,12 +126,25 @@ export async function extractDocument(data: Uint8Array): Promise<ExtractResult> 
 }
 
 /**
+ * Optional post-render hook: draw onto the page after the PDF is rendered,
+ * before PNG encoding. Used by the signer preview to stamp its per-recipient
+ * watermark. Guarded — an overlay failure degrades to a clean render and is
+ * never allowed to fail the page.
+ */
+export type PageRenderOverlay = (ctx: SKRSContext2D, width: number, height: number) => void;
+
+/**
  * Render one page to a PNG.
  *
  * @napi-rs/canvas rather than node-canvas: no native build step on Windows,
  * which is where this is developed.
  */
-export async function renderPage(data: Uint8Array, pageNumber: number, dpi: number): Promise<Buffer> {
+export async function renderPage(
+  data: Uint8Array,
+  pageNumber: number,
+  dpi: number,
+  overlay?: PageRenderOverlay,
+): Promise<Buffer> {
   const [lib, canvasLib] = await Promise.all([pdfjs(), import("@napi-rs/canvas")]);
   const doc = await lib.getDocument({ data: new Uint8Array(data), useSystemFonts: true }).promise;
 
@@ -152,6 +166,18 @@ export async function renderPage(data: Uint8Array, pageNumber: number, dpi: numb
     // This pdfjs version wants `canvas` alongside `canvasContext`.
     await page.render({ canvasContext: canvasContext as any, viewport, canvas: canvas as any } as any).promise;
     page.cleanup();
+
+    // The overlay (signer watermark) runs after the page content, so it can
+    // never be hidden by it — and a failure inside it degrades to a clean,
+    // unwatermarked render instead of a failed preview.
+    if (overlay) {
+      try {
+        overlay(canvasContext, canvas.width, canvas.height);
+      } catch (err) {
+        console.warn("[renderPage] overlay failed — serving the unwatermarked page:", err);
+      }
+    }
+
     return canvas.toBuffer("image/png");
   } finally {
     await (doc as any).destroy?.()?.catch?.(() => undefined);

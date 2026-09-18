@@ -1,0 +1,31 @@
+# Admin — platform settings: SMTP and TSA cards render with save actions.
+url: ${MAESTRO_BASE_URL}/login
+name: Admin platform settings render SMTP and TSA cards
+tags:
+  - e2e
+  - admin
+  - settings
+---
+- launchApp
+
+- extendedWaitUntil:
+    visible: Sign in to your portal
+    timeout: 30000
+
+- tapOn:
+    id: email
+- inputText: e2e-admin@docurama.eu
+- tapOn:
+    id: password
+- inputText: "e2eAdmin1234!"
+- tapOn: " ?Sign in securely ?"
+- extendedWaitUntil:
+    visible: "Platform overview.*"
+    timeout: 15000
+
+- tapOn: " ?Platform Settings ?"
+- extendedWaitUntil:
+    visible: ' ?Email delivery \(SMTP\) ?'
+    timeout: 10000
+- assertVisible: ' ?Save SMTP ?'
+- assertVisible: ' ?Save TSA ?'

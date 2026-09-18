@@ -1,0 +1,87 @@
+# Signer journey — the recipient-side happy path: open the personal signing
+# link, review, adopt a signature, sign, envelope seals, verify publicly.
+# Uses the seeded DOC-E2E0004 fixture (single signer => signing seals it).
+url: ${MAESTRO_BASE_URL}/sign/e2e-fixed-journey-token-0000000000000001
+name: Signer journey signs and seals an envelope end to end
+tags:
+  - e2e
+  - workspace
+  - signer
+---
+- launchApp
+
+# The signing page (no account, no login - the token is the auth).
+# Icon-adjacent text nodes carry a leading space — tolerant regexes
+# (convention: e2e/README.md, selector rules).
+- extendedWaitUntil:
+    visible: " ?Document for your signature ?"
+    timeout: 20000
+- assertVisible: ".*Service Agreement.*"
+- assertVisible: Signing now
+
+# The attached document is embedded as a page-by-page preview — the signer
+# reviews the actual bytes before consenting. The pager sits below the fold
+# (bounded 60vh reader pane), so scroll to it first, then wait for the
+# spinner to clear: that wait is the page's INTERACTIVITY gate — the overlay
+# only disappears when client JS ran and the first page actually rendered
+# (under suite load, Turbopack can recompile the route mid-flight and tear
+# down hydration; gating here fails with a clear diagnosis instead of a
+# dead tap further down).
+- assertVisible: " ?Document preview ?"
+- scrollUntilVisible:
+    element:
+      text: "Page 1 of 4"
+    direction: DOWN
+    timeout: 15000
+- extendedWaitUntil:
+    notVisible: ".*Rendering page.*"
+    timeout: 30000
+# Icon-text buttons: the aria-label is the addressable id (e2e/README)
+- tapOn:
+    id: "Next page"
+- extendedWaitUntil:
+    visible: "Page 2 of 4"
+    timeout: 10000
+- tapOn:
+    id: "Previous page"
+- extendedWaitUntil:
+    visible: "Page 1 of 4"
+    timeout: 10000
+
+# Back to the signing flow (the preview may have scrolled the page)
+- scrollUntilVisible:
+    element:
+      text: " ?Adopt your signature ?"
+    direction: DOWN
+    timeout: 15000
+
+# Name comes prefilled from the invitation; pick a signature style
+- tapOn:
+    id: font-great-vibes
+
+# The consent row and action bar sit below the fold — scroll them in
+# (the a11y tree only contains the viewport; e2e/README.md)
+- scrollUntilVisible:
+    element:
+      id: consent
+    direction: DOWN
+    timeout: 10000
+
+# Consent, then sign
+- tapOn:
+    id: consent
+- tapOn: " ?Sign document ?"
+
+# Single signer => envelope seals immediately
+- extendedWaitUntil:
+    visible: Document signed
+    timeout: 15000
+- assertVisible: " ?Envelope sealed ?"
+- assertVisible: DOC-E2E0004
+
+# The success screen offers the public proof of the seal. (The in-page Link
+# transition to /verify works in real Chromium — verified manually — but
+# Maestro's bundled browser throws a client-side exception on it; the seal's
+# public verifiability is asserted by signer-verify-seal.yaml, which runs
+# right after this flow and navigates directly.)
+- assertVisible: " ?Verify the seal ?"

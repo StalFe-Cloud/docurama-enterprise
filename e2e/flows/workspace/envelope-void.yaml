@@ -1,0 +1,77 @@
+# Workspace — envelope detail sheet: signers list, then void the envelope.
+url: ${MAESTRO_BASE_URL}/login
+name: Envelope detail shows signers and void works
+tags:
+  - e2e
+  - workspace
+  - envelope
+---
+- launchApp
+
+- extendedWaitUntil:
+    visible: Sign in to your portal
+    timeout: 30000
+
+- tapOn:
+    id: email
+- inputText: e2e@docurama.eu
+- tapOn:
+    id: password
+- inputText: "e2ePass1234!"
+- tapOn: " ?Sign in securely ?"
+- extendedWaitUntil:
+    visible: "Welcome back.*"
+    timeout: 15000
+
+# Create a disposable envelope to void
+- tapOn: " ?Documents ?"
+- extendedWaitUntil:
+    visible: " ?New envelope ?"
+    timeout: 10000
+- tapOn: " ?New envelope ?"
+- extendedWaitUntil:
+    visible: Send a document for signature
+    timeout: 10000
+- tapOn:
+    id: doc-title
+- eraseText: 100
+- inputText: E2E Void Fixture
+- tapOn:
+    id: "recipient-1-name"
+- inputText: Karla Blanc
+- tapOn:
+    id: "recipient-1-email"
+- inputText: karla.blanc@example.com
+- tapOn: "Send for signature.*"
+- extendedWaitUntil:
+    visible: "Sent to 1 recipient.*"
+    timeout: 15000
+
+# Open the detail sheet by tapping the new row
+- tapOn: E2E Void Fixture
+- extendedWaitUntil:
+    visible: Signers
+    timeout: 10000
+- assertVisible: Karla Blanc
+- assertVisible: Audit trail
+
+# The sheet overlays the table's action buttons — close it before voiding
+- tapOn: Close
+- extendedWaitUntil:
+    visible: " ?New envelope ?"
+    timeout: 10000
+
+# Void from the table row (aria-label id), then give the mandatory reason
+- tapOn:
+    id: Void E2E Void Fixture
+- assertVisible: Void this envelope?
+# The dialog autofocuses the reason input (app-side), so typing can start
+# immediately — no tap needed (taps in this portal-rendered dialog don't
+# reliably transfer focus under CDP automation).
+- inputText: "E2E-fixture-voided-by-maestro-suite"
+- tapOn: Void envelope
+
+# Confirmation toast + the row badge flips to voided
+- extendedWaitUntil:
+    visible: Envelope voided
+    timeout: 15000

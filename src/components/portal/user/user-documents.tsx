@@ -3,7 +3,8 @@
 import { useState, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Bell, Ban, Eye, FileSignature, Send, Plus, Trash2, UploadCloud, FileText, Loader2, Scale } from "lucide-react";
+import QRCode from "qrcode";
+import { Bell, Ban, Eye, FileSignature, Send, Plus, Trash2, UploadCloud, FileText, Loader2, Scale, Link2, QrCode, FileArchive, ServerCog } from "lucide-react";
 import { apiGet, apiPost, apiUpload, ApiError } from "@/lib/client";
 import {
   Column, ConfirmDialog, CopyableCode, DataTable, PageHeader, StatusBadge, fmtDate, fmtRelative,
@@ -20,20 +21,62 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
+import {
+  Popover, PopoverContent, PopoverTrigger,
+} from "@/components/ui/popover";
 
-type Recipient = { id: string; name: string; email: string; role: string; status: string; order: number; authMethod: string; signedAt: string | null };
+type Recipient = { id: string; name: string; email: string; role: string; status: string; order: number; authMethod: string; signedAt: string | null; signLink?: string | null };
 type EnvelopeRow = {
   id: string; publicCode: string; title: string; status: string; createdAt: string;
   createdBy: string; sealedAt: string | null; conformanceLevel: string | null; sha256: string | null;
   pages: number; lastRemindedAt: string | null; voidReason: string | null;
+  attestedAt: string | null; attestStatus: string | null; verifiedSenderDomain: string | null;
   recipients: Recipient[];
 };
 type EnvelopeDetail = {
   envelope: EnvelopeRow;
+  recipients: Recipient[];
+  tenantName?: string;
   events: { id: string; at: string; actor: string; action: string; detail: string | null; ipHash: string | null }[];
 };
 
 const STATUS_TABS = ["ALL", "SENT", "PARTIALLY_SIGNED", "COMPLETED", "VOIDED", "DECLINED", "EXPIRED"];
+
+/**
+ * QR handoff for a pending signer: renders the personal signing link as a
+ * scannable code so the envelope owner can hand the phone/tablet (or the
+ * link itself) to the signer in the room. Roadmap item #2 — removes the
+ * "I'll do it at my desk" failure mode.
+ */
+function SignLinkQr({ name, path }: { name: string; path: string }) {
+  const [dataUrl, setDataUrl] = useState<string | null>(null);
+  useEffect(() => {
+    QRCode.toDataURL(`${window.location.origin}${path}`, {
+      width: 220, margin: 1, color: { dark: "#0f172a", light: "#ffffff" },
+    }).then(setDataUrl).catch(() => setDataUrl(null));
+  }, [path]);
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Show signing QR for ${name}`} title="QR handoff">
+          <QrCode className="h-4 w-4" aria-hidden />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-auto p-4" align="end">
+        <div className="space-y-2 text-center">
+          {dataUrl ? (
+            <img src={dataUrl} alt={`Signing link QR for ${name}`} width={220} height={220} className="rounded-md border" />
+          ) : (
+            <Loader2 className="mx-auto h-8 w-8 animate-spin text-muted-foreground" aria-hidden />
+          )}
+          <p className="max-w-[220px] text-xs text-muted-foreground">
+            {name} scans this to open their personal signing page on their phone.
+          </p>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 export function UserDocuments() {
   const [page, setPage] = useState(1);
@@ -179,10 +222,13 @@ export function UserDocuments() {
       key: "actions", header: <span className="sr-only">Actions</span>, className: "w-36",
       render: (e) => (
         <div className="flex justify-end gap-1">
+          {/* Row actions stop propagation: without it, the click bubbles to
+              the row's onRowClick and opens the detail sheet UNDERNEATH the
+              action's own dialog (two Radix overlays fighting for focus). */}
           <Button
             variant="ghost" size="icon" className="h-11 w-11"
             aria-label={`Open details for ${e.title}`} title="Details"
-            onClick={() => setDetailId(e.id)}
+            onClick={(ev) => { ev.stopPropagation(); setDetailId(e.id); }}
           >
             <Eye className="h-4 w-4" aria-hidden />
           </Button>
@@ -191,7 +237,7 @@ export function UserDocuments() {
               variant="ghost" size="icon" className="h-11 w-11"
               aria-label={`Send reminder for ${e.title}`} title="Send reminder"
               disabled={act.isPending}
-              onClick={() => act.mutate({ op: "remind", id: e.id })}
+              onClick={(ev) => { ev.stopPropagation(); act.mutate({ op: "remind", id: e.id }); }}
             >
               <Bell className="h-4 w-4" aria-hidden />
             </Button>
@@ -199,7 +245,11 @@ export function UserDocuments() {
           {["SENT", "PARTIALLY_SIGNED", "DRAFT"].includes(e.status) && (
             <ConfirmDialog
               trigger={
-                <Button variant="ghost" size="icon" className="h-11 w-11 text-destructive" aria-label={`Void ${e.title}`} title="Void envelope">
+                <Button
+                  variant="ghost" size="icon" className="h-11 w-11 text-destructive"
+                  aria-label={`Void ${e.title}`} title="Void envelope"
+                  onClick={(ev) => ev.stopPropagation()}
+                >
                   <Ban className="h-4 w-4" aria-hidden />
                 </Button>
               }
@@ -309,13 +359,35 @@ export function UserDocuments() {
                       <span className="text-muted-foreground">Conformance</span>
                       <span>PAdES {env.conformanceLevel}</span>
                     </p>
+                    {env.verifiedSenderDomain && (
+                      <p className="flex items-center justify-between gap-2">
+                        <span className="text-muted-foreground">Sender domain</span>
+                        <span className="font-medium text-primary-deep">{env.verifiedSenderDomain} · DNS TXT verified</span>
+                      </p>
+                    )}
                     <p className="flex flex-wrap items-center justify-between gap-2">
                       <span className="text-muted-foreground">SHA-256 digest</span>
                       {env.sha256 && <CopyableCode value={env.sha256} max={22} />}
                     </p>
+                    {env.attestedAt && (
+                      <p className="flex items-center justify-between gap-2">
+                        <span className="text-muted-foreground">Public portal</span>
+                        <span className="flex items-center gap-1.5 font-medium text-primary-deep">
+                          <ServerCog className="h-3.5 w-3.5" aria-hidden /> fingerprint attested {fmtDate(env.attestedAt)}
+                        </span>
+                      </p>
+                    )}
                   </div>
+                  <a
+                    href={`/api/evidence-pack/${env.id}`}
+                    data-testid="evidence-pack-download"
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <FileArchive className="h-4 w-4" aria-hidden /> Evidence pack (.zip)
+                  </a>
                   <p className="text-xs text-muted-foreground">
                     The digest is derived from the sealed file itself and can be re-verified at any time on the public portal.
+                    The pack adds a signed manifest, the full ledger, the bilingual certificate and an offline verifier.
                   </p>
                 </section>
               )}
@@ -324,7 +396,9 @@ export function UserDocuments() {
               <section aria-labelledby="signers">
                 <h3 id="signers" className="mb-2 text-sm font-semibold">Signers</h3>
                 <ol className="space-y-1.5">
-                  {env.recipients.map((r) => (
+                  {/* recipients live at the top level of the detail response
+                      (WS9a moved them out of the envelope object) */}
+                  {(detail.data?.recipients ?? []).map((r) => (
                     <li key={r.id} className="flex items-center justify-between gap-3 rounded-lg border bg-card p-3">
                       <div className="flex min-w-0 items-center gap-3">
                         <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary-soft text-xs font-semibold text-primary" aria-hidden>
@@ -337,8 +411,27 @@ export function UserDocuments() {
                           </p>
                         </div>
                       </div>
-                      <div className="flex shrink-0 flex-col items-end gap-0.5">
-                        <StatusBadge status={r.status} />
+                      <div className="flex shrink-0 flex-col items-end gap-1">
+                        <div className="flex items-center gap-1.5">
+                          {r.signLink && (
+                            <>
+                              <Button
+                                variant="ghost" size="icon" className="h-8 w-8"
+                                aria-label={`Copy signing link for ${r.name}`} title="Copy signing link"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(`${window.location.origin}${r.signLink}`).then(
+                                    () => toast.success("Signing link copied — it opens as this signer"),
+                                    () => toast.error("Could not copy the link"),
+                                  );
+                                }}
+                              >
+                                <Link2 className="h-4 w-4" aria-hidden />
+                              </Button>
+                              <SignLinkQr name={r.name} path={r.signLink} />
+                            </>
+                          )}
+                          <StatusBadge status={r.status} />
+                        </div>
                         {r.signedAt && <span className="text-[11px] text-muted-foreground">{fmtDate(r.signedAt, true)}</span>}
                       </div>
                     </li>
@@ -491,6 +584,7 @@ export function UserDocuments() {
               {form.recipients.map((r, i) => (
                 <div key={i} className="flex gap-2">
                   <Input
+                    id={`recipient-${i + 1}-name`}
                     aria-label={`Recipient ${i + 1} name`}
                     value={r.name} placeholder="Name"
                     onChange={(e) => {
@@ -501,6 +595,7 @@ export function UserDocuments() {
                     className="h-11"
                   />
                   <Input
+                    id={`recipient-${i + 1}-email`}
                     aria-label={`Recipient ${i + 1} email`}
                     type="email" value={r.email} placeholder="name@company.com"
                     onChange={(e) => {

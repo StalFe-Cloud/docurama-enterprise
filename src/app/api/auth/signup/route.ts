@@ -17,6 +17,7 @@ export async function POST(req: NextRequest) {
   let body: {
     firstName?: string; lastName?: string; email?: string; password?: string;
     organization?: string; inviteToken?: string; consent?: boolean;
+    planCode?: string; // ?plan= prefill from the pricing page (SOLO | STARTER)
   };
   try {
     body = await req.json();
@@ -97,11 +98,16 @@ export async function POST(req: NextRequest) {
       if (organization.length > 80) return jsonError("Organization name must be 80 characters or fewer");
       const slug = `${organization.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "org"}-${Math.random().toString(36).slice(2, 8)}`;
       const trialDays = (await db.platformSetting.findUnique({ where: { id: "singleton" } }))?.trialLengthDays ?? 14;
+      // ?plan= prefill (pricing page CTA): SOLO is the Starter feature set
+      // capped at one seat. Only self-serve plans are accepted here —
+      // ENTERPRISE goes through /enterprise (sales-assisted onboarding).
+      const requestedPlan = String(body.planCode ?? "").trim().toUpperCase();
+      const planCode = requestedPlan === "SOLO" ? "SOLO" : "STARTER";
       const tenant = await db.tenant.create({
         data: {
           name: organization,
           slug,
-          planCode: "STARTER",
+          planCode,
           status: "TRIAL",
           trialEndsAt: new Date(Date.now() + trialDays * 24 * 3600_000),
         },

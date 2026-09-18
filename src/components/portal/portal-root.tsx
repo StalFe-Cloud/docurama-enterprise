@@ -28,6 +28,7 @@ import { AdminDomains } from "@/components/portal/admin/admin-domains";
 import { AdminLegal } from "@/components/portal/admin/admin-legal";
 import { AdminCompliance } from "@/components/portal/admin/admin-compliance";
 import { AdminBilling } from "@/components/portal/admin/admin-billing";
+import { AdminLeads } from "@/components/portal/admin/admin-leads";
 import { AdminIntegrations } from "@/components/portal/admin/admin-integrations";
 import { AdminProvisioning } from "@/components/portal/admin/admin-provisioning";
 import { AdminSettings } from "@/components/portal/admin/admin-settings";
@@ -110,6 +111,7 @@ function Portal({ user }: { user: SessionUser }) {
         {adminSection === "legal" && <AdminLegal />}
         {adminSection === "compliance" && <AdminCompliance />}
         {adminSection === "billing" && <AdminBilling />}
+        {adminSection === "leads" && <AdminLeads />}
         {adminSection === "integrations" && <AdminIntegrations />}
         {adminSection === "provisioning" && <AdminProvisioning />}
         {adminSection === "settings" && <AdminSettings />}

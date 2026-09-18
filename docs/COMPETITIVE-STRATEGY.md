@@ -99,7 +99,12 @@ modern console, a real REST API, webhooks and an MCP server for agents.
 1. **Evidence-first architecture.** Every envelope carries a SHA-256
    digest, optional X.509 certificate sealing, RFC 3161 timestamps and a
    complete event ledger. The public verification portal proves a signature
-   to a third party without an account and without exposing the file.
+   to a third party without an account and without exposing the file. Since
+   Sept 2026 the evidence is **portable**: a one-click evidence pack per
+   completed envelope (sealed document, ledger, bilingual certificate,
+   signed manifest) that verifies itself **offline in any browser** — no
+   Docurama infrastructure, no account, no network. No competitor's
+   "certificate of completion" does that.
 2. **Honest compliance labeling.** The platform reports the conformance
    level actually applied (SES, AdES-aligned, QES-aligned, B-B to B-LTA)
    and states plainly that it is not a QTSP. Regulators and auditors prefer
@@ -110,7 +115,8 @@ modern console, a real REST API, webhooks and an MCP server for agents.
    standards (SPF, DKIM, DMARC, MTA-STS, TLS-RPT).
 4. **API-first including AI agents.** REST API with scoped X-API-Key
    auth, signed webhooks with delivery logs, and an MCP server (JSON-RPC
-   2.0) with per-tenant allowlists and rate limits.
+   2.0) with per-tenant allowlists and rate limits. Evidence packs are
+   downloadable through the same API (`/envelopes/{id}/evidence-pack`).
 5. **Compliance operations in-product.** DSAR, incidents, access reviews,
    risk register, change management, vendor and subprocessor registers,
    retention policies and restore drills are all tracked in the admin
@@ -128,11 +134,19 @@ modern console, a real REST API, webhooks and an MCP server for agents.
 1. **Evidence pack export.** One-click ZIP per completed envelope: sealed
    document, certificate, timestamp tokens, event ledger CSV and a signed
    manifest. This makes Docurama evidence portable into customer matter
-   management systems, which no challenger does well.
+   management systems, which no challenger does well. **SHIPPED (Sept 2026)**:
+   `docs/EVIDENCE-PACK.md` — byte-exact STORE-method ZIP, RSA-SHA-256 signed
+   manifest over canonical JSON, bilingual FR/EN certificate, X.509 evidence
+   key (DNS-verified domain as SAN), and a self-contained `verify.html` that
+   re-verifies signature + every artifact hash offline in the browser.
 2. **QR handoff for signing.** Every signer email and the in-app document
    view gets a QR code that opens the signing page on the signer's phone.
    Removes the "I'll do it at my desk" failure mode that stalls completion
-   rates.
+   rates. **SHIPPED (Sept 2026)**: the public signer portal `/sign/{token}`
+   is live — one-page adopt-signature (typed, three handwriting fonts),
+   eIDAS consent, sign/decline with turn order, automatic sealing (SHA-256,
+   B-T) on the final signature — invitations carry the personal link, and
+   the in-app envelope detail offers per-signer link copy + QR handoff.
 3. **Bulk send with CSV merge fields.** Upload a template plus a CSV, one
    envelope per row. HR and property management workflows live on this.
 4. **Notarization-style witness flows.** Add a witness recipient type and
@@ -169,7 +183,12 @@ modern console, a real REST API, webhooks and an MCP server for agents.
 13. **Self-hosted / on-prem edition.** Enterprise pricing already
     anticipates it. A Docker Compose or Helm deployment with the same
     console competes with Documenso on its own ground with a compliance
-    story it cannot match.
+    story it cannot match. **Federation groundwork SHIPPED (Sept 2026)**:
+    self-hosted instances can already publish signed, GDPR-minimal
+    fingerprints of sealed envelopes to the public verification portal
+    (attestation protocol, `docs/SELF-HOSTED-ATTESTATION.md`) — the portal
+    answers for documents that never left the customer's infrastructure,
+    something no competitor offers in any form.
 14. **Signing analytics API.** Expose aggregate completion metrics through
     the public API so customers build their own contract-cycle dashboards.
 15. **Sector packs.** Pre-configured Part 11 mode, retention policies,

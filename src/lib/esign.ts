@@ -2,6 +2,7 @@
  * eSign domain helpers: document download filename formats, TSA presets and
  * 21 CFR Part 11 / eIDAS reference copy shared by the settings UI and API.
  */
+import { createHash } from "crypto";
 
 export const FILENAME_TOKENS: { token: string; description: string; example: string }[] = [
   { token: "{title}", description: "Envelope title", example: "Service Agreement" },
@@ -96,3 +97,45 @@ export const ESIGN_LEVELS: { key: string; label: string; description: string }[]
   { key: "advanced", label: "Advanced (AdES)", description: "Uniquely linked to the signer, tamper-evident, PAdES conformance" },
   { key: "qualified", label: "Qualified (QES)", description: "Qualified certificate + qualified timestamp (QSCD) - highest eIDAS level" },
 ];
+
+/* ── Envelope sealing ──────────────────────────────────────────────────────── */
+
+export type SealInput = {
+  id: string;
+  publicCode: string;
+  title: string;
+  pages: number;
+  createdAt: Date;
+  documentSha256?: string | null;
+  recipients: { email: string; role: string; status: string; order: number; signedAt: Date | null }[];
+  events: { action: string; actor: string; at: Date }[];
+};
+
+/**
+ * Deterministic digest over the complete envelope record at sealing time.
+ *
+ * When the envelope carries a real uploaded document, that file's SHA-256
+ * (computed at upload, stored on Envelope.sha256) is already the integrity
+ * anchor and is kept. Template-based envelopes have no file, so the seal is
+ * computed over a canonical serialization of everything that matters
+ * legally: the document identity, every recipient and their signing state,
+ * and the full event ledger. Any later mutation of any of those fields
+ * changes the digest, which is exactly the property the public verify
+ * portal relies on.
+ */
+export function computeEnvelopeDigest(env: SealInput): string {
+  if (env.documentSha256) return env.documentSha256;
+  const lines: string[] = [
+    `doc:${env.publicCode}`,
+    `title:${env.title}`,
+    `pages:${env.pages}`,
+    `created:${env.createdAt.toISOString()}`,
+  ];
+  for (const r of [...env.recipients].sort((a, b) => a.order - b.order)) {
+    lines.push(`rcpt:${r.order}:${r.email}:${r.role}:${r.status}:${r.signedAt?.toISOString() ?? "-"}`);
+  }
+  for (const e of [...env.events].sort((a, b) => a.at.getTime() - b.at.getTime())) {
+    lines.push(`evt:${e.at.toISOString()}:${e.action}:${e.actor}`);
+  }
+  return createHash("sha256").update(lines.join("\n")).digest("hex");
+}

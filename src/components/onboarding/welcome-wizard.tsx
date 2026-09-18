@@ -14,7 +14,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   ArrowRight, Building2, Check, CheckCircle2, Circle, Copy, Eraser, KeyRound,
-  Loader2, Mail, MailCheck, PenTool, ShieldCheck, UserPlus, Users,
+  Loader2, Mail, MailCheck, PenTool, PlayCircle, ShieldCheck, Sparkles, UserPlus, Users,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -24,6 +24,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ApiError, apiGet, apiPost, setSessionToken } from "@/lib/client";
 import { BrandLogo } from "@/components/brand/logo";
 import { PortalProviders } from "@/components/portal/providers";
+import { planDef, planGuide } from "@/lib/plans";
 import { cn } from "@/lib/utils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -38,6 +39,7 @@ type OnboardingData = {
   completed: boolean;
   pendingInvites: number;
   inviteList: { id: string; email: string; role: string; createdAt: string }[];
+  seats: { used: number; limit: number; remaining: number; members: number; pendingInvites: number };
   smtpTransportConfigured: boolean;
 };
 
@@ -85,6 +87,9 @@ function Wizard() {
   const [manualStep, setManualStep] = useState<StepKey | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const inviteTokenRef = useRef<string | null>(null);
+  // ?plan=SOLO prefill from the pricing page CTA (cycle 10). Lives in a ref:
+  // consumed once by the signup payload, no re-render needed.
+  const planRef = useRef<string | null>(null);
   const [inviteInfo, setInviteInfo] = useState<InviteInfo | null>(null);
 
   const stateQ = useQuery({
@@ -105,6 +110,10 @@ function Wizard() {
     const params = new URLSearchParams(window.location.search);
     const verify = params.get("verify");
     const invite = params.get("invite");
+    const plan = params.get("plan");
+    if (plan && ["SOLO", "STARTER"].includes(plan.toUpperCase())) {
+      planRef.current = plan.toUpperCase();
+    }
 
     if (invite) {
       inviteTokenRef.current = invite;
@@ -303,6 +312,7 @@ function Wizard() {
                 key={inviteInfo?.email ?? "new"}
                 invite={inviteInfo}
                 inviteTokenRef={inviteTokenRef}
+                planRef={planRef}
                 onDone={() => advance("verify")}
               />
             )}
@@ -357,7 +367,7 @@ function StepPanel({ title, description, children }: { title: string; descriptio
 
 // ─── Step 1: account (unauthenticated only) ───────────────────────────────────
 
-function AccountStep({ invite, inviteTokenRef, onDone }: { invite: InviteInfo | null; inviteTokenRef: React.RefObject<string | null>; onDone: () => void }) {
+function AccountStep({ invite, inviteTokenRef, planRef, onDone }: { invite: InviteInfo | null; inviteTokenRef: React.RefObject<string | null>; planRef: React.RefObject<string | null>; onDone: () => void }) {
   const qc = useQueryClient();
   const viaInvite = invite?.status === "PENDING";
   const [form, setForm] = useState({
@@ -433,6 +443,9 @@ function AccountStep({ invite, inviteTokenRef, onDone }: { invite: InviteInfo | 
       organization: corporateDomain?.autoJoin ? corporateDomain.tenantName : form.organization,
       consent: form.consent,
       ...(viaInvite ? { inviteToken: inviteTokenRef.current } : {}),
+      // ?plan= prefill from the pricing page (SOLO). Ignored when joining
+      // via invitation or corporate domain — the existing workspace wins.
+      ...(!viaInvite && !corporateDomain?.autoJoin && planRef.current ? { planCode: planRef.current } : {}),
     });
   };
 
@@ -870,6 +883,9 @@ function InvitesStep({ state, onDone }: { state: OnboardingData; onDone: () => v
   const act = useOnboardingAct();
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("MEMBER");
+  const seats = state.seats ?? { used: 1, limit: 3, remaining: 2, members: 1, pendingInvites: 0 };
+  const full = seats.remaining <= 0;
+  const plan = planDef(state.org?.planCode ?? "STARTER");
 
   return (
     <StepPanel
@@ -877,15 +893,40 @@ function InvitesStep({ state, onDone }: { state: OnboardingData; onDone: () => v
       description="Teammates receive an invitation email from notifications@docurama.eu with a secure link - they create their own password, so you never handle credentials."
     >
       <div className="space-y-4">
+        {/* Seat occupancy: invites target the plan's remaining seats. */}
+        <div className="rounded-lg border bg-muted/40 p-4">
+          <div className="flex items-center justify-between text-sm">
+            <p className="font-medium">
+              {seats.remaining > 0
+                ? `Fill your ${plan.name} seats — ${seats.remaining} of ${seats.limit} still open`
+                : `All ${seats.limit} ${plan.name} seats are taken`}
+            </p>
+            <span className="text-xs tabular-nums text-muted-foreground">
+              {seats.members} member{seats.members === 1 ? "" : "s"}
+              {seats.pendingInvites > 0 && ` · ${seats.pendingInvites} pending`}
+            </span>
+          </div>
+          <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuenow={seats.used} aria-valuemin={0} aria-valuemax={seats.limit} aria-label={`${seats.used} of ${seats.limit} seats used`}>
+            <div className={cn("h-full rounded-full transition-all", full ? "bg-destructive" : "bg-primary")} style={{ width: `${seats.limit ? Math.min(100, Math.round((seats.used / seats.limit) * 100)) : 0}%` }} />
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">
+            {full
+              ? "Revoke an invitation to free a seat, or continue — you can upgrade the plan anytime."
+              : seats.remaining === 1
+                ? "One seat left — invite the teammate who sends the most documents."
+                : "Invite now or continue alone; invitations can be sent anytime from Settings → Users."}
+          </p>
+        </div>
+
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
           <div className="flex-1 space-y-1.5">
             <Label htmlFor="inv-email">Email address</Label>
             <Input id="inv-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)}
-              placeholder="colleague@company.com" className="h-11" />
+              placeholder="colleague@company.com" className="h-11" disabled={full} />
           </div>
           <div className="w-full space-y-1.5 sm:w-48">
             <Label>Role</Label>
-            <Select value={role} onValueChange={setRole}>
+            <Select value={role} onValueChange={setRole} disabled={full}>
               <SelectTrigger className="h-11"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="MEMBER">Member</SelectItem>
@@ -893,7 +934,8 @@ function InvitesStep({ state, onDone }: { state: OnboardingData; onDone: () => v
               </SelectContent>
             </Select>
           </div>
-          <Button className="h-11" disabled={!email.includes("@") || act.isPending}
+          <Button className="h-11" disabled={!email.includes("@") || act.isPending || full}
+            title={full ? "All seats are in use" : undefined}
             onClick={() => { act.mutate({ op: "invite.send", data: { email, role } }); setEmail(""); }}>
             {act.isPending ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <UserPlus className="h-4 w-4" aria-hidden />}
             Invite
@@ -1083,6 +1125,11 @@ function DoneStep({ state }: { state: OnboardingData }) {
     { label: state.flags.skippedSecurity ? "Two-factor - skipped (enable anytime)" : "Two-factor authentication", done: state.steps.security },
   ];
 
+  // Per-plan guided instructions + demos (cycle 10): the done step points
+  // each customer at what their plan is for and how to see it working.
+  const plan = planDef(state.org?.planCode ?? "STARTER");
+  const guide = planGuide(state.org?.planCode ?? "STARTER");
+
   return (
     <StepPanel
       title={state.completed ? "You're all set" : "Finish setup"}
@@ -1101,6 +1148,52 @@ function DoneStep({ state }: { state: OnboardingData }) {
             </li>
           ))}
         </ul>
+
+        {/* Plan guide: what this plan is for, guided first moves, demos. */}
+        <div className="rounded-xl border bg-muted/40 p-5">
+          <p className="flex items-center gap-2 text-sm font-semibold">
+            <Sparkles className="h-4 w-4 text-primary" aria-hidden /> {guide.headline}
+          </p>
+          <p className="mt-1.5 text-xs text-muted-foreground">
+            {plan.name} · {plan.seatLabel} · {plan.envelopeLimit.toLocaleString("en-GB")} envelopes/month
+            {plan.code === "SOLO" || plan.code === "STARTER" ? " · 35 sending days a month (weekends on us)" : ""}
+            {" "}· unused envelopes roll over on renewal
+          </p>
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Guided first steps</p>
+              <ol className="mt-2 space-y-2">
+                {guide.steps.map((s, i) => (
+                  <li key={s.label} className="flex items-start gap-2 text-sm leading-relaxed">
+                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[11px] font-semibold text-primary">{i + 1}</span>
+                    <a className="underline-offset-2 hover:underline" href={s.href}>{s.label}</a>
+                  </li>
+                ))}
+              </ol>
+            </div>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">See it in action</p>
+              <ul className="mt-2 space-y-2.5">
+                {guide.demos.map((d) => (
+                  <li key={d.label} className="text-sm leading-relaxed">
+                    <a className="flex items-start gap-2 font-medium underline-offset-2 hover:underline" href={d.href}>
+                      <PlayCircle className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden /> {d.label}
+                    </a>
+                    <p className="ml-6 text-xs text-muted-foreground">{d.desc}</p>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+          <ul className="mt-4 space-y-1.5 border-t pt-3">
+            {plan.outcomes.map((o) => (
+              <li key={o} className="flex items-start gap-2 text-xs leading-relaxed text-muted-foreground">
+                <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" aria-hidden /> {o}
+              </li>
+            ))}
+          </ul>
+        </div>
+
         <div className="flex flex-wrap gap-3">
           {!state.completed && (
             <Button onClick={() => finish.mutate()} disabled={finish.isPending || !state.emailVerified || !state.steps.org}>

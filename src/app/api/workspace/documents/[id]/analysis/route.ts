@@ -1,9 +1,8 @@
 import { NextRequest } from "next/server";
-import { readFile } from "fs/promises";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
 import { jsonError, jsonOk } from "@/lib/serializers";
-import { documentPath } from "@/lib/document-store";
+import { readDocumentBytes } from "@/lib/document-store";
 import { extractDocument } from "@/lib/docintel/text-extract";
 import { detectFields } from "@/lib/docintel/field-detector";
 import { analyzeContract } from "@/lib/docintel/contract-analyzer";
@@ -28,10 +27,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     const forceRefresh = url.searchParams.get("refresh") === "true";
 
     // Read stored PDF bytes from disk
-    const filePath = documentPath(doc.id, doc.tenantId);
     let fileBytes: Buffer;
     try {
-      fileBytes = await readFile(filePath);
+      fileBytes = await readDocumentBytes(doc.id, doc.tenantId);
     } catch {
       return jsonError("Document file missing from storage", 404);
     }

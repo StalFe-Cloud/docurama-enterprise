@@ -1,0 +1,44 @@
+# QR handoff — the envelope owner sees, per pending signer, the personal
+# signing link (copy) and the QR code for phone handoff (roadmap item #2).
+url: ${MAESTRO_BASE_URL}/login
+name: Envelope detail offers per-signer link copy and QR handoff
+tags:
+  - e2e
+  - workspace
+  - signer
+---
+- launchApp
+
+- extendedWaitUntil:
+    visible: Sign in to your portal
+    timeout: 30000
+
+- tapOn:
+    id: email
+- inputText: e2e@docurama.eu
+- tapOn:
+    id: password
+- inputText: "e2ePass1234!"
+- tapOn: " ?Sign in securely ?"
+- extendedWaitUntil:
+    visible: "Welcome back.*"
+    timeout: 15000
+
+- tapOn: " ?Documents ?"
+- extendedWaitUntil:
+    visible: " ?New envelope ?"
+    timeout: 10000
+
+# Open the detail sheet by tapping the seeded row (row click opens detail —
+# same pattern as envelope-void.yaml; prefix regex avoids the parens trap)
+- tapOn: "E2E Fixture — Mutual NDA.*"
+- extendedWaitUntil:
+    visible: Signers
+    timeout: 10000
+
+# Per-signer handoff actions exist for the pending signer (icon buttons are
+# addressable by aria-label via id:, not text — e2e/README.md selector rules)
+- assertVisible:
+    id: "Copy signing link for Fixture Signer"
+- assertVisible:
+    id: "Show signing QR for Fixture Signer"

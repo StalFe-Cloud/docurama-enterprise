@@ -1,0 +1,28 @@
+# Auth — typed sign-in with the dedicated E2E account lands in the workspace.
+url: ${MAESTRO_BASE_URL}/login
+name: Sign in with E2E credentials reaches the workspace
+tags:
+  - e2e
+  - auth
+---
+- launchApp
+
+- extendedWaitUntil:
+    visible: Sign in to your portal
+    timeout: 30000
+
+- tapOn:
+    id: email
+- inputText: e2e@docurama.eu
+- tapOn:
+    id: password
+- inputText: "e2ePass1234!"
+- tapOn: " ?Sign in securely ?"
+
+# Workspace shell: welcome header + section nav
+- extendedWaitUntil:
+    visible: "Welcome back.*"
+    timeout: 15000
+- assertVisible: " ?Documents ?"
+- assertVisible: " ?Templates ?"
+- assertVisible: " ?Verify ?"

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { BadgeCheck, ShieldX, FileQuestion, Search, ShieldCheck, Clock } from "lucide-react";
+import { BadgeCheck, ShieldX, FileQuestion, Search, ShieldCheck, Clock, ServerCog, Globe, ListTree } from "lucide-react";
 import { apiGet } from "@/lib/client";
 import { CopyableCode, PageHeader, StatusBadge, fmtDate } from "@/components/portal/shared";
 import { cn } from "@/lib/utils";
@@ -20,7 +20,17 @@ type VerifyResult =
       envelope: {
         title: string; status: string; sealedAt: string; completedAt: string | null;
         conformance: string | null; sha256: string; tenantName: string; pages: number;
+        verifiedSenderDomain: string | null;
         signers: { id: string; name: string; email: string; signedAt: string | null }[];
+      };
+    }
+  | {
+      result: "VERIFIED_ATTESTED"; code: string;
+      attestation: {
+        sha256: string; sealedAt: string; completedAt: string | null; conformance: string | null;
+        pages: number; signerCount: number; verifiedDomain: string | null;
+        instance: { label: string; firstSeenAt: string; attestationCount: number };
+        transparency?: { chainSeq: number | null; chainEntryHash: string | null; proof: string; checkpoint: string } | null;
       };
     };
 
@@ -98,6 +108,14 @@ export function UserVerify() {
                     <div className="flex justify-between gap-4"><dt className="text-muted-foreground">Workspace</dt><dd>{data.envelope.tenantName}</dd></div>
                     <div className="flex justify-between gap-4"><dt className="text-muted-foreground">Sealed</dt><dd>{fmtDate(data.envelope.sealedAt, true)}</dd></div>
                     <div className="flex justify-between gap-4"><dt className="text-muted-foreground">Conformance</dt><dd>PAdES {data.envelope.conformance}</dd></div>
+                    {data.envelope.verifiedSenderDomain && (
+                      <div className="flex justify-between gap-4">
+                        <dt className="text-muted-foreground">Sender domain</dt>
+                        <dd className="flex items-center gap-1.5 font-medium text-primary-deep">
+                          <Globe className="h-3.5 w-3.5" aria-hidden /> {data.envelope.verifiedSenderDomain} (DNS TXT verified)
+                        </dd>
+                      </div>
+                    )}
                     <div className="flex flex-wrap justify-between gap-2">
                       <dt className="text-muted-foreground">SHA-256 digest</dt>
                       <dd><CopyableCode value={data.envelope.sha256} max={26} /></dd>
@@ -117,6 +135,62 @@ export function UserVerify() {
                   <p className="flex items-start gap-2 rounded-lg bg-success-soft/50 p-3 text-xs text-muted-foreground">
                     <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-success" aria-hidden />
                     Every claim above is derived from an inspection of the sealed file and its embedded certificate - including the RFC 3161 timestamp.
+                  </p>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* VERIFIED_ATTESTED — sealed on a self-hosted instance */}
+            {data.result === "VERIFIED_ATTESTED" && (
+              <Card className="border-primary/40">
+                <CardContent className="space-y-4 p-6">
+                  <div className="flex items-center gap-3">
+                    <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary-soft">
+                      <ServerCog className="h-6 w-6 text-primary" aria-hidden />
+                    </span>
+                    <div>
+                      <p className="text-base font-semibold text-primary-deep">Verified - attested by a self-hosted instance</p>
+                      <p className="text-xs text-muted-foreground">Sealed outside this platform - {data.code}</p>
+                    </div>
+                  </div>
+                  <dl className="space-y-2 text-sm">
+                    <div className="flex justify-between gap-4"><dt className="text-muted-foreground">Instance</dt><dd className="font-medium">{data.attestation.instance.label}</dd></div>
+                    <div className="flex justify-between gap-4"><dt className="text-muted-foreground">Instance key first seen</dt><dd>{fmtDate(data.attestation.instance.firstSeenAt, true)}</dd></div>
+                    <div className="flex justify-between gap-4"><dt className="text-muted-foreground">Sealed</dt><dd>{fmtDate(data.attestation.sealedAt, true)}</dd></div>
+                    <div className="flex justify-between gap-4"><dt className="text-muted-foreground">Conformance</dt><dd>PAdES {data.attestation.conformance ?? "-"}</dd></div>
+                    <div className="flex justify-between gap-4"><dt className="text-muted-foreground">Signers on record</dt><dd>{data.attestation.signerCount}</dd></div>
+                    {data.attestation.transparency?.chainSeq != null && (
+                      <div className="flex justify-between gap-4">
+                        <dt className="text-muted-foreground">Transparency registry</dt>
+                        <dd className="flex items-center gap-1.5 font-medium text-primary-deep">
+                          <ListTree className="h-3.5 w-3.5" aria-hidden /> Entry #{data.attestation.transparency.chainSeq} in the public append-only log
+                        </dd>
+                      </div>
+                    )}
+                    {data.attestation.verifiedDomain && (
+                      <div className="flex justify-between gap-4">
+                        <dt className="text-muted-foreground">Sender domain</dt>
+                        <dd className="flex items-center gap-1.5 font-medium text-primary-deep">
+                          <Globe className="h-3.5 w-3.5" aria-hidden /> {data.attestation.verifiedDomain} (DNS TXT verified)
+                        </dd>
+                      </div>
+                    )}
+                    <div className="flex flex-wrap justify-between gap-2">
+                      <dt className="text-muted-foreground">SHA-256 digest (as attested)</dt>
+                      <dd><CopyableCode value={data.attestation.sha256} max={26} /></dd>
+                    </div>
+                  </dl>
+                  <p className="flex items-start gap-2 rounded-lg bg-muted/60 p-3 text-xs text-muted-foreground">
+                    <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
+                    The document was sealed on the customer&apos;s own infrastructure; this platform holds only the
+                    minimal signed fingerprint it pushed (code, digest, seal date - no personal data). Ask the
+                    sender for the evidence pack to inspect the document itself.
+                    {data.attestation.transparency?.chainSeq != null && (
+                      <>
+                        {" "}The fingerprint is witnessed in the public append-only log — inclusion proof at{" "}
+                        <span className="font-mono">{data.attestation.transparency.proof}</span>.
+                      </>
+                    )}
                   </p>
                 </CardContent>
               </Card>

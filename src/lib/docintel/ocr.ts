@@ -13,7 +13,6 @@
  * returns as fast as an upload of a one-page contract.
  */
 
-import { readFile } from "fs/promises";
 import { db } from "@/lib/db";
 import { OCR_DPI, estimateSkew, preprocessForOcr, renderPage, tessdataPath } from "./text-extract";
 import { LOW_CONFIDENCE_FLOOR, type OcrPageResult, type OcrWord } from "./types";
@@ -166,8 +165,8 @@ export async function runOcr(docId: string): Promise<void> {
 
   let worker: Awaited<ReturnType<typeof newWorker>> | undefined;
   try {
-    const { resolveStorageKey } = await import("@/lib/document-store");
-    const bytes = new Uint8Array(await readFile(resolveStorageKey(doc.storageKey)));
+    const { readStoredBytes } = await import("@/lib/document-store");
+    const bytes = new Uint8Array(await readStoredBytes(doc.storageKey));
     worker = await newWorker();
 
     const results: OcrPageResult[] = [];

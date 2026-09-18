@@ -328,27 +328,186 @@ function ReferenceCard() {
 
 // ── Webhook events ───────────────────────────────────────────────────────────
 
+type WebhooksData = {
+  endpoints: { id: string; url: string; events: string; status: string; secretMasked: string; successRate: number; lastDeliveryAt: string | null; createdAt: string }[];
+  deliveries: { id: string; event: string; statusCode: number; success: boolean; attempts: number; at: string; url: string }[];
+};
+
 function WebhooksCard() {
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ["workspace", "settings-webhooks"],
+    queryFn: () => apiGet<WebhooksData>("/api/workspace/settings-webhooks"),
+  });
+  const act = useSettingsAct(["settings-webhooks"]);
+  const [dialog, setDialog] = useState(false);
+  const [created, setCreated] = useState<string | null>(null);
+  const [form, setForm] = useState({ url: "", events: ["envelope.sent", "envelope.completed"] as string[] });
+
+  if (error) return <ErrorState message={(error as Error).message} onRetry={() => refetch()} />;
+
+  const endpoints = data?.endpoints ?? [];
+  const deliveries = data?.deliveries ?? [];
+
+  const toggleEvent = (event: string) => {
+    setForm((f) => ({
+      ...f,
+      events: f.events.includes(event) ? f.events.filter((e) => e !== event) : [...f.events, event],
+    }));
+  };
+
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base">
-          <Webhook className="h-4 w-4 text-muted-foreground" aria-hidden /> Webhook events
-        </CardTitle>
-        <CardDescription>
-          Manage endpoints from Admin → API &amp; Webhooks. Deliveries are signed and retried with exponential backoff.
-        </CardDescription>
+      <CardHeader className="flex-row items-center justify-between">
+        <div>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Webhook className="h-4 w-4 text-muted-foreground" aria-hidden /> Webhook endpoints
+          </CardTitle>
+          <CardDescription>
+            Signed <span className="font-mono text-xs">POST</span> notifications when envelope events happen. Every delivery carries an <span className="font-mono text-xs">X-Docurama-Signature</span> HMAC-SHA256 header and is retried with exponential backoff.
+          </CardDescription>
+        </div>
+        <Button size="sm" className="h-10" onClick={() => setDialog(true)}>
+          <Plus className="h-4 w-4" aria-hidden /> Add endpoint
+        </Button>
       </CardHeader>
-      <CardContent>
-        <ul className="grid gap-2 sm:grid-cols-2">
-          {WEBHOOK_EVENTS.map((e) => (
-            <li key={e.event} className="rounded-lg border p-3">
-              <code className="font-mono text-xs font-medium">{e.event}</code>
-              <p className="mt-0.5 text-xs text-muted-foreground">{e.when}</p>
-            </li>
-          ))}
-        </ul>
+      <CardContent className="p-0" aria-busy={isLoading}>
+        {endpoints.length === 0 ? (
+          <p className="p-6 text-sm text-muted-foreground">No endpoints registered - add one to receive envelope events on your server.</p>
+        ) : (
+          <ul className="divide-y">
+            {endpoints.map((h) => (
+              <li key={h.id} className="flex flex-col gap-2 p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <p className="truncate font-mono text-xs font-medium">{h.url}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {h.successRate}% success · last delivery {h.lastDeliveryAt ? fmtDate(h.lastDeliveryAt) : "never"} · secret {h.secretMasked}
+                  </p>
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {h.events.split("|").map((ev) => (
+                      <span key={ev} className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">{ev}</span>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <StatusBadge status={h.status} />
+                  <Button
+                    variant="outline" size="sm" className="h-11"
+                    onClick={() => act.mutateAsync({ op: "webhook.toggle", id: h.id })}
+                  >
+                    {h.status === "PAUSED" ? "Resume" : "Pause"}
+                  </Button>
+                  <ConfirmDialog
+                    trigger={<Button variant="outline" size="sm" className="h-11 text-destructive hover:text-destructive">Delete</Button>}
+                    title="Delete this endpoint?"
+                    description="Your server stops receiving events immediately. Delivery history for this endpoint is removed."
+                    confirmLabel="Delete endpoint"
+                    onConfirm={() => act.mutateAsync({ op: "webhook.delete", id: h.id })}
+                  />
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {deliveries.length > 0 && (
+          <div className="border-t p-4">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Recent deliveries</p>
+            <ul className="space-y-1">
+              {deliveries.slice(0, 5).map((d) => (
+                <li key={d.id} className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", d.success ? "bg-success" : "bg-destructive")} aria-hidden />
+                  <code className="font-mono">{d.event}</code>
+                  <span className="truncate">{d.url}</span>
+                  <span className="ml-auto shrink-0">{d.success ? d.statusCode : `${d.statusCode || "network error"} · attempt ${d.attempts}`}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </CardContent>
+
+      <Dialog open={dialog} onOpenChange={setDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add webhook endpoint</DialogTitle>
+            <DialogDescription>
+              https URLs only (http for localhost). Verify the <span className="font-mono text-xs">X-Docurama-Signature</span> header on your side with the signing secret.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="wh-url">Endpoint URL</Label>
+              <Input
+                id="wh-url" value={form.url} className="h-11"
+                onChange={(e) => setForm({ ...form, url: e.target.value })}
+                placeholder="https://api.yourcompany.com/docurama/hooks"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Events</Label>
+              <div className="grid gap-1.5 sm:grid-cols-2">
+                {WEBHOOK_EVENTS.map((e) => (
+                  <label key={e.event} className="flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-xs transition-colors hover:bg-muted/50">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4"
+                      checked={form.events.includes(e.event)}
+                      onChange={() => toggleEvent(e.event)}
+                    />
+                    <span className="min-w-0">
+                      <code className="font-mono">{e.event}</code>
+                      <span className="block text-muted-foreground">{e.when}</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDialog(false)}>Cancel</Button>
+            <Button
+              disabled={!form.url.trim() || form.events.length === 0 || act.isPending}
+              onClick={async () => {
+                const res = await act.mutateAsync({ op: "webhook.create", data: form }).catch(() => undefined);
+                setDialog(false);
+                setForm({ url: "", events: ["envelope.sent", "envelope.completed"] });
+                if (res && typeof (res as { secret?: unknown }).secret === "string") {
+                  setCreated((res as { secret?: unknown }).secret as string);
+                }
+              }}
+            >
+              Register endpoint
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Signing secret - shown exactly once at creation */}
+      <Dialog open={Boolean(created)} onOpenChange={(v) => { if (!v) setCreated(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Copy your signing secret now</DialogTitle>
+            <DialogDescription>
+              Verify deliveries with <span className="font-mono text-xs">HMAC-SHA256(secret, raw body)</span> against the <span className="font-mono text-xs">X-Docurama-Signature</span> header. This is the only time the secret is displayed.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-lg border bg-muted/40 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <code className="min-w-0 break-all font-mono text-sm">{created}</code>
+              <Button
+                variant="ghost" size="icon" className="h-9 w-9 shrink-0"
+                aria-label="Copy signing secret"
+                onClick={() => navigator.clipboard?.writeText(created ?? "").catch(() => undefined)}
+              >
+                <Copy className="h-4 w-4" aria-hidden />
+              </Button>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setCreated(null)}>I stored it safely</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }

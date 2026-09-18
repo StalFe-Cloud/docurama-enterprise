@@ -1,0 +1,20 @@
+# Public verify portal — unknown code must report the honest NOT_FOUND state.
+url: ${MAESTRO_BASE_URL}/verify
+name: Verify portal reports unknown codes honestly
+tags:
+  - e2e
+  - public
+  - verify
+---
+- launchApp
+
+- assertVisible: Verify a document
+
+- tapOn:
+    id: vcode
+- inputText: DOC-DOESNOTEXIST
+- tapOn: " ?Verify ?"
+
+- extendedWaitUntil:
+    visible: " ?No sealed document with this code ?"
+    timeout: 10000

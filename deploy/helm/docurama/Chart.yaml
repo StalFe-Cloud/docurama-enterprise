@@ -1,0 +1,19 @@
+apiVersion: v2
+name: docurama
+description: |
+  Docurama e-signature platform — hardened single-node deployment with
+  boot-time schema migration, /api/health probes, SMTP mail delivery and
+  signed webhooks.
+type: application
+version: 0.3.0
+appVersion: "0.3.0"
+keywords:
+  - e-signature
+  - esign
+  - evidence
+  - transparency-log
+home: https://docurama.eu
+sources:
+  - https://github.com/StalFe-Cloud/docurama
+maintainers:
+  - name: Docurama

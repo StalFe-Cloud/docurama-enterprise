@@ -1,0 +1,39 @@
+# Workspace — Documents section: header, status tabs, search and table.
+url: ${MAESTRO_BASE_URL}/login
+name: Documents workspace renders table and controls
+tags:
+  - e2e
+  - workspace
+  - documents
+---
+- launchApp
+
+- extendedWaitUntil:
+    visible: Sign in to your portal
+    timeout: 30000
+
+- tapOn:
+    id: email
+- inputText: e2e@docurama.eu
+- tapOn:
+    id: password
+- inputText: "e2ePass1234!"
+- tapOn: " ?Sign in securely ?"
+- extendedWaitUntil:
+    visible: "Welcome back.*"
+    timeout: 15000
+
+- tapOn: " ?Documents ?"
+- extendedWaitUntil:
+    visible: " ?New envelope ?"
+    timeout: 10000
+
+# Status filter tabs
+- assertVisible: All
+- assertVisible: Sent
+
+# Search box present
+- assertVisible: Search documents…
+
+# Seeded fixture envelope is listed
+- assertVisible: E2E Fixture — Mutual NDA (sent)

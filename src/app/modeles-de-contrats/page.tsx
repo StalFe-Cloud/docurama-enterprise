@@ -13,10 +13,18 @@ export const metadata: Metadata = {
 };
 
 export default async function ModelesContratsPage() {
-  const templates = await db.template.findMany({
-    where: { isBuiltIn: true },
-    orderBy: { name: "asc" },
-  });
+  // Public marketing surface: a database hiccup (wrong DATABASE_URL, locked
+  // SQLite file, pending migration) must degrade to an empty state, never a
+  // 500 (finding F2 in docs/IMPROVEMENT-PLAN.md).
+  let templates: Awaited<ReturnType<typeof db.template.findMany>> = [];
+  try {
+    templates = await db.template.findMany({
+      where: { isBuiltIn: true },
+      orderBy: { name: "asc" },
+    });
+  } catch {
+    // Catalog temporarily unavailable — render the empty state below.
+  }
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -55,7 +63,19 @@ export default async function ModelesContratsPage() {
           </p>
         </div>
 
-        {/* Templates Grid */}
+        {/* Templates Grid — or graceful empty state when the catalog is unavailable */}
+        {templates.length === 0 ? (
+          <div className="mt-12 rounded-xl border bg-card p-10 text-center shadow-sm">
+            <FileText className="mx-auto h-10 w-10 text-muted-foreground" aria-hidden />
+            <h2 className="mt-4 text-lg font-semibold">Catalogue momentanément indisponible</h2>
+            <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
+              La bibliothèque de modèles est en cours de mise à jour. Veuillez réessayer dans quelques instants.
+            </p>
+            <Button className="mt-6" size="sm" asChild>
+              <Link href="/login?next=/templates">Accéder à l'espace de travail</Link>
+            </Button>
+          </div>
+        ) : (
         <div className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {templates.map((t) => {
             const fieldsCount = t.fields ? (JSON.parse(t.fields) as any[]).length : 2;
@@ -109,6 +129,7 @@ export default async function ModelesContratsPage() {
             );
           })}
         </div>
+        )}
       </main>
     </div>
   );

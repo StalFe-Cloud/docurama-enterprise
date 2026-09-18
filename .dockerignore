@@ -3,3 +3,9 @@ node_modules
 .git
 storage
 *.log
+db
+download
+skills
+e2e
+test-results
+playwright-report

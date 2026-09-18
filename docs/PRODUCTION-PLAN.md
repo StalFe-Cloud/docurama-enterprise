@@ -11,14 +11,16 @@
 
 | Layer | Component | Notes |
 |---|---|---|
-| Edge | DNS (docurama.eu zone, see `download/docurama.eu.zone`) | 11 sub-domains, MX/SPF/DKIM/DMARC/MTA-STS/CAA records |
+| Edge | DNS (docurama.eu zone, see `download/docurama.eu.zone`) | 11 sub-domains, MX/SPF/DKIM/DMARC/MTA-STS/CAA records. `ROOT_DOMAIN` env makes the routing portable to other zones |
 | TLS / proxy | Caddy (automatic ACME Let's Encrypt) or nginx | Terminates TLS, proxies to the Next.js standalone server |
 | App | Next.js 16 (App Router) standalone build, port 3000 | Single Node/Bun process, server components + API routes |
-| Data | SQLite via Prisma (`db/custom.db`) | EU residency (Paris). File-level backups. Postgres path documented in §9 |
+| Data | SQLite via Prisma (`db/custom.db`) | EU residency (Paris). File-level backups. Postgres portability gated in CI (schema applies cleanly to PostgreSQL on every push) |
 | Files | `public/` static + per-tenant document artifacts | Bundled in image; move to object storage at scale (§9) |
-| Mail | SMTP relay (`notifications@docurama.eu`) | Sender identity fixed to the verified sending domain |
+| Mail | SMTP relay (`notifications@docurama.eu`) | Sender identity fixed to the verified sending domain. Delivery engine: `SMTP_URL` env (unset = outbox-only mode), retries with backoff, 5 attempts |
+| Webhooks | HMAC-signed event deliveries (`X-Docurama-Signature`) | Managed in Settings → API; retried with backoff by the background worker |
+| Health | `GET /api/health` | DB + storage + mail + webhook + Rekor posture; 503 when critical checks fail. Docker HEALTHCHECK and Helm probes target it |
 | Time-stamping | RFC 3161 TSA (DigiCert / Sectigo / FreeTSA presets) | Configured per workspace in Settings → eSign |
-| Ops | `download/DOCURAMA-DNS-EMAIL-PROVISIONING.md` + this plan | Restore, backup, update, rollback runbooks |
+| Ops | `download/DOCURAMA-DNS-EMAIL-PROVISIONING.md` + this plan | Restore, backup, update, rollback runbooks. K8s: `deploy/helm/docurama`; containers: hardened `Dockerfile` + `docker-compose.yml`; backups: `scripts/backup.sh` |
 
 Minimum server: 2 vCPU / 4 GB RAM / 40 GB SSD, Debian 12 or Ubuntu 24.04, EU region (Paris). One box carries app + DB; the design stays single-node until the Postgres/object-storage migration.
 
@@ -154,8 +156,8 @@ Secrets policy: credentials (SMTP passwords, SMS secrets, TOTP secrets, PKCS#12 
 
 ## 7. Backup & restore
 
-- **Nightly:** `sqlite3 db/custom.db ".backup '/var/backups/docurama/db-$(date +%F).sqlite'"` + copy `.next/standalone` build and `public/` artifacts; keep 30 days, encrypt at rest (age/gpg), off-site copy (rsync to a second EU host).
-- **Documents:** artifacts live in the tenant storage tree — included in the nightly copy.
+- **Nightly:** `scripts/backup.sh` (sqlite3 `.backup` snapshot + storage tarball, 30-day retention, optional `--gpg` encryption and `--remote` off-site rsync). Cron: `15 3 * * * /opt/docurama/scripts/backup.sh >> /var/log/docurama-backup.log 2>&1`.
+- **Documents:** artifacts live in the tenant storage tree — included in the nightly tarball.
 - **Restore drill:** restore DB file → `bun run start` → verify `/api/health` + one sealed document via `verify.docurama.eu`; quarterly drill logged in Admin → Compliance → Drills.
 
 ## 8. Monitoring & go-live checklist
@@ -176,7 +178,13 @@ Go-live:
 
 ## 9. Scale-out path (when single-node SQLite is no longer enough)
 
-1. **Database** — `DATABASE_URL` to Postgres (Prisma supports the switch; schema is portable).
+1. **Database** — `DATABASE_URL` to Postgres (Prisma supports the switch; schema portability is now CI-gated — the `postgres-portability` job applies the schema to PostgreSQL 16 on every push, so this stays a config change, not a project).
 2. **Documents** — move artifacts to S3-compatible EU object storage (Scaleway Paris / OVH Gravelines).
-3. **Jobs** — reminder platform job and webhook dispatcher move to a queue worker (the reminder policy model already separates manual / per-envelope / platform-scheduled runs).
+3. **Jobs** — the background worker (src/instrumentation.ts: mail + webhook retry passes) is single-instance by design. On a multi-replica tier set `DOCURAMA_WORKER=off` on all but one replica, or lift both passes into an external cron/queue worker — they are self-contained functions over the database.
 4. **App** — stateless app tier behind a load balancer; sessions already live in the database.
+
+## 10. Container & Kubernetes deployments
+
+- **Docker (hardened):** non-root uid 10001, `HEALTHCHECK` on `/api/health`, boot-time additive schema push (`DOCURAMA_SKIP_DB_PUSH=1` to delegate), demo mode off by default. `docker-compose.yml` ships named volumes for `/app/db` + `/app/storage`.
+- **Kubernetes (private cloud):** `helm install docurama deploy/helm/docurama`. Probes on `/api/health`, one RWO PVC (SQLite + documents), `Recreate` strategy, SMTP via existing Secret, `ROOT_DOMAIN` derived from the ingress host. Exactly one replica until the Postgres + object-storage migration; then `DOCURAMA_WORKER=off` on all but one.
+- **Self-hosted without K8s:** the §2 runbook remains the primary path; `docker compose up -d` is the one-command alternative behind your own TLS proxy.

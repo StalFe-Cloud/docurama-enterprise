@@ -3,7 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import {
   Building2, Users, FileSignature, ShieldCheck, Euro, TriangleAlert, Scale,
-  Activity, Cpu, Timer, Lock, Ban, BadgeCheck,
+  Activity, Cpu, Timer, Lock, Ban, BadgeCheck, ListChecks,
 } from "lucide-react";
 import {
   Area, AreaChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer,
@@ -51,7 +51,7 @@ export function AdminOverview({ onNavigate }: { onNavigate: (k: AdminSectionKey)
     day: new Date(s.date).toLocaleDateString("en-GB", { day: "numeric", month: "short" }),
   }));
   const pieData = data.planDist.map((p) => ({ name: p.planCode, value: p._count }));
-  const PIE_COLORS: Record<string, string> = { STARTER: "#a4a097", BUSINESS: "#0f7a5a", ENTERPRISE: "#1a1a1a" };
+  const PIE_COLORS: Record<string, string> = { SOLO: "#d9d5cb", STARTER: "#a4a097", BUSINESS: "#0f7a5a", ENTERPRISE: "#1a1a1a" };
   const certDays = daysUntil(data.health.certExpiryAt);
 
   return (
@@ -61,6 +61,9 @@ export function AdminOverview({ onNavigate }: { onNavigate: (k: AdminSectionKey)
         description="Live KPIs, signing pipeline health and security posture across every Docurama tenant."
         actions={<Button variant="outline" size="sm" onClick={() => refetch()}>Refresh</Button>}
       />
+
+      {/* Admin onboarding guide (cycle 10): the operator's checklist. */}
+      <AdminGuideCard onNavigate={onNavigate} />
 
       {/* System health strip */}
       <div className="grid gap-3 rounded-xl border bg-card p-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -261,5 +264,49 @@ export function AdminOverview({ onNavigate }: { onNavigate: (k: AdminSectionKey)
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+// ─── Admin onboarding guide ───────────────────────────────────────────────────
+//
+// Guided checklist for platform operators (cycle 10 "admin onboarding"):
+// the five things a fresh admin should verify before declaring the platform
+// production-ready, each linking to the console section that does it.
+
+function AdminGuideCard({ onNavigate }: { onNavigate: (k: AdminSectionKey) => void }) {
+  const items: { label: string; desc: string; target: AdminSectionKey }[] = [
+    { label: "Wire SMTP delivery", desc: "Set SMTP_URL in Platform Settings so queued verification, invite and signing mail actually leaves; the outbox shows what is waiting.", target: "settings" },
+    { label: "Triage Enterprise leads", desc: "Reply to NEW leads within one business day — the /enterprise page promises it. Statuses track contact → pilot → review → rollout.", target: "leads" },
+    { label: "Review tenants and plans", desc: "Plan catalogue now includes Solo and 50-envelope Starter with rollover; confirm each tenant's plan and subscription term.", target: "tenants" },
+    { label: "Verify DNS and mail posture", desc: "SPF, DKIM, DMARC and the mail sub-domains under Email & DNS — deliverability depends on it.", target: "provisioning" },
+    { label: "Check ops health", desc: "TSA reachability, certificate expiry, queue depth and the transparency log — everything a signed envelope promises.", target: "health" },
+  ];
+  return (
+    <Card className="border-primary/30 bg-primary-soft/20">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <ListChecks className="h-4 w-4 text-primary" aria-hidden /> Platform onboarding guide
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <ol className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {items.map((it, i) => (
+            <li key={it.label}>
+              <button
+                type="button"
+                onClick={() => onNavigate(it.target)}
+                className="flex h-full w-full items-start gap-2.5 rounded-lg border bg-card p-3.5 text-left transition-colors hover:bg-muted/60 focus-visible:outline-2 focus-visible:outline-ring"
+              >
+                <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[11px] font-semibold text-primary">{i + 1}</span>
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium">{it.label}</span>
+                  <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">{it.desc}</span>
+                </span>
+              </button>
+            </li>
+          ))}
+        </ol>
+      </CardContent>
+    </Card>
   );
 }

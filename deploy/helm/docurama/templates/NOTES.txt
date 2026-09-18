@@ -1,0 +1,34 @@
+Docurama {{ .Chart.AppVersion }} is deployed.
+
+{{- if .Values.persistence.enabled }}
+Persistent data (SQLite + documents) is on PVC {{ .Release.Name }}-docurama
+({{ .Values.persistence.size }}). The pod runs Recreate strategy — one replica
+at a time, the SQLite file must never be opened by two processes.
+{{- end }}
+
+{{- if .Values.ingress.enabled }}
+1. Point DNS for {{ (index .Values.ingress.hosts 0).host }} at your ingress
+   controller's load balancer.
+2. Ensure TLS is issued (cert-manager annotation or manual secret).
+{{- else }}
+Expose the service:
+  kubectl port-forward svc/{{ .Release.Name }}-docurama 3000:http
+{{- end }}
+
+Verify the deployment:
+
+  kubectl get pods -l app.kubernetes.io/instance={{ .Release.Name }}
+  curl http://{{ (index .Values.ingress.hosts 0).host | default "localhost" }}/api/health
+
+The health payload reports database, storage, mail mode, webhook and Rekor
+witnessing state — a 503 means unready (orchestrators already act on it via
+the configured probes).
+
+Next steps:
+  * Mail delivery: create the SMTP secret if you did not:
+      kubectl create secret generic docurama-smtp \
+        --from-literal=SMTP_URL='smtp://user:pass@relay.example.com:587'
+    and set smtp.existingSecret=docurama-smtp
+  * Vanity sub-domains (verify./docs./status.) route by ROOT_DOMAIN
+    ({{ include "docurama.rootDomain" . }}).
+  * Backups: schedule scripts/backup.sh against the PVC (see PRODUCTION-PLAN §7).

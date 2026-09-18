@@ -17,6 +17,7 @@
  */
 
 import { useState } from "react";
+import Link from "next/link";
 import {
   ArrowRight, BadgeCheck, BellRing, FileSignature, FileCheck2, Fingerprint,
   Lock, Menu, X, PenTool, ScrollText, ShieldCheck, Timer, MessageSquare,
@@ -31,6 +32,10 @@ import { ScrollTop } from "@/components/marketing/scroll-top";
 import { LanguageSwitcher } from "@/components/i18n/language-switcher";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import {
+  PLAN_CATALOG, PLAN_ORDER, BILLING_TERMS, type BillingTerm,
+  effectiveMonthlyEur, termTotalEur, termSavingsEur,
+} from "@/lib/plans";
 
 const NAV = [
   { href: "#product", labelKey: "nav.product", fallback: "Product" },
@@ -111,36 +116,6 @@ const COMPLIANCE = [
   },
 ];
 
-const PLANS = [
-  {
-    code: "STARTER",
-    name: "Starter",
-    price: "€19",
-    per: "/mo",
-    blurb: "For small teams sending their first envelopes.",
-    features: ["3 seats", "25 envelopes / month", "PAdES B-B sealing", "Email signing and public verify portal", "2 templates", "99.5% uptime SLA"],
-    highlight: false,
-  },
-  {
-    code: "BUSINESS",
-    name: "Business",
-    price: "€79",
-    per: "/mo",
-    blurb: "For growing operations that live in documents.",
-    features: ["10 seats", "250 envelopes / month", "PAdES B-LT sealing", "SMS + WhatsApp delivery", "API access and webhooks", "DNS domain attestation", "Unlimited templates", "99.9% uptime SLA"],
-    highlight: true,
-  },
-  {
-    code: "ENTERPRISE",
-    name: "Enterprise",
-    price: "€349",
-    per: "/mo",
-    blurb: "For regulated teams with audit obligations.",
-    features: ["100 seats", "5,000 envelopes / month", "PAdES B-LTA sealing", "BYO certificates and SSO/SAML", "21 CFR Part 11 mode", "Audit chain exports", "Custom retention and legal hold", "99.99% uptime SLA"],
-    highlight: false,
-  },
-];
-
 const FAQS = [
   {
     q: "Is Docurama an EU company, and where is my data?",
@@ -170,6 +145,9 @@ const FAQS = [
 
 export function MarketingPage() {
   const [menuOpen, setMenuOpen] = useState(false);
+  // Promotional billing-term switch: monthly (no engagement) or a committed
+  // 3/6/12-month term with an incremental discount. Drives every card price.
+  const [termChoice, setTermChoice] = useState<BillingTerm>(BILLING_TERMS[0]);
   const { t, locale } = useI18n();
 
   return (
@@ -189,11 +167,14 @@ export function MarketingPage() {
           </div>
           <div className="hidden items-center gap-2 md:flex">
             <LanguageSwitcher />
-            <Button variant="ghost" size="sm" onClick={() => { window.location.assign("/login"); }}>
-              {t("nav.signIn", "Sign in")}
+            {/* Real links (asChild + Link), not onClick navigations: the CTAs
+                keep working before hydration and for assistive tech, and the
+                in-app transition stays client-side once hydrated. */}
+            <Button variant="ghost" size="sm" asChild>
+              <Link href="/login">{t("nav.signIn", "Sign in")}</Link>
             </Button>
-            <Button size="sm" onClick={() => { window.location.assign("/welcome"); }}>
-              {t("nav.startTrial", "Start free trial")}
+            <Button size="sm" asChild>
+              <Link href="/welcome">{t("nav.startTrial", "Start free trial")}</Link>
             </Button>
           </div>
           <button
@@ -215,11 +196,11 @@ export function MarketingPage() {
               </a>
             ))}
             <div className="flex gap-2 pt-2">
-              <Button variant="outline" className="flex-1" onClick={() => { window.location.assign("/login"); }}>
-                {t("nav.signIn", "Sign in")}
+              <Button variant="outline" className="flex-1" asChild>
+                <Link href="/login">{t("nav.signIn", "Sign in")}</Link>
               </Button>
-              <Button className="flex-1" onClick={() => { window.location.assign("/welcome"); }}>
-                {t("nav.startTrial", "Start free trial")}
+              <Button className="flex-1" asChild>
+                <Link href="/welcome">{t("nav.startTrial", "Start free trial")}</Link>
               </Button>
             </div>
           </div>
@@ -247,11 +228,13 @@ export function MarketingPage() {
               {t("hero.subtitle", "EU-built eSignatures with cryptographic evidence: X.509 sealing, RFC 3161 timestamps and an audit trail built for review.")}
             </p>
             <div className="hero-in mt-7 flex flex-wrap justify-center gap-3" style={{ animationDelay: ".16s" }}>
-              <Button size="lg" onClick={() => { window.location.assign("/welcome"); }}>
-                {t("hero.startFree", "Start free trial")} <ArrowRight className="h-4 w-4" aria-hidden />
+              <Button size="lg" asChild>
+                <Link href="/welcome">
+                  {t("hero.startFree", "Start free trial")} <ArrowRight className="h-4 w-4" aria-hidden />
+                </Link>
               </Button>
-              <Button size="lg" variant="outline" onClick={() => { window.location.assign("/verify"); }}>
-                {t("hero.verifyDoc", "Verify a document")}
+              <Button size="lg" variant="outline" asChild>
+                <Link href="/verify">{t("hero.verifyDoc", "Verify a document")}</Link>
               </Button>
             </div>
           </div>
@@ -447,49 +430,55 @@ export function MarketingPage() {
           </h2>
           <p className="mt-3 max-w-xl text-sm leading-relaxed text-muted-foreground sm:text-base">
             Every plan starts with a 14-day trial, no credit card required.
-            Prices exclude VAT.
+            Monthly billing has no engagement — cancel anytime. Commit to a
+            term and the discount grows: 3 months −5%, 6 months −10%, 12
+            months −15%. Prices exclude VAT.
           </p>
-          <div className="mt-10 grid gap-4 lg:grid-cols-3">
-            {PLANS.map((p) => (
-              <div key={p.code} className={cn(
-                "relative flex flex-col rounded-xl border p-6",
-                p.highlight ? "border-primary bg-card shadow-lg shadow-primary/[0.07]" : "bg-card",
-              )}>
-                {p.highlight && (
-                  <span className="absolute -top-3 left-6 rounded-full bg-primary px-3 py-0.5 text-[11px] font-semibold text-primary-foreground">
-                    Most popular
-                  </span>
-                )}
-                {/* Fixed-height header block keeps feature lists aligned across columns */}
-                <div className="min-h-[104px]">
-                  <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">{p.name}</h3>
-                  <p className="mt-2 flex items-baseline gap-1">
-                    <span className="text-3xl font-semibold tracking-tight">{p.price}</span>
-                    <span className="text-sm text-muted-foreground">{p.per}</span>
-                  </p>
-                  <p className="mt-1.5 text-xs text-muted-foreground">{p.blurb}</p>
-                </div>
-                <ul className="mt-5 flex-1 space-y-2.5">
-                  {p.features.map((f) => (
-                    <li key={f} className="flex items-start gap-2 text-xs leading-relaxed">
-                      <span className="mt-[5px] h-1 w-1 shrink-0 rounded-full bg-primary" aria-hidden />
-                      {f}
-                    </li>
-                  ))}
-                </ul>
-                <Button className="mt-6 w-full" variant={p.highlight ? "default" : "outline"}
-                  onClick={() => {
-                    if (p.code === "ENTERPRISE") window.location.assign("mailto:sales@docurama.eu");
-                    else window.location.assign("/welcome");
-                  }}>
-                  {p.code === "ENTERPRISE" ? "Talk to sales" : "Start free trial"}
-                </Button>
-              </div>
+
+          {/* Promotional billing-term switch */}
+          <div className="mt-8">
+            <div className="inline-flex max-w-full flex-wrap gap-1 rounded-xl border bg-card p-1" role="tablist" aria-label="Billing term">
+              {BILLING_TERMS.map((bt) => {
+                const active = bt.months === termChoice.months;
+                return (
+                  <button
+                    key={bt.months}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => setTermChoice(bt)}
+                    className={cn(
+                      "flex-1 rounded-lg px-3 py-2 text-xs font-medium transition-colors sm:text-sm",
+                      active ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    {bt.label}
+                    {bt.discountPct > 0 && (
+                      <span className={cn("ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold", active ? "bg-primary-foreground/20 text-primary-foreground" : "bg-emerald-100 text-emerald-800")}>
+                        −{bt.discountPct}%
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="mt-2.5 text-xs text-muted-foreground">
+              {termChoice.months === 1
+                ? "No engagement — pay monthly and cancel anytime."
+                : `Committed ${termChoice.months}-month term: −${termChoice.discountPct}% off list price, billed once for the term.`}
+            </p>
+          </div>
+
+          <div className="mt-10 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            {PLAN_ORDER.map((code) => (
+              <PricingCard key={code} code={code} term={termChoice} />
             ))}
           </div>
           <p className="mt-6 text-xs text-muted-foreground">
-            Need more envelopes, self-hosting or on-premises deployment?{" "}
-            <a className="font-medium underline underline-offset-2" href="mailto:sales@docurama.eu">Write to sales@docurama.eu</a>.
+            Unused envelopes roll over to the next period on renewal (up to one
+            monthly allowance) — a quiet month is never a lost month. Need more
+            envelopes, self-hosting or on-premises deployment?{" "}
+            <Link className="font-medium underline underline-offset-2" href="/enterprise">Talk to sales about Enterprise</Link>.
           </p>
         </div>
       </section>
@@ -525,8 +514,10 @@ export function MarketingPage() {
             </p>
           </div>
           <div className="shrink-0">
-            <Button size="lg" onClick={() => { window.location.assign("/welcome"); }}>
-              Start free trial <ArrowRight className="h-4 w-4" aria-hidden />
+            <Button size="lg" asChild>
+              <Link href="/welcome">
+                Start free trial <ArrowRight className="h-4 w-4" aria-hidden />
+              </Link>
             </Button>
           </div>
         </div>
@@ -583,6 +574,75 @@ export function MarketingPage() {
       </footer>
 
       <ScrollTop />
+    </div>
+  );
+}
+
+// ─── Pricing card ─────────────────────────────────────────────────────────────
+//
+// Deliberately no "most popular" highlight (cycle 10): instead of steering
+// buyers to a badge, each card shows what the plan helps them achieve —
+// outcome bullets plus a "best for" line — so customers self-select.
+
+function PricingCard({ code, term }: { code: string; term: BillingTerm }) {
+  const p = PLAN_CATALOG[code as keyof typeof PLAN_CATALOG];
+  if (!p) return null;
+  const monthly = effectiveMonthlyEur(p, term);
+  const total = termTotalEur(p, term);
+  const savings = termSavingsEur(p, term);
+  const discounted = term.discountPct > 0;
+
+  return (
+    <div className="flex flex-col rounded-xl border bg-card p-6">
+      {/* Fixed-height header keeps feature lists aligned across columns */}
+      <div className="min-h-[128px]">
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">{p.name}</h3>
+        <p className="mt-2 flex flex-wrap items-baseline gap-1.5">
+          {discounted && (
+            <span className="text-sm text-muted-foreground line-through" aria-hidden>€{p.monthlyEur.toFixed(2)}</span>
+          )}
+          <span className="text-3xl font-semibold tracking-tight">
+            €{monthly.toFixed(2).replace(/\.00$/, "")}
+          </span>
+          <span className="text-sm text-muted-foreground">/mo</span>
+        </p>
+        <p className="mt-1 text-xs font-medium text-muted-foreground">
+          {discounted
+            ? `€${total.toFixed(2)} billed for ${term.months} months · save €${savings.toFixed(2)}`
+            : "Billed monthly · no engagement"}
+        </p>
+        <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">{p.bestFor}</p>
+      </div>
+
+      <ul className="mt-5 flex-1 space-y-2.5">
+        {p.features.map((f) => (
+          <li key={f} className="flex items-start gap-2 text-xs leading-relaxed">
+            <span className="mt-[5px] h-1 w-1 shrink-0 rounded-full bg-primary" aria-hidden />
+            {f}
+          </li>
+        ))}
+      </ul>
+
+      {/* What this plan helps you achieve — replaces the "most popular" badge */}
+      <div className="mt-5 rounded-lg bg-muted/60 p-3.5">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          With {p.name} you&apos;ll
+        </p>
+        <ul className="mt-2 space-y-1.5">
+          {p.outcomes.map((o) => (
+            <li key={o} className="flex items-start gap-1.5 text-[11px] leading-relaxed text-muted-foreground">
+              <BadgeCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />
+              {o}
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <Button className="mt-5 w-full" variant="outline" asChild>
+        {p.code === "ENTERPRISE"
+          ? <Link href="/enterprise">Talk to sales</Link>
+          : <Link href={p.code === "SOLO" ? "/welcome?plan=SOLO" : "/welcome"}>Start free trial</Link>}
+      </Button>
     </div>
   );
 }

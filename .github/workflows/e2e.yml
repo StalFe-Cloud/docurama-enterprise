@@ -1,0 +1,124 @@
+name: E2E (Maestro)
+
+on:
+  push:
+    branches: [main, quality]
+  pull_request:
+    branches: [main, quality]
+  workflow_dispatch:
+
+jobs:
+  maestro:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      MAESTRO_CLI_NO_ANALYTICS: "1"
+      MAESTRO_BASE_URL: http://127.0.0.1:3000
+      NEXT_PUBLIC_DEMO_MODE: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: bunx prisma generate
+
+      - name: Prepare environment
+        run: |
+          cp .env.example .env
+          # Absolute DATABASE_URL so the app and seed agree on the file.
+          sed -i "s|file:./db/custom.db|file:$PWD/db/custom.db|" .env
+          mkdir -p db && touch db/custom.db
+          bunx prisma db push --accept-data-loss
+
+      - name: Install Maestro
+        run: |
+          curl -Ls 'https://get.maestro.mobile.dev' | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+
+      - name: Install Chrome + no-sandbox wrapper
+        run: |
+          # Maestro web needs a `chromium`/`google-chrome` binary. GH runners
+          # ship Chrome; we wrap it to inject container-safe flags.
+          CHROME_BIN="$(readlink -f "$(which google-chrome || which chromium || which chromium-browser)")"
+          echo "Chrome at: $CHROME_BIN"
+          mkdir -p "$HOME/.local/bin"
+          cat > "$HOME/.local/bin/chromium" <<EOF
+          #!/bin/bash
+          exec "$CHROME_BIN" --no-sandbox --disable-gpu --disable-dev-shm-usage "\$@"
+          EOF
+          chmod +x "$HOME/.local/bin/chromium"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          # The visual-regression suite drives the same binary via Playwright.
+          echo "CHROME_BIN=$CHROME_BIN" >> "$GITHUB_ENV"
+
+      - name: Install SeaweedFS (S3 backend E2E)
+        run: |
+          # Single static binary — the S3 storage suite spawns a real
+          # `weed server -s3` on scratch ports (e2e/s3-seaweed.test.ts).
+          WEED_VER="4.47"
+          curl -sL "https://github.com/seaweedfs/seaweedfs/releases/download/${WEED_VER}/linux_amd64.tar.gz" -o /tmp/weed.tar.gz
+          tar xzf /tmp/weed.tar.gz -C /tmp
+          mkdir -p "$HOME/.local/bin" && mv /tmp/weed "$HOME/.local/bin/weed" && chmod +x "$HOME/.local/bin/weed"
+          "$HOME/.local/bin/weed" version | head -1
+          echo "WEED_BIN=$HOME/.local/bin/weed" >> "$GITHUB_ENV"
+
+      - name: Run E2E suite
+        run: bash e2e/run.sh
+
+      - name: Upload Maestro debug artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: maestro-debug
+          path: ~/.maestro/tests/
+          retention-days: 7
+
+  # ── Schema portability gate (PRODUCTION-PLAN §9) ──────────────────────────
+  # The scale-out path is "flip DATABASE_URL to Postgres". This job proves the
+  # schema actually applies cleanly to PostgreSQL on every push, so the
+  # migration stays a config change instead of becoming a project.
+  postgres-portability:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: docurama
+          POSTGRES_PASSWORD: docurama
+          POSTGRES_DB: docurama_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Apply schema to PostgreSQL
+        run: |
+          # Provider swap is the ONLY edit — portability must survive it.
+          sed 's/provider = "sqlite"/provider = "postgresql"/' prisma/schema.prisma > prisma/schema.pg.prisma
+          bunx prisma db push --schema prisma/schema.pg.prisma --skip-generate
+        env:
+          DATABASE_URL: postgresql://docurama:docurama@localhost:5432/docurama_test
+
+      - name: "Smoke: tables exist"
+        run: |
+          docker exec ${{ job.services.postgres.id }} psql -U docurama -d docurama_test -c "\dt" | tee /dev/stderr | grep -q "Envelope"
+          docker exec ${{ job.services.postgres.id }} psql -U docurama -d docurama_test -c "\dt" | grep -q "TransparencyEntry"

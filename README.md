@@ -1,4 +1,4 @@
-# Docurama — Enterprise e-Signature & Legal Evidence Platform
+# Docurama Enterprise — Sovereign Self-Hosted & On-Premises Edition
 
 > **Docurama SAS** · 1 Rue Marguerin, 75014 Paris, France  
 > **Jurisdiction:** French Republic & European Union Law · **Data Residency:** Paris, France (EU-West)  
@@ -389,24 +389,42 @@ For two-factor signing verification and OTP delivery, Docurama integrates 14 car
 
 ---
 
-## 10. Recent Implementations & Platform Enhancements (v1.2.0)
+## 10. Platform Enhancements & Architectural Advancements (Cycles 1–10)
 
-1. **Homepage Hero Demo Viewport & Scaling Fix:**
-   - Eliminated rigid `.hero-fold` viewport constraint (`calc(100vh - 4rem)`) that compressed the demo canvas vertically on desktop displays.
-   - Refactored `HeroDemo` responsive canvas scaling from constrained dual-axis `Math.min(w/CANVAS_W, h/CANVAS_H, 1)` to proportional width-based scaling `scale = Math.min(w / CANVAS_W, 1)` with automatic dynamic aspect-ratio height (`fit.h = CANVAS_H * scale`).
-   - The interactive product movie now displays at full 1000px width on desktop and scales naturally across mobile and tablet devices without squishing.
-2. **Self-Service Password Reset Pipeline:**
-   - Implemented `POST /api/auth/forgot-password` with 32-byte cryptographic token generation and 1-hour expiration.
-   - Created dedicated `/reset-password` UI with real-time password strength indicators and confirmation validation.
-   - Implemented `POST /api/auth/reset-password` for secure token redemption, SHA-256 password rehashing, and automated token invalidation.
-   - Added direct "Forgot password?" modal triggers on `/login`.
-3. **Corporate Domain Auto-Enrollment & Billing Bypass:**
-   - Added real-time corporate domain lookup via `GET /api/auth/check-domain?domain=...`.
-   - Created Platform Admin Allowed Domains governance panel (`/admin` → Tenants / Domains) with `autoJoin` and `bypassBilling` toggles.
-   - Implemented `@singa.fr` demonstration corporate bypass allowing employees to directly join the StålFe workspace without entering payment details.
-4. **French Statutory Contract Integration in Templates Catalog:**
-   - Embedded all 8 statutory French contracts (CDI, CDD, NDA, Bail Commercial, CGV, Prestation, Pacte d'associés, Accord de résiliation) directly inside `/templates`.
-   - Added French legal system statutory badges (**Droit Français**), category filtering, and direct one-click drafting into the New Envelope wizard.
+Docurama has undergone 10 continuous engineering cycles, graduating from early prototypes to an audited, production-grade e-signature and evidence infrastructure:
+
+1. **Maestro Browser E2E Automation Suite (Cycle 1):**
+   - 25 end-to-end browser flows verifying the entire user journey: authentication, document drafting, template instantiation, multi-recipient handoffs, decline workflows, and administrative console operations.
+   - Deterministic fixtures seeded in `e2e/seed.ts` with strict type gates (`tsc --noEmit`) and visual regression baseline comparisons.
+2. **Public Signer Portal & Core Signing Loop (Cycle 2):**
+   - Responsive, zero-friction signer journey at `/sign/[token]` requiring no account creation.
+   - Dual-mode signature execution: biometric freehand canvas drawing or SVG-rendered cryptographic type-to-sign fonts (Dancing Script, Great Vibes, Caveat).
+   - In-app signer decline workflow with statutory audit event logging and sender notifications.
+3. **Evidence Pack Export & Attestation Federation (Cycle 3):**
+   - One-click `.zip` evidence archive generation via `src/lib/evidence-pack.ts` containing the sealed PDF, canonical JSON audit trail manifest, SHA-256 certificate chains, and an offline zero-dependency HTML verifier (`verify.html`).
+   - Cross-instance public portal attestation loopback (`/api/attestations`) allowing sovereign self-hosted instances to federate minimal verification fingerprints without exposing document contents.
+4. **Certificate Transparency (CT)-Style Append-Only Registry (Cycle 4):**
+   - Cryptographic Merkle/hash-chain registry (`src/lib/transparency.ts`) recording every seal commitment with SHA-256 links to preceding block headers.
+   - Public inclusion proofs (`GET /api/transparency/proof/{code}`) and signed checkpoints (`GET /api/transparency/checkpoint`) enabling third-party monitors to detect rewrite attacks or log truncation without central trust.
+5. **Embedded Document Preview Engine (Cycle 5):**
+   - High-fidelity PDF page rasterizer (`/api/sign/[token]/pages/[n]`) allowing signers to review full document typography, layouts, and statutory clauses before executing signatures.
+6. **Sigstore Rekor Neutral Third-Party Witnessing (Cycle 6):**
+   - Cryptographic integration with OpenSSF's public Rekor transparency log (`src/lib/rekor.ts`).
+   - The portal transparency key signs a self-commitment statement (`docurama-portal-key-witness-v1`), submitted to `rekor.sigstore.dev` as a `hashedrekord`. Checkpoints embed the Rekor entry UUID, log index, and inclusion proof, eliminating single-operator trust.
+7. **Per-Recipient Preview Watermarking & MCP Server (Cycle 7):**
+   - Dynamic canvas watermarking (`CONFIDENTIAL - REVIEW ONLY`) stamped on document preview pages with recipient email and timestamp, deterring unauthorized pre-signature distribution.
+   - Key-authenticated Model Context Protocol (MCP) server at `/api/mcp` for LLM agents to programmatically query envelope status, audit logs, and compliance records.
+8. **Production Deployment Readiness & Hardened Packaging (Cycle 8):**
+   - Comprehensive `/api/health` probe evaluating SQLite/PostgreSQL connectivity, object storage readiness, SMTP relay status, webhook dispatch queues, and Rekor connectivity.
+   - Hardened non-root container image (`uid 10001 docurama`), automated boot-time additive schema migrations (`docker-entrypoint.sh`), and enterprise Helm charts (`deploy/helm/docurama`).
+   - Postfix/SMTP retry daemon with exponential backoff and HMAC-SHA256 signed webhook delivery engine.
+9. **S3-Compatible Scalable Object Storage (Cycle 9):**
+   - Native dual-engine document store supporting local POSIX storage or S3-compatible backends (Apache-2.0 SeaweedFS, MinIO, Ceph, AWS S3, Cloudflare R2).
+   - Real SeaweedFS test integration in CI and Docker Compose (`--profile s3`).
+10. **Repriced Commercial Catalogue & Guided Onboarding (Cycle 10):**
+    - Multi-tier catalogue (SOLO 1-seat €19/mo, STARTER 5-seat €49/mo, BUSINESS 15-seat €149/mo, ENTERPRISE custom).
+    - Unused envelope rollover on renewal, committed-term billing discounts, and small team organizational groups.
+    - Public `/enterprise` intake pipeline (`/api/enterprise-lead`) with platform admin triage console.
 
 ---
 

@@ -12,11 +12,18 @@ export const metadata: Metadata = {
 };
 
 export default async function LegalDocsPage() {
-  const docs = await db.complianceDocument.findMany({
-    where: { isPublic: true },
-    orderBy: { title: "asc" },
-    include: { versions: { orderBy: { createdAt: "desc" }, take: 1 } },
-  });
+  // Public compliance surface: degrade to the existing empty state on a DB
+  // hiccup instead of 500ing (same class as F2, modeles-de-contrats).
+  let docs: Awaited<ReturnType<typeof db.complianceDocument.findMany>> = [];
+  try {
+    docs = await db.complianceDocument.findMany({
+      where: { isPublic: true },
+      orderBy: { title: "asc" },
+      include: { versions: { orderBy: { createdAt: "desc" }, take: 1 } },
+    });
+  } catch {
+    // Compliance library temporarily unavailable — empty state below.
+  }
 
   return (
     <div className="min-h-screen bg-background text-foreground">

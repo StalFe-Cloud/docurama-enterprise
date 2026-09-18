@@ -1,0 +1,25 @@
+# Public proof for the envelope sealed by signer-journey.yaml in the same
+# suite run (DOC-E2E0004 goes from SENT to COMPLETED there). Runs directly
+# after it in suite order (find | sort: signer-journey < signer-verify-seal),
+# so the code below verifies a seal created moments ago in a real browser —
+# the full loop: send -> sign -> seal -> publicly verifiable.
+#
+# Maestro note: the success screen's "Verify the seal" Link transition is
+# exercised manually in real Chromium (Maestro's bundled browser throws a
+# client-side exception on that SPA transition); this flow drives the same
+# target URL with a fresh navigation instead.
+url: ${MAESTRO_BASE_URL}/verify?code=DOC-E2E0004
+name: Sealed signer-journey envelope verifies on the public portal
+tags:
+  - e2e
+  - workspace
+  - signer
+  - verify
+---
+- launchApp
+
+- extendedWaitUntil:
+    visible: " ?Verified - cryptographic evidence found ?"
+    timeout: 30000
+- assertVisible: E2E Fixture — Service Agreement (signer journey)
+- assertVisible: E2E Testing

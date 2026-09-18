@@ -14,6 +14,7 @@ async function main() {
   console.log("Clearing existing data…");
   await Promise.all([
     db.user.deleteMany(), db.tenant.deleteMany(), db.plan.deleteMany(),
+    db.enterpriseLead.deleteMany(),
     db.control.deleteMany(), db.retentionPolicy.deleteMany(), db.consent.deleteMany(),
     db.incident.deleteMany(), db.accessReview.deleteMany(), db.risk.deleteMany(),
     db.change.deleteMany(), db.vendor.deleteMany(), db.restoreDrill.deleteMany(),
@@ -23,11 +24,15 @@ async function main() {
   ]);
 
   // ── Plans ──────────────────────────────────────────────────────────────
+  // Mirrors src/lib/plans.ts PLAN_CATALOG (cycle 10): SOLO added (Starter
+  // feature set at one seat), STARTER envelopes 25 → 50 with the 35-day
+  // weekends-on-us framing, outcome bullets on every plan.
   await db.plan.createMany({
     data: [
-      { code: "STARTER", name: "Starter", monthlyEur: 19, seatLimit: 3, envelopeLimit: 25, storageGb: 5, apiAccess: false, slaUptime: "99.5%", support: "Email support", features: "PAdES B-B sealing|Email signing|Public verify portal|2 templates" },
-      { code: "BUSINESS", name: "Business", monthlyEur: 79, seatLimit: 10, envelopeLimit: 250, storageGb: 50, apiAccess: true, slaUptime: "99.9%", support: "Priority email support", features: "PAdES B-LT sealing|SMS delivery|API + webhooks|Unlimited templates|DNS domain attestation" },
-      { code: "ENTERPRISE", name: "Enterprise", monthlyEur: 349, seatLimit: 100, envelopeLimit: 5000, storageGb: 500, apiAccess: true, slaUptime: "99.99%", support: "24/7 support + TAM", features: "PAdES B-LTA sealing|BYO certificate|SSO/SAML|Audit chain exports|Custom retention|Legal hold workflows" },
+      { code: "SOLO", name: "Solo", monthlyEur: 19, seatLimit: 1, envelopeLimit: 50, storageGb: 5, apiAccess: false, slaUptime: "99.5%", support: "Email support", features: "1 seat|50 envelopes/month|35 sending days a month — weekends on us|Envelope rollover on renewal (up to 50)|PAdES B-B sealing|Email signing|Public verify portal|2 templates", outcomes: "Sign client contracts yourself without paying for seats you don't have|Keep every unused envelope — a quiet month is never a lost month|Look professional from day one with branded signing pages and public verification" },
+      { code: "STARTER", name: "Starter", monthlyEur: 19, seatLimit: 3, envelopeLimit: 50, storageGb: 5, apiAccess: false, slaUptime: "99.5%", support: "Email support", features: "3 seats|50 envelopes/month|35 sending days a month — weekends on us|Envelope rollover on renewal (up to 50)|PAdES B-B sealing|Email signing|Public verify portal|2 templates", outcomes: "Get your first contracts signed this week, as a team|Never lose unused envelopes — they roll over on renewal|Give clients a verifiable, EU-compliant signing experience without IT help" },
+      { code: "BUSINESS", name: "Business", monthlyEur: 79, seatLimit: 10, envelopeLimit: 250, storageGb: 50, apiAccess: true, slaUptime: "99.9%", support: "Priority email support", features: "10 seats|250 envelopes/month (rollover on renewal, up to 250)|PAdES B-LT sealing|SMS + WhatsApp delivery|API + webhooks|Unlimited templates|DNS domain attestation", outcomes: "Run your whole contract operation in one place|Automate signing into your own tools with the REST API and webhooks|Send from your own verified domain so invitations carry your brand" },
+      { code: "ENTERPRISE", name: "Enterprise", monthlyEur: 349, seatLimit: 100, envelopeLimit: 5000, storageGb: 500, apiAccess: true, slaUptime: "99.99%", support: "24/7 support + TAM", features: "100 seats|5000 envelopes/month (rollover on renewal, up to 5000)|PAdES B-LTA sealing|BYO certificate|SSO/SAML|21 CFR Part 11 mode|Audit chain exports|Custom retention|Legal hold workflows", outcomes: "Pass audits — every signature manifests who signed, when and what it means|Keep counsel happy with legal holds, retention policies and evidence packs|Bring your own certificates and SSO, on EU infrastructure" },
     ],
   });
 
@@ -43,6 +48,7 @@ async function main() {
     { name: "Lumen Research Institute", slug: "lumen-research", plan: "STARTER", status: "TRIAL", storage: 980 },
     { name: "Atlas Freight Systems", slug: "atlas-freight", plan: "BUSINESS", status: "ACTIVE", storage: 41_300 },
     { name: "Verdant Agriculture", slug: "verdant-agri", plan: "STARTER", status: "ACTIVE", storage: 1_850 },
+    { name: "Lefebvre Consulting", slug: "lefebvre-consulting", plan: "SOLO", status: "ACTIVE", storage: 320 },
   ];
   const tenants: Record<string, string> = {};
   for (const t of tenantsData) {
@@ -74,6 +80,7 @@ async function main() {
     { email: "yuki@lumen-research.example", first: "Yuki", last: "Tanaka", role: "MEMBER", pw: "demo1234", tenant: "lumen-research", mrole: "OWNER", totp: false },
     { email: "dmitri@atlas-freight.example", first: "Dmitri", last: "Volkov", role: "MEMBER", pw: "demo1234", tenant: "atlas-freight", mrole: "ADMIN", totp: true },
     { email: "leila@verdant-agri.example", first: "Leila", last: "Haddad", role: "MEMBER", pw: "demo1234", tenant: "verdant-agri", mrole: "OWNER", totp: false },
+    { email: "arnaud@lefebvre.example", first: "Arnaud", last: "Lefebvre", role: "MEMBER", pw: "demo1234", tenant: "lefebvre-consulting", mrole: "OWNER", totp: false },
   ];
   const users: Record<string, string> = {};
   for (const u of usersData) {
@@ -91,22 +98,67 @@ async function main() {
   }
 
   // ── Subscriptions ──────────────────────────────────────────────────────
-  const subData: [string, string, number, number][] = [
-    ["stalfe", "ENTERPRISE", 349, 18], ["aurora-legal", "BUSINESS", 79, 7],
-    ["helios-energy", "ENTERPRISE", 349, 42], ["bayern-immo", "BUSINESS", 79, 5],
-    ["solstice-media", "STARTER", 19, 2], ["atlas-freight", "BUSINESS", 79, 9],
-    ["verdant-agri", "STARTER", 19, 2], ["corvus-mfg", "ENTERPRISE", 349, 24],
+  // Cycle 10: term/discount fields demo the promotional switch (committed
+  // 3/6/12-month terms at −5/−10/−15%); rollover fields demo envelope
+  // carry-forward on renewal.
+  const subData: [string, string, number, number, number, number, number][] = [
+    // slug, plan, mrr, seats, termMonths, discountPct, carriedForward
+    ["stalfe", "ENTERPRISE", 349, 18, 12, 15, 820],
+    ["aurora-legal", "BUSINESS", 79, 7, 6, 10, 140],
+    ["helios-energy", "ENTERPRISE", 349, 42, 12, 15, 2100],
+    ["bayern-immo", "BUSINESS", 79, 5, 3, 5, 0],
+    ["solstice-media", "STARTER", 19, 2, 1, 0, 12],
+    ["atlas-freight", "BUSINESS", 79, 9, 6, 10, 60],
+    ["verdant-agri", "STARTER", 19, 2, 1, 0, 0],
+    ["corvus-mfg", "ENTERPRISE", 349, 24, 12, 15, 0],
+    ["lefebvre-consulting", "SOLO", 19, 1, 3, 5, 18],
   ];
-  for (const [slug, plan, mrr, seats] of subData) {
+  for (const [slug, plan, mrr, seats, termMonths, discountPct, carried] of subData) {
     const failed = slug === "corvus-mfg";
     await db.subscription.create({
       data: {
         tenantId: tenants[slug], planCode: plan, status: failed ? "PAST_DUE" : "ACTIVE",
         mrrEur: mrr, seats, renewalAt: dFuture(10 + (mrr % 17)),
+        termMonths, discountPct, carriedForwardEnvelopes: carried,
         lastInvoiceAt: d(12), failedPayment: failed,
       },
     });
   }
+
+  // ── Small team groups (cycle 10) ───────────────────────────────────────
+  // StålFe runs Sales / Engineering / Legal groups inside the one workspace.
+  const teamDefs: [string, string[]][] = [
+    ["stalfe", ["Sales", "Engineering", "Legal"]],
+  ];
+  for (const [slug, names] of teamDefs) {
+    for (const n of names) {
+      await db.team.create({ data: { tenantId: tenants[slug], name: n } });
+    }
+  }
+  // Assign StålFe members to their groups (owner stays ungrouped).
+  const teamAssign: [string, string][] = [
+    ["marco@stalfe.example", "Sales"],
+    ["sofia@stalfe.example", "Engineering"],
+    ["lars@nordjarm.example", "Legal"],
+  ];
+  for (const [email, teamName] of teamAssign) {
+    const team = await db.team.findFirst({ where: { tenantId: tenants.stalfe, name: teamName } });
+    if (team) {
+      await db.member.updateMany({
+        where: { userId: users[email], tenantId: tenants.stalfe },
+        data: { teamId: team.id },
+      });
+    }
+  }
+
+  // ── Enterprise pipeline (cycle 10) ─────────────────────────────────────
+  await db.enterpriseLead.createMany({
+    data: [
+      { company: "Nordpharm Medical Devices", contactName: "Ingrid Sørensen", email: "ingrid@nordpharm.example", phone: "+45 20 11 22 33", seats: 40, monthlyEnvelopes: 1200, requirements: "Medical-device company; needs 21 CFR Part 11 mode, BYO qualified certificates, possible self-hosting later.", status: "CONTACTED", notes: "Call booked Thursday; pilot on NDAs + supplier agreements." },
+      { company: "Banque Helvetia Partenaires", contactName: "Élise Rochat", email: "e.rochat@helvetia-p.example", seats: 60, monthlyEnvelopes: 3500, requirements: "SSO/SAML mandatory, audit chain exports quarterly, data residency in EU/Paris confirmed.", status: "NEW" },
+      { company: "Voltalis Grid Services", contactName: "Marek Nowak", email: "marek@voltalis-grid.example", seats: 25, monthlyEnvelopes: 800, requirements: "Small team structures per country subsidiary; API integration with their ERP.", status: "QUALIFIED", notes: "Security questionnaire returned; DPA in review with their legal." },
+    ],
+  });
 
   // ── Envelopes ──────────────────────────────────────────────────────────
   const envTitles = [

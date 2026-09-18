@@ -119,21 +119,30 @@ model Invitation {
 }
 
 // Transactional mail ledger — every outbound system email (verification,
-// invites, reminders) is recorded here. Delivery transport (platform SMTP
-// credentials) is not wired yet, so messages are queued and inspectable
-// instead of silently dropped.
+// invites, reminders) is recorded here. When SMTP_URL is configured the
+// delivery engine (src/lib/mail.ts) drains QUEUED rows over SMTP with
+// retry/backoff; without it messages stay queued and inspectable in the
+// admin console (demo / air-gapped mode) instead of silently dropping.
 model MailOutbox {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   toEmail   String
-  fromEmail String   @default("Docurama Sign <notifications@docurama.eu>")
+  fromEmail String    @default("Docurama Sign <notifications@docurama.eu>")
   subject   String
-  template  String   // SIGNUP_VERIFICATION | TEAM_INVITE | REMINDER | TEST
-  status    String   @default("QUEUED") // QUEUED | SENT | FAILED
+  template  String    // SIGNUP_VERIFICATION | TEAM_INVITE | REMINDER | TEST
+  status    String    @default("QUEUED") // QUEUED | SENT | FAILED
   bodyText  String
   linkUrl   String?
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
   sentAt    DateTime?
 
+  // Delivery engine (SMTP transport). Attempts and backoff survive restarts:
+  // the worker (or an inline pass after send) re-reads QUEUED rows whose
+  // nextAttemptAt has come due. FAILED is terminal after 5 attempts.
+  attempts     Int       @default(0)
+  lastError    String?
+  nextAttemptAt DateTime? // null = due immediately
+
+  @@index([status, nextAttemptAt])
   @@index([toEmail])
 }
 
@@ -145,10 +154,32 @@ model Member {
   status    String   @default("ACTIVE")
   createdAt DateTime @default(now())
 
+  // Small team groups (cycle 10): optional grouping of members inside a
+  // company workspace (e.g. "Sales", "HR", "Legal"). Purely organisational —
+  // every member keeps full workspace visibility; teams drive filtering
+  // and structure for large tenants.
+  teamId String?
+  team   Team?   @relation(fields: [teamId], references: [id], onDelete: SetNull)
+
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@unique([userId, tenantId])
+}
+
+// Small team groups inside a company workspace. Created by workspace admins,
+// assigned per member; used to organise large tenants (Enterprise onboarding:
+// "some users want a small team group with the company").
+model Team {
+  id        String   @id @default(cuid())
+  tenantId  String
+  name      String
+  createdAt DateTime @default(now())
+
+  tenant  Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  members Member[]
+
+  @@unique([tenantId, name])
 }
 
 model Tenant {
@@ -171,6 +202,7 @@ model Tenant {
 
   invitations Invitation[]
   members      Member[]
+  teams        Team[]
   envelopes    Envelope[]
   templates    Template[]
   documents    Document[]
@@ -185,6 +217,8 @@ model Tenant {
   notificationSettings NotificationSettings?
   smsGateway    SmsGateway?
   mcpConfig     McpConfig?
+  evidenceKey   EvidenceKey?
+  transparencyEntries TransparencyEntry[]
 }
 
 // ─── Documents & Signing ──────────────────────────────────────────────────────
@@ -200,6 +234,7 @@ model Envelope {
   tenantId          String
   createdById       String
   documentId        String?   // the signed artefact; null while an envelope is a DRAFT
+  templateId        String?   // template the envelope was sent from (signer preview + evidence chain)
   status            String    @default("DRAFT") // DRAFT | SENT | PARTIALLY_SIGNED | COMPLETED | VOIDED | DECLINED | EXPIRED
   message           String?
   pages             Int       @default(1)
@@ -213,10 +248,15 @@ model Envelope {
   lastRemindedAt    DateTime?
   autoRemind        Boolean   @default(false) // per-envelope reminder job (user-enabled)
   reminderCount     Int       @default(0)
+  // ── Evidence federation (roadmap #1 + self-hosted attestation) ──
+  verifiedSenderDomain String? // sender email domain was DNS-TXT-verified at seal time
+  attestedAt        DateTime? // when the minimal fingerprint was pushed to the public portal
+  attestStatus      String?   // PUSHED | FAILED | SKIPPED
 
   tenant     Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   createdBy  User      @relation("createdDocs", fields: [createdById], references: [id])
   document   Document? @relation("envelopeDocument", fields: [documentId], references: [id])
+  template  Template? @relation("envelopeTemplate", fields: [templateId], references: [id])
   recipients Recipient[]
   events     EnvelopeEvent[]
 
@@ -246,7 +286,7 @@ model EnvelopeEvent {
   envelopeId String
   at         DateTime @default(now())
   actor      String
-  action     String // CREATED | SENT | VIEWED | DELIVERED | REMINDED | SIGNED | DECLINED | VOIDED | SEALED | DELEGATED | CORRECTION_REQUESTED
+  action     String // CREATED | SENT | VIEWED | DELIVERED | DOCUMENT_VIEWED | REMINDED | SIGNED | DECLINED | VOIDED | SEALED | DELEGATED | CORRECTION_REQUESTED
   detail     String?
   ipHash     String?
 
@@ -278,6 +318,7 @@ model Template {
   fields       String? // JSON: placeholder schema [{ key, label, type, required }]
   libraryKey   String? @unique // stable id from src/lib/templates/**, drives idempotent sync
   isBuiltIn    Boolean @default(false)
+  envelopes    Envelope[] @relation("envelopeTemplate")
   version      String  @default("1.0.0")
   sourceNotes  String? // JSON: statutory references and last legal review date
 
@@ -354,6 +395,151 @@ model Domain {
   lastCheckNote  String?
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+// ─── Evidence federation ──────────────────────────────────────────────────────
+// The per-tenant evidence key signs evidence-pack manifests and public-portal
+// attestations. It is a real RSA-2048 key pair with a self-signed X.509
+// certificate; when the tenant has a DNS-TXT-verified sending domain, that
+// domain is embedded as a subjectAltName so the certificate carries the
+// domain-control proof (checked at issuance) with it.
+model EvidenceKey {
+  id             String   @id @default(cuid())
+  tenantId       String   @unique
+  keyId          String   @unique // stable public identifier, ek_<hex>
+  algorithm      String   @default("RSA-2048")
+  certificatePem String
+  publicKeyPem   String
+  privateKeyPem  String // instance-held only; lives in the operator's own database file
+  thumbprint     String // SHA-256 of the certificate DER, lowercase hex
+  sanDomain      String? // DNS-verified sending domain embedded as SAN at issuance
+  createdAt      DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+// Portal side (the public verification portal's registry). An "instance" is any
+// Docurama deployment - cloud or self-hosted - that pushed attestations.
+// Registration is trust-on-first-use: the first key that claims an identity is
+// pinned; a different key presenting the same thumbprint is rejected.
+model PortalInstance {
+  id              String   @id @default(cuid())
+  keyThumbprint   String   @unique
+  label           String
+  verifiedDomain  String?
+  certificatePem  String
+  publicKeyPem    String
+  firstSeenAt     DateTime @default(now())
+  lastSeenAt      DateTime @default(now())
+  attestationCount Int     @default(0)
+
+  attestations PortalAttestation[]
+}
+
+// Portal side: the minimal fingerprint pushed for public verification.
+// Deliberately free of personal data - no signer names, no emails, no tenant
+// names, no document bytes. The document itself never leaves the instance.
+model PortalAttestation {
+  id                 String   @id @default(cuid())
+  code               String   @unique
+  sha256             String
+  sealedAt           DateTime
+  completedAt        DateTime?
+  conformance        String?
+  pages              Int      @default(1)
+  signerCount        Int      @default(0)
+  verifiedDomain     String?
+  instanceThumbprint String
+  receivedAt         DateTime @default(now())
+  rawPayload         String // exact canonical JSON as received, for audit
+  tSeq               Int? // instance transparency-chain position the instance claimed (null = legacy push)
+  tEntryHash         String? // instance chain entry hash; first-seen value is the witnessed commitment
+
+  instance PortalInstance @relation(fields: [instanceThumbprint], references: [keyThumbprint], onDelete: Cascade)
+
+  @@index([instanceThumbprint])
+}
+
+// ─── Transparency registry (instance side) ───────────────────────────────────
+// A per-tenant append-only hash chain — a miniature Certificate Transparency
+// log. Every sealed envelope appends one entry committing to its seal
+// fingerprint. Entries link backward (prevHead); rewriting any entry changes
+// every subsequent head, which contradicts the heads the public portal
+// witnessed. Evidence packs embed the entry + the segment to the current head
+// + a signed checkpoint, giving third parties an offline inclusion proof.
+
+model TransparencyEntry {
+  id          String   @id @default(cuid())
+  tenantId    String
+  seq         Int // per-tenant sequence, 1-based
+  envelopeId  String? // null never happens today, but keeps the log append-only on re-seal
+  publicCode  String
+  payloadHash String // SHA-256 of the canonical seal commitment
+  prevHead    String // head of entry seq-1 ("0"×64 at genesis)
+  head        String // SHA-256 of canonical {seq, payloadHash, prevHead, at}
+  at          DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, seq])
+  @@unique([tenantId, envelopeId, payloadHash])
+  @@index([tenantId, seq])
+}
+
+// ─── Transparency registry (portal side) ─────────────────────────────────────
+// The public verification portal runs its own append-only log: every accepted
+// attestation appends one entry, witnessing the instance's claimed chain
+// position. The checkpoint endpoint signs the current head; third-party
+// monitors can poll it and detect a shrinking or rewritten log (the same
+// gossip model as Certificate Transparency, scaled down).
+
+model PortalLogEntry {
+  id                 String   @id @default(cuid())
+  seq                Int @unique // global sequence, 1-based
+  code               String
+  instanceThumbprint String
+  sha256             String
+  instanceEntryHash  String? // the instance-side chain hash that was witnessed
+  prevHead           String
+  head               String // SHA-256 of canonical {seq, code, instanceThumbprint, sha256, instanceEntryHash, prevHead, at}
+  at                 DateTime @default(now())
+
+  @@index([code])
+  @@index([seq])
+}
+
+// The portal's own signing key for transparency checkpoints. Generated once
+// per deployment; monitors pin it on first sight (TOFU) and can then hold the
+// portal operator to every checkpoint they ever served.
+model PortalKey {
+  id            String   @id @default("portal")
+  algorithm     String   @default("RSA-2048")
+  publicKeyPem  String
+  privateKeyPem String
+  createdAt     DateTime @default(now())
+}
+
+// Third-party witnessing of the portal key in Sigstore Rekor (public,
+// OpenSSF-operated, free, no account): at submit time the portal key signs a
+// statement committing to its own fingerprint, and the resulting hashedrekord
+// entry is stored with its inclusion proof. A substituted or rogue portal key
+// becomes publicly provable — the neutral log contradicts the portal's claim.
+// One row per witnessed key version; absence = not yet witnessed (offline,
+// firewalled or disabled deployments keep working, TOFU-only).
+model RekorWitness {
+  id             String   @id @default("portal-key") // subject + key version
+  subject        String   @default("portal-key")
+  keyFingerprint String // SHA-256 of the portal key's SPKI DER
+  rekorUrl       String // base URL of the log the entry lives in
+  entryUUID      String // Rekor entry id (= hash of the entry body)
+  logIndex       Int
+  treeSize       Int? // at inclusion-proof fetch time
+  integratedTime DateTime
+  statement      String // canonical JSON — exactly the bytes signed and hashed
+  statementHash  String // SHA-256 of the statement, what the hashedrekord commits to
+  signature      String // base64 RSA-SHA-256 over the statement bytes
+  inclusionProof String? // JSON: Rekor's {checkpoint, hashes, logIndex, rootHash, treeSize}
+  createdAt      DateTime @default(now())
 }
 
 // ─── Production settings: eSign, notifications, SMS, MCP ──────────────────────
@@ -491,7 +677,7 @@ model McpConfig {
 
 model Plan {
   id          String  @id @default(cuid())
-  code        String  @unique // STARTER | BUSINESS | ENTERPRISE
+  code        String  @unique // SOLO | STARTER | BUSINESS | ENTERPRISE
   name        String
   monthlyEur  Int
   seatLimit   Int
@@ -501,6 +687,9 @@ model Plan {
   slaUptime   String  @default("99.5%")
   support     String
   features    String // pipe-separated
+  // Outcome bullets ("with this plan you'll …") — replaces the old
+  // "most popular" highlight with per-plan value framing.
+  outcomes    String? // pipe-separated
   active      Boolean @default(true)
 }
 
@@ -516,7 +705,34 @@ model Subscription {
   lastInvoiceAt  DateTime?
   failedPayment  Boolean   @default(false)
 
+  // Billing term (cycle 10 promotional switch): 1 (no engagement), 3, 6 or
+  // 12 months, with an incremental committed discount (0/5/10/15%).
+  termMonths           Int @default(1)
+  discountPct          Int @default(0)
+  // Envelope rollover: unused envelopes carried into the current period on
+  // renewal (capped at one monthly allowance — see src/lib/billing.ts).
+  carriedForwardEnvelopes Int @default(0)
+
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+// Enterprise pipeline (cycle 10): prospects from the /enterprise onboarding
+// page. Platform admins triage leads in the admin console (Leads section);
+// each lead is a potential custom Enterprise rollout (SSO, BYO certs,
+// self-hosting, high-volume quotas).
+model EnterpriseLead {
+  id          String    @id @default(cuid())
+  company     String
+  contactName String
+  email       String
+  phone       String?
+  seats       Int       @default(0) // expected seat count
+  monthlyEnvelopes Int  @default(0) // expected volume
+  requirements String   @default("") // free text: SSO, Part 11, self-hosting…
+  status      String    @default("NEW") // NEW | CONTACTED | QUALIFIED | WON | LOST
+  notes       String    @default("") // admin-visible triage notes
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 }
 
 // ─── Legal, Privacy & Compliance ──────────────────────────────────────────────
@@ -733,12 +949,17 @@ model WebhookEndpoint {
   id            String    @id @default(cuid())
   tenantId      String
   url           String
-  events        String // pipe-separated event list
+  events        String // pipe-separated event list, "*" subscribes to all
   status        String    @default("ACTIVE") // ACTIVE | PAUSED | FAILING
   secretMasked  String
   successRate   Int       @default(100)
   lastDeliveryAt DateTime?
   createdAt     DateTime  @default(now())
+
+  // Raw signing secret (whsec_…), kept retrievable because HMAC verification
+  // on the receiver side needs the exact bytes. Never returned by any API -
+  // only the masked preview and the one-time reveal at creation.
+  secret        String?
 
   tenant      Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   deliveries  WebhookDelivery[]
@@ -753,7 +974,18 @@ model WebhookDelivery {
   success    Boolean
   at         DateTime @default(now())
 
+  // Retry engine: the exact payload that was POSTed is snapshotted so the
+  // worker can re-deliver byte-identical bodies (receivers verify a stable
+  // HMAC). Nullable for additive migration: pre-engine rows have no snapshot
+  // and are skipped by the retry pass. attempts < 5 with nextAttemptAt in
+  // the past = due for retry.
+  payload      String?
+  attempts     Int       @default(1)
+  nextAttemptAt DateTime?
+
   endpoint WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+
+  @@index([success, attempts, nextAttemptAt])
 }
 
 // ─── Audit & Ops ──────────────────────────────────────────────────────────────

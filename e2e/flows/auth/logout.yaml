@@ -1,0 +1,34 @@
+# Auth — account menu sign-out returns to the sign-in screen.
+url: ${MAESTRO_BASE_URL}/login
+name: Sign out returns to the sign-in screen
+tags:
+  - e2e
+  - auth
+---
+- launchApp
+
+- extendedWaitUntil:
+    visible: Sign in to your portal
+    timeout: 30000
+
+- tapOn:
+    id: email
+- inputText: e2e@docurama.eu
+- tapOn:
+    id: password
+- inputText: "e2ePass1234!"
+- tapOn: " ?Sign in securely ?"
+
+- extendedWaitUntil:
+    visible: "Welcome back.*"
+    timeout: 15000
+
+# Account menu (avatar shows the signed-in name)
+- tapOn: Ella Tester
+- assertVisible: " ?Sign out ?"
+- tapOn: " ?Sign out ?"
+
+# Session gone — back to the sign-in form
+- extendedWaitUntil:
+    visible: Sign in to your portal
+    timeout: 15000

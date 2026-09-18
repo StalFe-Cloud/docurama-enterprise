@@ -1,0 +1,32 @@
+# Workspace — Templates catalog: the 8 statutory Droit Français templates.
+url: ${MAESTRO_BASE_URL}/login
+name: Templates catalog lists statutory French templates
+tags:
+  - e2e
+  - workspace
+  - templates
+---
+- launchApp
+
+- extendedWaitUntil:
+    visible: Sign in to your portal
+    timeout: 30000
+
+- tapOn:
+    id: email
+- inputText: e2e@docurama.eu
+- tapOn:
+    id: password
+- inputText: "e2ePass1234!"
+- tapOn: " ?Sign in securely ?"
+- extendedWaitUntil:
+    visible: "Welcome back.*"
+    timeout: 15000
+
+- tapOn: " ?Templates ?"
+- extendedWaitUntil:
+    visible: " ?Use template ?"
+    timeout: 10000
+
+# Statutory badge on the built-in French templates (icon + text)
+- assertVisible: " ?Droit Français ?"

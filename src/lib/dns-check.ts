@@ -78,3 +78,68 @@ export async function verifySendingDomain(domain: string, token: string): Promis
     records: result.records,
   };
 }
+
+/* ── Email deliverability posture ──────────────────────────────────────────────
+ *
+ * Domain verification (above) proves ownership. Posture check answers the
+ * neighbouring question a sender actually cares about: "will my mail
+ * authenticate?" — SPF and DMARC are queried generically (their records live
+ * at well-known names), DKIM is best-effort because selectors are
+ * provider-specific; we probe the common `default._domainkey` and report
+ * "unknown" rather than a false negative when it is absent.
+ */
+
+/** Find the SPF record among a domain's TXT records (at most one is legal). */
+export function parseSpfRecord(records: string[]): string | null {
+  const spf = records.find((r) => r.trim().toLowerCase().startsWith("v=spf1"));
+  return spf ?? null;
+}
+
+/** SPF enforcement level from the `all` mechanism. */
+const SPF_POLICIES: Record<string, "strict" | "soft" | "neutral" | "permissive"> = {
+  "-": "strict", "~": "soft", "?": "neutral", "+": "permissive",
+};
+export function spfPolicy(spf: string | null): "strict" | "soft" | "neutral" | "permissive" | "none" {
+  if (!spf) return "none";
+  const m = spf.match(/([+\-~?])all\b/i);
+  if (!m) return "none";
+  return SPF_POLICIES[m[1]] ?? "none";
+}
+
+/** Find the DMARC policy value among _dmarc TXT records. */
+export function parseDmarcPolicy(records: string[]): string | null {
+  const dmarc = records.find((r) => r.trim().toLowerCase().startsWith("v=dmarc1"));
+  if (!dmarc) return null;
+  return dmarc.match(/\bp=([a-z]+)/i)?.[1]?.toLowerCase() ?? null;
+}
+
+export type EmailPosture = {
+  domain: string;
+  spf: { found: boolean; policy: string };
+  dmarc: { found: boolean; policy: string | null };
+  dkim: { status: "found" | "not-found" | "unknown"; note: string };
+};
+
+/** Live posture check for a domain (SPF + DMARC + best-effort DKIM probe). */
+export async function checkEmailPosture(domain: string): Promise<EmailPosture> {
+  const host = domain.toLowerCase().trim();
+  const [rootRes, dmarcRes, dkimRes] = await Promise.all([
+    lookupTxt(host),
+    lookupTxt(`_dmarc.${host}`),
+    lookupTxt(`default._domainkey.${host}`),
+  ]);
+  const spf = rootRes.ok ? parseSpfRecord(rootRes.records) : null;
+  return {
+    domain: host,
+    spf: { found: !!spf, policy: spfPolicy(spf) },
+    dmarc: {
+      found: dmarcRes.ok && dmarcRes.records.some((r) => r.trim().toLowerCase().startsWith("v=dmarc1")),
+      policy: dmarcRes.ok ? parseDmarcPolicy(dmarcRes.records) : null,
+    },
+    dkim: !dkimRes.ok
+      ? { status: "unknown", note: "DNS lookup failed" }
+      : dkimRes.records.length > 0
+        ? { status: "found", note: "Selector `default` publishes a key" }
+        : { status: "unknown", note: "No key at `default._domainkey` — DKIM selectors are provider-specific, this is not a failure" },
+  };
+}

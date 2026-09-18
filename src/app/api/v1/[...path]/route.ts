@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { createHash } from "crypto";
 import { db } from "@/lib/db";
 import { publicRecipient, iso, isos, jsonError, jsonOk } from "@/lib/serializers";
+import { buildEvidencePack, recordEvidencePackExport, EvidencePackError } from "@/lib/evidence-pack";
 
 /**
  * Public integration API (v1) - the surface documented in Settings → API.
@@ -12,8 +13,11 @@ import { publicRecipient, iso, isos, jsonError, jsonOk } from "@/lib/serializers
  *
  *   GET /api/v1/envelopes?status=&page=&perPage=
  *   GET /api/v1/envelopes/{idOrCode}
+ *   GET /api/v1/envelopes/{idOrCode}/evidence-pack   (ZIP, sealed envelopes)
  *   GET /api/v1/templates
- *   GET /api/v1/verify/{code}          (public - no key required)
+ *   GET /api/v1/verify/{code}          (public - no key required; falls back
+ *                                       to pushed attestations for codes that
+ *                                       belong to self-hosted instances)
  */
 
 export const dynamic = "force-dynamic";
@@ -46,7 +50,41 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         where: { publicCode: code },
         include: { recipients: true, tenant: { select: { name: true } } },
       });
-      if (!e) return jsonOk({ result: "NOT_FOUND", code });
+      if (!e) {
+        // Not a local envelope — maybe a self-hosted instance attested this
+        // code to the portal. Honest, clearly-labeled fallback: the portal
+        // vouches for the pushed fingerprint, not for a local document.
+        const att = await db.portalAttestation.findUnique({
+          where: { code },
+          include: { instance: true },
+        });
+        if (att) {
+          return jsonOk({
+            result: "VERIFIED_ATTESTED", code,
+            attestation: {
+              sha256: att.sha256,
+              sealedAt: att.sealedAt.toISOString(),
+              completedAt: att.completedAt?.toISOString() ?? null,
+              conformance: att.conformance,
+              pages: att.pages,
+              signerCount: att.signerCount,
+              verifiedDomain: att.verifiedDomain,
+              instance: {
+                label: att.instance.label,
+                firstSeenAt: att.instance.firstSeenAt.toISOString(),
+                attestationCount: att.instance.attestationCount,
+              },
+              transparency: {
+                chainSeq: att.tSeq,
+                chainEntryHash: att.tEntryHash,
+                proof: `/api/transparency/proof/${att.code}`,
+                checkpoint: "/api/transparency/checkpoint",
+              },
+            },
+          });
+        }
+        return jsonOk({ result: "NOT_FOUND", code });
+      }
       if (e.status === "VOIDED") {
         return jsonOk({ result: "VOIDED", code, voidedAt: e.voidedAt?.toISOString() ?? null, voidReason: e.voidReason });
       }
@@ -60,6 +98,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           completedAt: e.completedAt?.toISOString() ?? null,
           conformance: e.conformanceLevel, sha256: e.sha256,
           tenantName: e.tenant.name, pages: e.pages,
+          verifiedSenderDomain: e.verifiedSenderDomain,
           signers: e.recipients.filter((r) => r.status === "SIGNED").map(publicRecipient),
         },
       });
@@ -114,10 +153,26 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           createdAt: e.createdAt.toISOString(),
           lastRemindedAt: e.lastRemindedAt?.toISOString() ?? null,
           autoRemind: e.autoRemind, reminderCount: e.reminderCount,
+          attestedAt: e.attestedAt?.toISOString() ?? null,
+          verifiedSenderDomain: e.verifiedSenderDomain,
         },
         tenantName: e.tenant.name,
         recipients: e.recipients.map(publicRecipient),
         events: isos(e.events),
+      });
+    }
+
+    // Signed evidence pack (ZIP) — sealed envelopes of this tenant only.
+    if (resource === "envelopes" && rest.length === 2 && rest[1] === "evidence-pack") {
+      const key = rest[0];
+      const pack = await buildEvidencePack(key, tenantId);
+      await recordEvidencePackExport(key, tenantId, "API key");
+      return new Response(new Uint8Array(pack.bytes), {
+        headers: {
+          "content-type": "application/zip",
+          "content-disposition": `attachment; filename="${pack.filename}"`,
+          "cache-control": "no-store",
+        },
       });
     }
 
@@ -134,6 +189,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     return jsonError(`Unknown v1 resource: /${path.join("/")}`, 404);
   } catch (err) {
     if (err instanceof Response) return err;
+    if (err instanceof EvidencePackError) return jsonError(err.message, err.status);
     console.error("[api v1]", err);
     return jsonError("Request failed", 500);
   }

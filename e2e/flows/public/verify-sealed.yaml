@@ -1,0 +1,22 @@
+# Public verify portal — seeded sealed fixture (DOC-E2E0002) must verify.
+# The fixture is created by e2e/seed.ts; this flow depends on it.
+url: ${MAESTRO_BASE_URL}/verify
+name: Verify portal confirms a sealed document
+tags:
+  - e2e
+  - public
+  - verify
+---
+- launchApp
+
+- assertVisible: Verify a document
+
+- tapOn:
+    id: vcode
+- inputText: DOC-E2E0002
+- tapOn: " ?Verify ?"
+
+- extendedWaitUntil:
+    visible: " ?Verified - cryptographic evidence found ?"
+    timeout: 20000
+- assertVisible: E2E Fixture — Supply Agreement (sealed)

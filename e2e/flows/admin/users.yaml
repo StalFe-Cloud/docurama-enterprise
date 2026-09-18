@@ -1,0 +1,32 @@
+# Admin — users directory renders and search narrows it.
+url: ${MAESTRO_BASE_URL}/login
+name: Admin users directory lists and searches users
+tags:
+  - e2e
+  - admin
+  - users
+---
+- launchApp
+
+- extendedWaitUntil:
+    visible: Sign in to your portal
+    timeout: 30000
+
+- tapOn:
+    id: email
+- inputText: e2e-admin@docurama.eu
+- tapOn:
+    id: password
+- inputText: "e2eAdmin1234!"
+- tapOn: " ?Sign in securely ?"
+- extendedWaitUntil:
+    visible: "Platform overview.*"
+    timeout: 15000
+
+- tapOn: Users
+- extendedWaitUntil:
+    visible: Search by name, email or tenant…
+    timeout: 10000
+
+# The E2E seed account is in the directory
+- assertVisible: e2e@docurama.eu

@@ -177,6 +177,6 @@ Go-live:
 ## 9. Scale-out path (when single-node SQLite is no longer enough)
 
 1. **Database** — `DATABASE_URL` to Postgres (Prisma supports the switch; schema is portable).
-2. **Documents** — move artifacts to S3-compatible EU object storage (Scaleway Paris / OVH Gravelines).
+2. **Documents** — S3-compatible object storage is built in (set the `S3_*` env — see `docs/STORAGE-OPTIONS.md`); EU choices: self-hosted SeaweedFS, Scaleway Paris / OVH Gravelines, or Cloudflare R2 (free tier, zero egress).
 3. **Jobs** — reminder platform job and webhook dispatcher move to a queue worker (the reminder policy model already separates manual / per-envelope / platform-scheduled runs).
 4. **App** — stateless app tier behind a load balancer; sessions already live in the database.

@@ -1,0 +1,44 @@
+# Public — the verify portal serves attestations pushed by self-hosted
+# instances. Uses the seeded fixture DOC-E2EATST (instance "Acme Corp
+# (self-hosted fixture)", DNS-verified domain acme-corp.example).
+url: ${MAESTRO_BASE_URL}/verify
+name: Public verify portal serves self-hosted attestations honestly
+tags:
+  - e2e
+  - public
+  - verify
+  - attestation
+---
+- launchApp
+
+- assertVisible: Verify a document
+
+- tapOn:
+    id: vcode
+- inputText: DOC-E2EATST
+- tapOn: " ?Verify ?"
+
+- extendedWaitUntil:
+    visible: " ?Verified - attested by a self-hosted Docurama instance ?"
+    timeout: 20000
+- assertVisible: "Acme Corp (self-hosted fixture)"
+
+# The domain badge sits below the fold on 1440x1000 — bring it into view
+- scrollUntilVisible:
+    element: " ?Sender domain verified via DNS TXT: acme-corp.example ?"
+    direction: DOWN
+    timeout: 15000
+- assertVisible: " ?Sender domain verified via DNS TXT: acme-corp.example ?"
+
+# The honest labeling: fingerprint only, no local document claim
+- assertVisible: "Signers on record"
+- assertVisible: "SHA-256 digest (as attested)"
+
+# Transparency registry: the fixture is witnessed in the append-only log
+- assertVisible: "Transparency registry"
+- assertVisible: "Entry #1 in the public append-only log"
+- scrollUntilVisible:
+    element: " ?/api/transparency/proof/DOC-E2EATST ?"
+    direction: DOWN
+    timeout: 15000
+- assertVisible: " ?/api/transparency/proof/DOC-E2EATST ?"

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Building2, Plus, ShieldCheck, Globe, KeyRound, LogOut, Trash2, Check, RefreshCw, Landmark, Save,
+  Building2, Plus, ShieldCheck, Globe, KeyRound, LogOut, Trash2, Check, RefreshCw, Landmark, Save, Activity,
 } from "lucide-react";
 import { apiGet, apiPost } from "@/lib/client";
 import { ConfirmDialog, CopyableCode, ErrorState, StatusBadge, fmtDate, cn } from "@/components/portal/shared";
@@ -34,6 +34,14 @@ type AccountData = {
   domains: { id: string; domain: string; status: string; token: string; verifiedAt: string | null; lastCheckedAt: string | null; lastCheckNote: string | null }[];
   part11: { part11Mode: boolean; requireReauth: boolean; signatureLevel: string; consentVersion: string };
   isAdmin: boolean;
+};
+
+/** Email deliverability posture for a sending domain (domain.posture op). */
+type Posture = {
+  domain: string;
+  spf: { found: boolean; policy: string };
+  dmarc: { found: boolean; policy: string | null };
+  dkim: { status: "found" | "not-found" | "unknown"; note: string };
 };
 
 export function AccountTab() {
@@ -184,6 +192,8 @@ function DomainVerificationCard({ data }: { data: AccountData }) {
   const [dialog, setDialog] = useState(false);
   const [domain, setDomain] = useState("");
   const [verifying, setVerifying] = useState<string | null>(null);
+  const [posturing, setPosturing] = useState<string | null>(null);
+  const [postures, setPostures] = useState<Record<string, Posture>>({});
 
   return (
     <Card>
@@ -215,6 +225,21 @@ function DomainVerificationCard({ data }: { data: AccountData }) {
                     <StatusBadge status={d.status} />
                   </div>
                   <div className="flex items-center gap-2">
+                    <Button
+                      size="sm" variant="outline" className="h-10"
+                      disabled={posturing === d.id}
+                      onClick={async () => {
+                        setPosturing(d.id);
+                        const res = await act
+                          .mutateAsync({ op: "domain.posture", id: d.id })
+                          .catch(() => undefined);
+                        if (res && res.posture) setPostures((p) => ({ ...p, [d.id]: res.posture as Posture }));
+                        setPosturing(null);
+                      }}
+                    >
+                      <Activity className={cn("h-4 w-4", posturing === d.id && "animate-spin")} aria-hidden />
+                      {posturing === d.id ? "Checking SPF / DMARC…" : "Email posture"}
+                    </Button>
                     {d.status !== "VERIFIED" && (
                       <Button
                         size="sm" variant="outline" className="h-10"
@@ -250,6 +275,29 @@ function DomainVerificationCard({ data }: { data: AccountData }) {
                 )}
                 {d.lastCheckNote && <p className="mt-2 text-xs text-muted-foreground">{d.lastCheckNote}</p>}
                 {d.verifiedAt && <p className="mt-2 text-xs text-success">Verified {fmtDate(d.verifiedAt)} - authenticated sending enabled.</p>}
+                {postures[d.id] && (
+                  <div className="mt-3 grid gap-2 rounded-lg border bg-muted/30 p-3 sm:grid-cols-3" data-testid={`posture-${d.domain}`}>
+                    <div>
+                      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">SPF</p>
+                      <p className={cn("text-sm font-medium", postures[d.id].spf.found ? "text-success" : "text-destructive")}>
+                        {postures[d.id].spf.found ? `Present · ${postures[d.id].spf.policy}` : "No record"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">DMARC</p>
+                      <p className={cn("text-sm font-medium", postures[d.id].dmarc.found ? "text-success" : "text-warning")}>
+                        {postures[d.id].dmarc.found ? `Present · p=${postures[d.id].dmarc.policy ?? "none"}` : "No record"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">DKIM</p>
+                      <p className="text-sm font-medium text-muted-foreground">
+                        {postures[d.id].dkim.status === "found" ? "Key at default._domainkey" : "Selector unknown"}
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">{postures[d.id].dkim.note}</p>
+                    </div>
+                  </div>
+                )}
               </li>
             ))}
           </ul>

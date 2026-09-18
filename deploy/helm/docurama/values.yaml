@@ -1,0 +1,146 @@
+# Default values for the Docurama Helm chart.
+#
+# Topology: ONE replica by default. The app embeds a background worker
+# (mail + webhook retries) and, in the default SQLite mode, the database
+# lives on the persistent volume — running >1 replica against the same
+# volume corrupts it. Scale-out (Postgres + object storage) is documented
+# in PRODUCTION-PLAN §9; until then keep replicaCount: 1.
+
+image:
+  repository: ghcr.io/stalfe-cloud/docurama
+  # Overrides the chart appVersion when pinning.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+replicaCount: 1
+
+# ── Persistence (SQLite mode) ─────────────────────────────────────────────────
+# One PVC carries both the SQLite file and the document tree. For an external
+# Postgres + S3 topology, set persistence.enabled: false and provide
+# DATABASE_URL / storage config via extraEnv / existingSecret.
+persistence:
+  enabled: true
+  storageClass: ""
+  accessModes:
+    - ReadWriteOnce
+  size: 20Gi
+  # Mount sub-paths: db file under /app/db, documents under /app/storage.
+  dbSubPath: db
+  storageSubPath: storage
+
+# ── Mail delivery ────────────────────────────────────────────────────────────
+# Unset smtpUrl = outbox-only mode (invitations queue in the admin console).
+# Provide via an existing Secret in production:
+#   kubectl create secret generic docurama-smtp --from-literal=SMTP_URL='smtp://user:pass@relay:587'
+smtp:
+  existingSecret: ""
+  secretKey: SMTP_URL
+
+# ── S3 object storage (multitenant / scale-out) ──────────────────────────────
+# Disabled by default: documents live on the PVC (STORAGE_DIR). Enable to
+# store document bytes in S3-compatible storage instead — SeaweedFS (see
+# docs/STORAGE-OPTIONS.md), MinIO, Garage, Ceph RGW, AWS S3, Cloudflare R2…
+# Credentials come from an existing Secret (never plain values.yaml):
+#   kubectl create secret generic docurama-s3 \
+#     --from-literal=S3_ACCESS_KEY_ID=… --from-literal=S3_SECRET_ACCESS_KEY=…
+s3:
+  enabled: false
+  # S3-compatible endpoint, e.g. http://seaweedfs-s3.monitoring:8333.
+  # Empty = the AWS default endpoint for the region.
+  endpoint: ""
+  bucket: docurama
+  region: us-east-1
+  # Create the bucket on first use when it does not exist (HeadBucket →
+  # CreateBucket). Set false when the bucket is managed outside the app.
+  autoCreateBucket: true
+  existingSecret: docurama-s3
+  # Path-style addressing (needed by SeaweedFS/MinIO/Garage/R2; AWS native
+  # uses virtual-hosted style — set false only for AWS without an endpoint).
+  forcePathStyle: true
+
+# ── Service / ingress ────────────────────────────────────────────────────────
+service:
+  type: ClusterIP
+  port: 3000
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations: {}
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: app.docurama.eu
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+    # - secretName: docurama-tls
+    #   hosts:
+    #     - app.docurama.eu
+
+# ── Application configuration ────────────────────────────────────────────────
+# ROOT_DOMAIN drives the vanity sub-domain routing (verify./docs./status./…).
+# The chart sets ROOT_DOMAIN from ingress.hosts[0].host's registrable domain
+# ONLY if you leave rootDomain empty; set it explicitly when in doubt.
+rootDomain: ""
+
+# Extra env vars (lowest precedence). Provide DATABASE_URL here for an
+# external Postgres, e.g.:
+#   - name: DATABASE_URL
+#     value: postgresql://user:pass@postgres:5432/docurama
+extraEnv: []
+#  - name: DOCURAMA_WORKER
+#    value: "off"
+
+# Env vars from an existing Secret (highest precedence, e.g. SMTP creds when
+# not using smtp.existingSecret).
+extraEnvFrom: []
+#  - secretRef:
+#      name: docurama-secrets
+
+# ── Probes ───────────────────────────────────────────────────────────────────
+# /api/health returns 503 when the database or storage is broken — readiness
+# pulls traffic, liveness restarts the pod.
+livenessProbe:
+  initialDelaySeconds: 25
+  periodSeconds: 30
+  timeoutSeconds: 5
+  failureThreshold: 3
+readinessProbe:
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+# ── Resources / scheduling ───────────────────────────────────────────────────
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    memory: 1Gi
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false # writable /tmp needed by pdfjs + OCR
+  capabilities:
+    drop:
+      - ALL
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Skip the entrypoint's prisma db push (dedicated migration Job instead).
+skipDbPush: false

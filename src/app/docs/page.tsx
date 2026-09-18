@@ -208,7 +208,7 @@ export default function DocsPage() {
                           </span>
                           <code className="font-mono text-[13px]">{ep.path}</code>
                           <span className="ml-auto rounded-full border px-2.5 py-0.5 text-[11px] text-muted-foreground">
-                            {ep.auth === "api-key" ? "X-API-Key" : ep.auth === "session" ? "session" : "public"}
+                            {ep.auth === "api-key" ? "X-API-Key" : ep.auth === "session" ? "session" : ep.auth === "signature" ? "signed payload" : "public"}
                           </span>
                         </div>
                         <p className="mt-2.5 text-sm leading-relaxed text-muted-foreground">{ep.summary}</p>

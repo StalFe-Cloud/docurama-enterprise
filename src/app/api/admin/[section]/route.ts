@@ -1,10 +1,9 @@
 import { NextRequest } from "next/server";
 import { promises as dns } from "dns";
-import { stat } from "fs/promises";
 import { db } from "@/lib/db";
 import { requirePlatformAdmin, recordAudit } from "@/lib/auth";
 import { publicRecipient, isos, iso, jsonError, jsonOk } from "@/lib/serializers";
-import { purgeExpired, storageDir } from "@/lib/document-store";
+import { purgeExpired, storageHealthProbe } from "@/lib/document-store";
 import {
   COMPANY, EMAIL_ACCOUNTS, SUBDOMAINS, DNS_RECORDS,
   parseProvisioningState, buildZoneFile,
@@ -15,7 +14,7 @@ export const dynamic = "force-dynamic";
 
 type Ctx = { params: Promise<{ section: string }> };
 
-const PLAN_MRR: Record<string, number> = { STARTER: 19, BUSINESS: 79, ENTERPRISE: 349 };
+const PLAN_MRR: Record<string, number> = { SOLO: 19, STARTER: 19, BUSINESS: 79, ENTERPRISE: 349 };
 
 // ─────────────────────────────────────────────────────────── GET (read) ──
 export async function GET(req: NextRequest, ctx: Ctx) {
@@ -231,6 +230,34 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           plans: isos(plans),
           subscriptions: subs.map((s) => ({ ...iso(s), tenantName: s.tenant.name, tenantSlug: s.tenant.slug, tenantStatus: s.tenant.status })),
           mrrTrend: isos(stats),
+        });
+      }
+
+      case "leads": {
+        // Enterprise pipeline (cycle 10): public /enterprise form intake.
+        const leadWhere: Record<string, unknown> = {};
+        if (search) leadWhere.OR = [
+          { company: { contains: search } },
+          { contactName: { contains: search } },
+          { email: { contains: search } },
+        ];
+        const status = q.get("status");
+        if (status && status !== "ALL") leadWhere.status = status;
+        const [total, leads] = await Promise.all([
+          db.enterpriseLead.count({ where: leadWhere }),
+          db.enterpriseLead.findMany({
+            where: leadWhere, orderBy: { createdAt: "desc" },
+            skip: (page - 1) * perPage, take: perPage,
+          }),
+        ]);
+        const [newCount, wonCount] = await Promise.all([
+          db.enterpriseLead.count({ where: { status: "NEW" } }),
+          db.enterpriseLead.count({ where: { status: "WON" } }),
+        ]);
+        return jsonOk({
+          total, page, perPage,
+          leads: isos(leads),
+          kpis: { newCount, wonCount },
         });
       }
 
@@ -725,7 +752,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
           const drillStart = Date.now();
           const [dbCheck, storageStat] = await Promise.all([
             db.$queryRaw`SELECT 1`.then(() => true).catch(() => false),
-            stat(storageDir()).then(() => true).catch(() => false),
+            storageHealthProbe().then((r) => r.ok).catch(() => false),
           ]);
           const elapsedMs = Date.now() - drillStart;
           const rtoActual = `${elapsedMs}ms`;
@@ -783,6 +810,35 @@ export async function POST(req: NextRequest, ctx: Ctx) {
           await db.subscription.update({ where: { id }, data: { status: "CANCELED" } });
           await recordAudit({ actor, actorRole: "PLATFORM_ADMIN", action: "billing.subscription_canceled", resource: `subscription:${id}`, severity: "WARNING", detail: reason });
           return jsonOk({ ok: true, message: "Subscription cancelled at period end" });
+        }
+        return jsonError("Unsupported operation");
+      }
+
+      // ── Enterprise leads (cycle 10) ──
+      case "leads": {
+        const LEAD_STATUSES = ["NEW", "CONTACTED", "QUALIFIED", "WON", "LOST"];
+        if (op === "lead.status") {
+          const status = String(data.status ?? "").trim().toUpperCase();
+          if (!LEAD_STATUSES.includes(status)) return jsonError("Status must be one of " + LEAD_STATUSES.join(", "));
+          const lead = await db.enterpriseLead.findUnique({ where: { id } });
+          if (!lead) return jsonError("Lead not found", 404);
+          await db.enterpriseLead.update({ where: { id }, data: { status } });
+          await recordAudit({
+            actor, actorRole: "PLATFORM_ADMIN", action: "enterprise.lead.status_changed",
+            resource: `lead:${id}`, detail: `${lead.company}: ${lead.status} → ${status}`,
+          });
+          return jsonOk({ ok: true, message: `Lead marked ${status}` });
+        }
+        if (op === "lead.note") {
+          const notes = String(data.notes ?? "").trim().slice(0, 2000);
+          const lead = await db.enterpriseLead.findUnique({ where: { id } });
+          if (!lead) return jsonError("Lead not found", 404);
+          await db.enterpriseLead.update({ where: { id }, data: { notes } });
+          await recordAudit({
+            actor, actorRole: "PLATFORM_ADMIN", action: "enterprise.lead.noted",
+            resource: `lead:${id}`, tenantName: lead.company, detail: notes ? "Triage note saved" : "Triage note cleared",
+          });
+          return jsonOk({ ok: true, message: notes ? "Note saved" : "Note cleared" });
         }
         return jsonError("Unsupported operation");
       }

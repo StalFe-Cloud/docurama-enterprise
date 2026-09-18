@@ -1,0 +1,17 @@
+# Signer portal — an invalid or mistyped token must show the honest
+# invalid-link state, never a 500 or a blank page.
+url: ${MAESTRO_BASE_URL}/sign/definitely-not-a-real-token
+name: Signer portal rejects invalid links gracefully
+tags:
+  - e2e
+  - public
+  - signer
+---
+- launchApp
+
+# 30s: on a freshly-booted dev server this is the first /sign/{token} render
+# (the warm-up uses a dead token; both compile the same dynamic route)
+- extendedWaitUntil:
+    visible: This signing link is not valid
+    timeout: 30000
+- assertVisible: Secure signing

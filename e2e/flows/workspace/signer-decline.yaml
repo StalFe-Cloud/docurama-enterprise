@@ -1,0 +1,47 @@
+# Signer journey — declining: the recipient refuses to sign with a reason;
+# the envelope moves to DECLINED and the ledger records it. Uses the seeded
+# DOC-E2E0003 fixture so the happy-path fixture (0004) stays pristine.
+url: ${MAESTRO_BASE_URL}/sign/e2e-fixed-decline-token-0000000000000001
+name: Signer can decline to sign with a reason
+tags:
+  - e2e
+  - workspace
+  - signer
+---
+- launchApp
+
+- extendedWaitUntil:
+    visible: " ?Document for your signature ?"
+    timeout: 20000
+
+# The action bar sits below the fold — scroll it in first
+- scrollUntilVisible:
+    element:
+      text: " ?Decline to sign ?"
+    direction: DOWN
+    timeout: 10000
+
+# Re-assert before tapping: on cold runners the scroll can land mid-hydration
+# and the first tap re-resolves against a re-rendered tree (observed as an
+# immediate tap failure on CI while passing locally). One stability wait
+# closes the race.
+- extendedWaitUntil:
+    visible: " ?Decline to sign ?"
+    timeout: 10000
+
+# Decline from the action bar
+- tapOn: " ?Decline to sign ?"
+- extendedWaitUntil:
+    visible: "Decline to sign this document\\?"
+    timeout: 10000
+
+# Reason is optional; hyphenated text (Maestro sendKeys chokes on spaces
+# inside Radix dialogs - see e2e/README.md)
+- tapOn:
+    id: decline-reason
+- inputText: e2e-wrong-terms
+- tapOn: " ?Confirm decline ?"
+
+- extendedWaitUntil:
+    visible: You declined to sign
+    timeout: 15000

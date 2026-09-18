@@ -1,0 +1,40 @@
+# Workspace — in-app Verify section against the seeded SENT fixture.
+url: ${MAESTRO_BASE_URL}/login
+name: In-app verify shows the not-yet-sealed state for a sent envelope
+tags:
+  - e2e
+  - workspace
+  - verify
+---
+- launchApp
+
+- extendedWaitUntil:
+    visible: Sign in to your portal
+    timeout: 30000
+
+- tapOn:
+    id: email
+- inputText: e2e@docurama.eu
+- tapOn:
+    id: password
+- inputText: "e2ePass1234!"
+- tapOn: " ?Sign in securely ?"
+- extendedWaitUntil:
+    visible: "Welcome back.*"
+    timeout: 15000
+
+- tapOn: Verify
+- extendedWaitUntil:
+    visible: Verify a document
+    timeout: 10000
+
+- tapOn:
+    id: verify-code
+- inputText: DOC-E2E0001
+# css selector: the nav link and the submit button share the text "Verify"
+- tapOn:
+    css: 'button[type="submit"]'
+
+- extendedWaitUntil:
+    visible: Document found - not yet sealed
+    timeout: 10000

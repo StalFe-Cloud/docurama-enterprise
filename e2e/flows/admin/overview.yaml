@@ -1,0 +1,28 @@
+# Admin — platform overview KPIs render for a platform admin.
+url: ${MAESTRO_BASE_URL}/login
+name: Admin overview shows platform KPIs
+tags:
+  - e2e
+  - admin
+---
+- launchApp
+
+- extendedWaitUntil:
+    visible: Sign in to your portal
+    timeout: 30000
+
+- tapOn:
+    id: email
+- inputText: e2e-admin@docurama.eu
+- tapOn:
+    id: password
+- inputText: "e2eAdmin1234!"
+- tapOn: " ?Sign in securely ?"
+
+# PLATFORM_ADMIN lands in the admin shell
+- extendedWaitUntil:
+    visible: "Platform overview.*"
+    timeout: 15000
+- assertVisible: Active tenants
+- assertVisible: Platform users
+- assertVisible: Envelopes (30d)

@@ -428,10 +428,19 @@ export function ConfirmDialog({
   const [open, setOpen] = useState(false);
   const disabled = requireReason && !reason.trim();
 
+  // When a reason is required, own the dialog's auto-focus: type-ready focus
+  // on the required field is better UX than Radix's default (first button),
+  // and makes the flow reliably automatable.
+  const handleOpenAutoFocus = (e: Event) => {
+    if (!requireReason) return;
+    e.preventDefault(); // skip Radix's focus-first-button default
+    (document.getElementById("confirm-reason") as HTMLInputElement | null)?.focus();
+  };
+
   return (
     <AlertDialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) setReason(""); }}>
       <AlertDialogTrigger asChild>{trigger}</AlertDialogTrigger>
-      <AlertDialogContent>
+      <AlertDialogContent onOpenAutoFocus={handleOpenAutoFocus}>
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>{description}</AlertDialogDescription>

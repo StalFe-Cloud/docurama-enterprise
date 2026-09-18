@@ -1,0 +1,21 @@
+# Platform pages — docs, developers and status surfaces must render.
+url: ${MAESTRO_BASE_URL}/docs
+name: Docs, developers and status pages render
+tags:
+  - e2e
+  - public
+---
+- launchApp
+
+- assertVisible: Documentation
+
+- openLink: ${MAESTRO_BASE_URL}/developers
+- extendedWaitUntil:
+    visible: Built API-first
+    timeout: 10000
+
+- openLink: ${MAESTRO_BASE_URL}/status
+- extendedWaitUntil:
+    visible: System status
+    timeout: 10000
+- assertVisible: "All systems operational.*"

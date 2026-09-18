@@ -1,0 +1,16 @@
+# French statutory contract catalog — public, DB-backed page.
+url: ${MAESTRO_BASE_URL}/modeles-de-contrats
+name: French contract catalog renders with statutory templates
+tags:
+  - e2e
+  - public
+  - legal
+---
+- launchApp
+
+# The 8 built-in Droit Français templates must be reachable without an account
+- assertVisible: Modèles de Contrats Prêts à Signer
+- assertVisible: " ?Droit Français & Code Civil ?"
+
+# A statutory template card is present with its CTA (icon + text)
+- assertVisible: " ?Utiliser ce modèle ?"

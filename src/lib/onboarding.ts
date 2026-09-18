@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "crypto";
 import { db } from "@/lib/db";
+import { seatCapacity } from "@/lib/billing";
 
 /**
  * Onboarding domain logic (Task 7) - shared by /api/auth/signup,
@@ -44,6 +45,9 @@ export type OnboardingState = {
   completed: boolean;
   pendingInvites: number;
   inviteList: { id: string; email: string; role: string; createdAt: string }[];
+  /** Seat occupancy (cycle 10): drives "invite your team to the remaining
+   *  seats" guidance in the wizard and the users settings tab. */
+  seats: { used: number; limit: number; remaining: number; members: number; pendingInvites: number };
   smtpTransportConfigured: boolean;
 };
 
@@ -83,7 +87,9 @@ export async function computeOnboardingState(userId: string): Promise<Onboarding
     return {
       authenticated: false, user: null, emailVerified: false, emailVerifiedAt: null, org: null,
       steps: { account: false, verify: false, org: false, signature: false, invites: false, security: false },
-      flags: {}, completed: false, pendingInvites: 0, inviteList: [], smtpTransportConfigured: SMTP_TRANSPORT_CONFIGURED,
+      flags: {}, completed: false, pendingInvites: 0, inviteList: [],
+      seats: { used: 0, limit: 0, remaining: 0, members: 0, pendingInvites: 0 },
+      smtpTransportConfigured: SMTP_TRANSPORT_CONFIGURED,
     };
   }
 
@@ -107,6 +113,14 @@ export async function computeOnboardingState(userId: string): Promise<Onboarding
   const orgDone = tenant ? orgNamed(tenant.name) : false;
   const invitesDone = flags.skippedInvite || pendingInvites > 0;
   const securityDone = user.totpEnabled || flags.skippedSecurity || false;
+  const capacity = tenant ? await seatCapacity(tenant.id) : null;
+  const seats = {
+    used: capacity?.used ?? 0,
+    limit: capacity?.seatLimit ?? 0,
+    remaining: capacity?.remaining ?? 0,
+    members: capacity?.members ?? 0,
+    pendingInvites: capacity?.pendingInvites ?? 0,
+  };
 
   return {
     authenticated: true,
@@ -128,6 +142,7 @@ export async function computeOnboardingState(userId: string): Promise<Onboarding
     completed: Boolean(flags.completedAt),
     pendingInvites,
     inviteList,
+    seats,
     smtpTransportConfigured: SMTP_TRANSPORT_CONFIGURED,
   };
 }

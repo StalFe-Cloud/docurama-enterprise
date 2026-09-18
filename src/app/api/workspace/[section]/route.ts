@@ -5,11 +5,13 @@ import { requireUser, recordAudit } from "@/lib/auth";
 import { publicRecipient, isos, iso, jsonError, jsonOk } from "@/lib/serializers";
 import { getSettingsSection, postSettingsOp } from "@/lib/settings-handlers";
 import { foldForSearch } from "@/lib/search";
+import { dispatchEnvelopeEvent } from "@/lib/webhooks";
+import { processOutbox } from "@/lib/mail";
+import { currentAllowance } from "@/lib/billing";
 
 export const dynamic = "force-dynamic";
 
 type Ctx = { params: Promise<{ section: string }> };
-const PLAN_LIMITS: Record<string, number> = { STARTER: 25, BUSINESS: 250, ENTERPRISE: 5000 };
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 
 export async function GET(req: NextRequest, ctx: Ctx) {
@@ -25,15 +27,15 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
     // Workspace context requires a tenant membership.
     if (
-      ["envelopes", "templates", "settings", "overview", "settings-account", "settings-esign", "settings-notifications", "settings-sms", "settings-mcp"].includes(section) &&
+      ["envelopes", "templates", "settings", "overview", "settings-account", "settings-esign", "settings-notifications", "settings-sms", "settings-mcp", "settings-webhooks"].includes(section) &&
       !tenantId
     ) {
       return jsonError("No workspace membership for this account", 403);
     }
 
     // Production settings sections (account security, eSign, notifications,
-    // SMS gateway, MCP) are served by the dedicated handlers module.
-    if (["settings-account", "settings-esign", "settings-notifications", "settings-sms", "settings-mcp"].includes(section)) {
+    // SMS gateway, MCP, webhooks) are served by the dedicated handlers module.
+    if (["settings-account", "settings-esign", "settings-notifications", "settings-sms", "settings-mcp", "settings-webhooks"].includes(section)) {
       return getSettingsSection(section, me);
     }
 
@@ -67,7 +69,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         return jsonOk({
           plan: plan ? iso(plan) : null,
           tenant: iso(tenant),
-          quota: { used: sentThisMonth, limit: PLAN_LIMITS[tenant.planCode] ?? 25 },
+          // Allowance incl. rollover (unused envelopes carried forward on
+          // renewal, capped at one monthly allowance — src/lib/billing.ts).
+          quota: await currentAllowance(tenantId!),
           kpis: { sentThisMonth, completed, pending, awaitingMe },
           recent: recent.map((e) => ({
             ...iso(e), createdBy: `${e.createdBy.firstName} ${e.createdBy.lastName}`,
@@ -136,10 +140,24 @@ export async function GET(req: NextRequest, ctx: Ctx) {
             createdAt: e.createdAt.toISOString(),
             lastRemindedAt: e.lastRemindedAt?.toISOString() ?? null,
             autoRemind: e.autoRemind, reminderCount: e.reminderCount,
+            attestedAt: e.attestedAt?.toISOString() ?? null,
+            attestStatus: e.attestStatus,
+            verifiedSenderDomain: e.verifiedSenderDomain,
             createdBy: `${e.createdBy.firstName} ${e.createdBy.lastName}`,
           },
           tenantName: e.tenant.name,
-          recipients: e.recipients.map(publicRecipient),
+          // Owner-only: personal signing links for pending signers. The list
+          // endpoints keep publicRecipient (tokens stripped); only the
+          // envelope owner — this query is tenant-scoped — sees these, so
+          // they can re-share a link or hand it off via QR.
+          recipients: e.recipients.map((r) => ({
+            ...publicRecipient(r),
+            signLink:
+              r.role !== "CC" && // a CC receives the completed copy — there is nothing to sign
+              ["SENT", "PARTIALLY_SIGNED"].includes(e.status) && ["PENDING", "DELIVERED"].includes(r.status)
+                ? `/sign/${r.accessToken}`
+                : null,
+          })),
           events: isos(e.events),
         });
       }
@@ -170,7 +188,39 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           include: { recipients: true, tenant: { select: { name: true } } },
         });
         // Honest verification states - never present an unsigned document as verified.
-        if (!e) return jsonOk({ result: "NOT_FOUND", code });
+        if (!e) {
+          // Self-hosted attestation fallback — same engine as the public portal.
+          const att = await db.portalAttestation.findUnique({
+            where: { code },
+            include: { instance: true },
+          });
+          if (att) {
+            return jsonOk({
+              result: "VERIFIED_ATTESTED", code,
+              attestation: {
+                sha256: att.sha256,
+                sealedAt: att.sealedAt.toISOString(),
+                completedAt: att.completedAt?.toISOString() ?? null,
+                conformance: att.conformance,
+                pages: att.pages,
+                signerCount: att.signerCount,
+                verifiedDomain: att.verifiedDomain,
+                instance: {
+                  label: att.instance.label,
+                  firstSeenAt: att.instance.firstSeenAt.toISOString(),
+                  attestationCount: att.instance.attestationCount,
+                },
+                transparency: {
+                  chainSeq: att.tSeq,
+                  chainEntryHash: att.tEntryHash,
+                  proof: `/api/transparency/proof/${att.code}`,
+                  checkpoint: "/api/transparency/checkpoint",
+                },
+              },
+            });
+          }
+          return jsonOk({ result: "NOT_FOUND", code });
+        }
         if (e.status === "VOIDED") return jsonOk({ result: "VOIDED", code, voidedAt: e.voidedAt?.toISOString() ?? null, voidReason: e.voidReason });
         if (e.status !== "COMPLETED" || !e.sealedAt || !e.sha256) {
           return jsonOk({ result: "NOT_SEALED", code, title: e.title, status: e.status });
@@ -182,6 +232,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
             completedAt: e.completedAt?.toISOString() ?? null,
             conformance: e.conformanceLevel, sha256: e.sha256,
             tenantName: e.tenant.name, pages: e.pages,
+            verifiedSenderDomain: e.verifiedSenderDomain,
             signers: e.recipients.filter((r) => r.status === "SIGNED").map(publicRecipient),
           },
         });
@@ -222,11 +273,15 @@ export async function POST(req: NextRequest, ctx: Ctx) {
           if (!title) return jsonError("Document title is required");
           const valid = recipients.filter((r) => r.email && String(r.email).includes("@"));
           if (valid.length === 0) return jsonError("At least one valid recipient email is required");
-          const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
-          const used = await db.envelope.count({ where: { tenantId: tenantId!, createdAt: { gte: monthStart } } });
+          const allowance = await currentAllowance(tenantId!);
           const tenant = await db.tenant.findUnique({ where: { id: tenantId! } });
-          if (used >= (PLAN_LIMITS[tenant!.planCode] ?? 25)) {
-            return jsonError(`Monthly envelope quota reached (${used}/${PLAN_LIMITS[tenant!.planCode]}). Upgrade your plan to send more.`, 402);
+          if (allowance.used >= allowance.total) {
+            return jsonError(
+              `Monthly envelope quota reached (${allowance.used}/${allowance.total}` +
+                `${allowance.carriedForward > 0 ? ` incl. ${allowance.carriedForward} carried over` : ""}` +
+                "). Unused envelopes roll over on renewal, or upgrade your plan to send more.",
+              402,
+            );
           }
 
           // WS3: accept documentId or templateId for real page count and SHA-256
@@ -254,6 +309,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
           const code = `DOC-${randomBytes(4).toString("hex").toUpperCase()}`;
 
+          // Signing links are absolute; derive the public origin from the
+          // request so invitations carry the right host in any deployment.
+          const origin = req.nextUrl.origin;
+
           // WS9e: atomic transaction - a mid-loop failure cannot leave an envelope
           // in SENT with partial recipients.
           const env = await db.$transaction(async (tx) => {
@@ -261,12 +320,14 @@ export async function POST(req: NextRequest, ctx: Ctx) {
               data: {
                 publicCode: code, title, titleLower: foldForSearch(title),
                 tenantId: tenantId!, createdById: me.id, documentId,
+                templateId, // evidence chain: which template produced this envelope
                 status: "SENT", message: String(data.message ?? ""),
                 pages: realPageCount, sha256: realSha256,
               },
             });
             // WS9b: signing tokens are cryptographically random, not derived from
             // the envelope id. Each token is 32 bytes of entropy encoded as base64url.
+            const tokens = valid.map(() => randomBytes(32).toString("base64url"));
             await tx.recipient.createMany({
               data: valid.map((r, i) => ({
                 envelopeId: envelope.id,
@@ -275,12 +336,28 @@ export async function POST(req: NextRequest, ctx: Ctx) {
                 role: r.role === "CC" ? "CC" : "SIGNER",
                 order: i + 1,
                 status: "PENDING",
-                accessToken: randomBytes(32).toString("base64url"),
+                accessToken: tokens[i],
               })),
             });
-            // WS9f: record what actually happened. Signing invitations are queued
-            // into MailOutbox when the mail transport is wired; until then the
-            // audit trail must not claim they were delivered via SMTP.
+            // Signing invitations into the mail outbox, each carrying the
+            // recipient's unique signing link (/sign/{token}). While the SMTP
+            // transport is not wired the messages stay QUEUED and inspectable
+            // in the admin console - the audit trail below says exactly that.
+            await tx.mailOutbox.createMany({
+              data: valid.map((r, i) => ({
+                toEmail: String(r.email).toLowerCase(),
+                template: "SIGN_INVITE",
+                subject: `${actor} asks for your signature: ${title}`,
+                bodyText:
+                  `Hello ${String(r.name ?? r.email)},\n\n` +
+                  `${actor} sent you "${title}" for electronic signature via Docurama.\n\n` +
+                  `Open your personal signing link (unique to you, do not forward):\n${origin}/sign/${tokens[i]}\n\n` +
+                  `Verification code once completed: ${code}\n`,
+                linkUrl: `${origin}/sign/${tokens[i]}`,
+              })),
+            });
+            // WS9f: record what actually happened — invitations are queued in
+            // the outbox; the ledger does not claim SMTP delivery.
             await tx.envelopeEvent.createMany({
               data: [
                 { envelopeId: envelope.id, actor, action: "CREATED", detail: "Document prepared in Builder" },
@@ -289,6 +366,17 @@ export async function POST(req: NextRequest, ctx: Ctx) {
             });
             return envelope;
           });
+
+          // Webhooks + mail are post-commit side effects: the envelope send
+          // itself never depends on an SMTP relay or a customer endpoint
+          // being up (same policy as the transparency append).
+          void dispatchEnvelopeEvent(tenantId!, "envelope.sent", {
+            code, title, status: "SENT",
+            recipientCount: valid.length,
+            recipients: valid.map((r) => ({ name: String(r.name ?? r.email), email: String(r.email).toLowerCase(), role: r.role === "CC" ? "CC" : "SIGNER" })),
+          }).catch(() => undefined);
+          void processOutbox(20).catch(() => undefined);
+
           return jsonOk({ ok: true, message: `Sent to ${valid.length} recipient${valid.length > 1 ? "s" : ""} - code ${code}` });
         }
         if (op === "remind") {
@@ -301,6 +389,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
           }
           await db.envelope.update({ where: { id }, data: { lastRemindedAt: new Date() } });
           await db.envelopeEvent.create({ data: { envelopeId: id, actor, action: "REMINDED", detail: "Reminder email dispatched" } });
+          void dispatchEnvelopeEvent(tenantId!, "reminder.sent", { code: e.publicCode, title: e.title, status: e.status }).catch(() => undefined);
+          void processOutbox(20).catch(() => undefined);
           return jsonOk({ ok: true, message: "Reminder sent" });
         }
         if (op === "void") {
@@ -312,6 +402,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
           await db.envelope.update({ where: { id }, data: { status: "VOIDED", voidedAt: new Date(), voidReason: reason } });
           await db.envelopeEvent.create({ data: { envelopeId: id, actor, action: "VOIDED", detail: reason } });
           await recordAudit({ actor, actorRole: me.role, action: "envelope.voided", resource: `envelope:${e.publicCode}`, severity: "WARNING", tenantName: me.tenantName, detail: reason });
+          void dispatchEnvelopeEvent(tenantId!, "envelope.voided", { code: e.publicCode, title: e.title, status: "VOIDED", reason }).catch(() => undefined);
           return jsonOk({ ok: true, message: "Envelope voided" });
         }
         return jsonError("Unsupported operation");

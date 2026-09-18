@@ -45,7 +45,7 @@ const E2E_MCP_RATE_KEY_SECRET = "dk_e2e_mcp_rate_0000000000000000000000000000001
 const E2E_QUOTA_TENANT_SLUG = "e2e-quota";
 const E2E_QUOTA_USER_EMAIL = "e2e-quota@docurama.eu";
 const E2E_QUOTA_USER_PASSWORD = "e2eQuota1234!";
-const E2E_QUOTA_FILLER = 50; // == PLAN_CATALOG.STARTER.envelopeLimit (src/lib/plans.ts)
+const E2E_QUOTA_FILLER = 100; // == PLAN_CATALOG.STARTER.envelopeLimit (src/lib/plans.ts)
 
 // Fixed doc ids (doc_ + 32 hex, per DOC_ID_RE) so re-seeds overwrite the same
 // storage keys instead of accumulating files.

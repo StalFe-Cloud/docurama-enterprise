@@ -143,7 +143,7 @@ export default function EnterprisePage() {
             </div>
             <p className="mt-6 text-xs text-muted-foreground">
               List price is €349/month for 100 seats and 5,000 envelopes;
-              committed 3/6/12-month terms take −5/−10/−15%. Higher volumes,
+              committed 3/6/12-month terms take −5/−10/−20%. Higher volumes,
               self-hosting and on-premises deployments are quoted per rollout —
               the form below captures what we need to price it.
             </p>

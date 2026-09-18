@@ -432,7 +432,7 @@ export function MarketingPage() {
             Every plan starts with a 14-day trial, no credit card required.
             Monthly billing has no engagement — cancel anytime. Commit to a
             term and the discount grows: 3 months −5%, 6 months −10%, 12
-            months −15%. Prices exclude VAT.
+            months −20%. Prices exclude VAT.
           </p>
 
           {/* Promotional billing-term switch */}

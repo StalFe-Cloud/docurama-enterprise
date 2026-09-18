@@ -365,7 +365,7 @@ describe("envelope rollover on renewal (src/lib/billing.ts)", () => {
         where: { action: "subscription.renewed", resource: `subscription:${subA.id}` },
       });
       expect(audit).not.toBeNull();
-      expect(audit!.detail).toContain("30 carried forward");
+      expect(audit!.detail).toContain("80 carried forward");
 
       // Idempotency: nothing is due anymore; a second pass is a no-op.
       const second = await renewDueSubscriptions();

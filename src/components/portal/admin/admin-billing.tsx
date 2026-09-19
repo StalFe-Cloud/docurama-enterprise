@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CreditCard, RotateCcw, Ban, TrendingUp } from "lucide-react";
+import { BadgeCheck, Ban, CreditCard, Loader2, RotateCcw, TrendingUp } from "lucide-react";
 import {
   Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip as ChartTooltip, XAxis, YAxis,
 } from "recharts";
@@ -16,6 +16,12 @@ type BillingData = {
   plans: { id: string; code: string; name: string; monthlyEur: number; seatLimit: number; envelopeLimit: number; storageGb: number; apiAccess: boolean; slaUptime: string; support: string; features: string }[];
   subscriptions: { id: string; tenantName: string; tenantSlug: string; tenantStatus: string; planCode: string; status: string; mrrEur: number; seats: number; renewalAt: string; paymentMethod: string; lastInvoiceAt: string | null; failedPayment: boolean }[];
   mrrTrend: { date: string; mrrEur: number }[];
+  payments: {
+    id: string; tenantName: string; tenantSlug: string; provider: string; kind: string; planCode: string;
+    termMonths: number; amountCents: number; currency: string; status: string; reference: string | null;
+    description: string; createdAt: string; paidAt: string | null; approverNote: string | null;
+  }[];
+  pendingPayments: number;
 };
 
 export function AdminBilling() {
@@ -64,8 +70,73 @@ export function AdminBilling() {
         <KpiCard label="Active MRR" value={`€${activeMrr.toLocaleString()}`} icon={TrendingUp} tone="primary" sub="Monthly recurring revenue" />
         <KpiCard label="ARR (run-rate)" value={`€${(activeMrr * 12).toLocaleString()}`} sub="Projected annual" />
         <KpiCard label="Subscriptions" value={data.subscriptions.length} icon={CreditCard} sub={`${data.subscriptions.filter((s) => s.status === "ACTIVE").length} active`} />
-        <KpiCard label="Failed payments" value={failed.length} tone={failed.length ? "destructive" : "success"} sub={failed.length ? "Requires collection action" : "All invoices settled"} />
+        <KpiCard label="Pending transfers" value={data.pendingPayments} tone={data.pendingPayments ? "warning" : "success"} sub={data.pendingPayments ? "Bank transfers awaiting approval" : "Nothing awaiting approval"} />
       </div>
+
+      {/* Manual payments awaiting approval (bank-transfer mode) */}
+      {data.payments.some((p) => p.status === "PENDING") && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Bank transfers awaiting approval</CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="docurama-scroll overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Reference</TableHead>
+                    <TableHead>Tenant</TableHead>
+                    <TableHead>Plan / term</TableHead>
+                    <TableHead className="text-right">Amount</TableHead>
+                    <TableHead>Requested</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {data.payments.filter((p) => p.status === "PENDING").map((p) => (
+                    <TableRow key={p.id}>
+                      <TableCell><code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">{p.reference}</code></TableCell>
+                      <TableCell className="max-w-[180px]"><p className="truncate font-medium">{p.tenantName}</p></TableCell>
+                      <TableCell>{p.description}</TableCell>
+                      <TableCell className="text-right tabular-nums font-medium">€{(p.amountCents / 100).toFixed(2)}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground">{fmtDate(p.createdAt)}</TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-1">
+                          <ConfirmDialog
+                            trigger={
+                              <Button variant="outline" size="sm" className="h-11" aria-label={`Approve payment ${p.reference} for ${p.tenantName}`}>
+                                <BadgeCheck className="h-4 w-4" aria-hidden /> Approve
+                              </Button>
+                            }
+                            title={`Approve ${p.reference}?`}
+                            description={`Confirm the bank transfer of €${(p.amountCents / 100).toFixed(2)} for ${p.tenantName} has been received. The plan activates immediately for ${p.termMonths} month(s).`}
+                            confirmLabel="Approve & activate"
+                            requireReason
+                            reasonLabel="Bank reference / receipt"
+                            onConfirm={(note) => act.mutateAsync({ op: "payment.approve", id: p.id, data: { note } })}
+                          />
+                          <ConfirmDialog
+                            trigger={
+                              <Button variant="ghost" size="sm" className="h-11 text-destructive hover:text-destructive" aria-label={`Cancel payment ${p.reference}`}>
+                                Decline
+                              </Button>
+                            }
+                            title={`Decline ${p.reference}?`}
+                            description="The payment request is marked canceled. The tenant keeps its current plan and sees the cancellation in billing history."
+                            confirmLabel="Decline request"
+                            requireReason
+                            onConfirm={(reason) => act.mutateAsync({ op: "payment.cancel", id: p.id, data: { note: reason } })}
+                          />
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

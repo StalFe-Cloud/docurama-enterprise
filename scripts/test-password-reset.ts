@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { randomBytes } from "crypto";
 import { sha } from "@/lib/onboarding";
-import { hashPassword } from "@/lib/auth";
+import { hashPassword, verifyPassword } from "@/lib/auth";
 
 async function main() {
   console.log("=== Testing Password Reset Flow ===");
@@ -76,7 +76,7 @@ async function main() {
 
   // Step 4: Verify authentication with new password
   const updatedUser = await db.user.findUnique({ where: { email: user.email } });
-  if (updatedUser?.passwordHash !== hashPassword(testNewPassword)) {
+  if (!updatedUser || !verifyPassword(testNewPassword, updatedUser.passwordHash)) {
     throw new Error("Password authentication verification failed!");
   }
   console.log("Password reset successfully verified with cryptographic match!");

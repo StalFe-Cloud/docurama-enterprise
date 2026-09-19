@@ -10,6 +10,7 @@ import { EnterpriseLeadForm } from "@/components/marketing/enterprise-lead-form"
 import { PortalProviders } from "@/components/portal/providers";
 
 export const metadata: Metadata = {
+  alternates: { canonical: "/enterprise" },
   title: "Enterprise onboarding - Docurama",
   description:
     "Audit-grade eSignature for regulated teams: SSO/SAML, BYO certificates, 21 CFR Part 11 mode, legal holds and self-hosting. Guided onboarding from first call to rollout.",
@@ -143,7 +144,7 @@ export default function EnterprisePage() {
             </div>
             <p className="mt-6 text-xs text-muted-foreground">
               List price is €349/month for 100 seats and 5,000 envelopes;
-              committed 3/6/12-month terms take −5/−10/−15%. Higher volumes,
+              committed 3/6/12-month terms take −5/−10/−20%. Higher volumes,
               self-hosting and on-premises deployments are quoted per rollout —
               the form below captures what we need to price it.
             </p>

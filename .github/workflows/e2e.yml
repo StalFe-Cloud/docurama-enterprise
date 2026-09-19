@@ -8,6 +8,42 @@ on:
   workflow_dispatch:
 
 jobs:
+  production-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bunx prisma generate
+      - run: bun run lint
+      - name: Check startup failure policy
+        run: bash scripts/test-entrypoint.sh
+      - name: Build production container
+        run: docker build -t docurama-ci:${{ github.sha }} .
+      - name: Check image content and boot with an empty scratch database
+        run: |
+          docker run --rm --entrypoint sh docurama-ci:${{ github.sha }} -c 'test ! -e /app/.env && test ! -e /app/.env.production && test -f /app/content/blog/docurama-is-live.md'
+          docker run -d --name docurama-ci -p 127.0.0.1:3030:3000 -e DATABASE_URL=file:/app/db/smoke.db -e REKOR_WITNESS=off -e DOCURAMA_WORKER=off docurama-ci:${{ github.sha }}
+          for attempt in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:3030/api/health; then
+              curl -fsS http://127.0.0.1:3030/blog | grep -q 'Docurama is live'
+              docker exec -e DOCURAMA_BOOTSTRAP_EMAIL=admin@container.test -e DOCURAMA_BOOTSTRAP_PASSWORD=DisposableContainerTest123 docurama-ci bun /app/bootstrap-admin.js --empty-installation
+              exit 0
+            fi
+            sleep 3
+          done
+          docker logs docurama-ci
+          exit 1
+      - name: Container logs
+        if: failure()
+        run: docker logs docurama-ci || true
+      - name: Stop test container
+        if: always()
+        run: docker rm -f docurama-ci || true
+
   maestro:
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -80,9 +116,9 @@ jobs:
           retention-days: 7
 
   # ── Schema portability gate (PRODUCTION-PLAN §9) ──────────────────────────
-  # The scale-out path is "flip DATABASE_URL to Postgres". This job proves the
-  # schema actually applies cleanly to PostgreSQL on every push, so the
-  # migration stays a config change instead of becoming a project.
+  # This validates schema shape only. A PostgreSQL release also needs a
+  # provider-specific generated client and the full runtime regression suite.
+  # The supplied SQLite image must not be pointed at PostgreSQL unchanged.
   postgres-portability:
     runs-on: ubuntu-latest
     timeout-minutes: 10

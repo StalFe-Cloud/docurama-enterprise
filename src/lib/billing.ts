@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import type { Prisma } from "@prisma/client";
 import { ENVELOPE_LIMITS, planDef, rolloverCap, termFor } from "@/lib/plans";
 
 /**
@@ -14,10 +15,8 @@ import { ENVELOPE_LIMITS, planDef, rolloverCap, termFor } from "@/lib/plans";
  * capped at one monthly allowance (src/lib/plans.ts rolloverCap) — a quiet
  * month is never lost, but allowances can't be hoarded indefinitely.
  *
- * There is no payment provider wired (billing rails are a revenue-triggered
- * rung in IMPROVEMENT-PLAN §7): renewal therefore re-activates the existing
- * payment method the way a charged card would, and the event is audited so
- * the ledger says exactly what happened.
+ * Manual/out-of-band subscriptions renew here and are audited. Stripe-managed
+ * subscriptions advance only through verified payment-provider webhooks.
  */
 
 export interface Allowance {
@@ -47,6 +46,9 @@ export function periodStart(subscription: { renewalAt: Date; termMonths: number 
 }
 
 export async function currentAllowance(tenantId: string): Promise<Allowance> {
+  // A stopped worker must not freeze manual subscriptions in an expired window.
+  // Provider-managed subscriptions remain webhook-driven.
+  await renewDueSubscriptions(50, tenantId);
   const tenant = await db.tenant.findUnique({
     where: { id: tenantId },
     include: { subscriptions: { orderBy: { renewalAt: "desc" }, take: 1 } },
@@ -84,39 +86,51 @@ export interface RenewalOutcome {
  * call repeatedly (worker cadence or manual) — only subscriptions with
  * renewalAt <= now are touched, each exactly once per elapsed term.
  */
-export async function renewDueSubscriptions(limit = 50): Promise<RenewalOutcome[]> {
+export async function renewDueSubscriptions(limit = 50, tenantId?: string): Promise<RenewalOutcome[]> {
   const due = await db.subscription.findMany({
-    where: { status: "ACTIVE", renewalAt: { lte: new Date() } },
-    include: { tenant: { select: { id: true, slug: true, planCode: true, name: true } } },
+    // Stripe-managed subscriptions renew via webhook (invoice.paid) — the
+    // worker only advances manual/out-of-band subscriptions.
+    where: {
+      status: "ACTIVE",
+      ...(tenantId ? { tenantId } : {}),
+      renewalAt: { lte: new Date() },
+      OR: [{ provider: null }, { provider: "manual" }],
+    },
+    select: { id: true },
     take: limit,
   });
 
   const results: RenewalOutcome[] = [];
-  for (const sub of due) {
-    // Loop while still elapsed (a worker outage can skip several terms).
-    let renewalAt = sub.renewalAt;
+  for (const candidate of due) {
+    const outcome = await db.$transaction(async (tx) => {
     const now = new Date();
+    const sub = await tx.subscription.findUnique({
+      where: { id: candidate.id }, include: { tenant: { select: { id: true, slug: true, name: true } } },
+    });
+    // Recheck after acquiring the transaction: another reader may have renewed.
+    if (!sub || sub.status !== "ACTIVE" || sub.renewalAt > now ||
+        (sub.provider !== null && sub.provider !== "manual")) return null;
+    const plan = planDef(sub.planCode);
+    let renewalAt = sub.renewalAt;
+    let carriedForward = sub.carriedForwardEnvelopes;
+    let usedInPeriod = 0;
+    let allowance = 0;
     while (renewalAt <= now) {
+      usedInPeriod = await tx.envelope.count({
+        where: { tenantId: sub.tenantId, createdAt: { gte: periodStart({ renewalAt, termMonths: sub.termMonths }), lt: renewalAt } },
+      });
+      allowance = (ENVELOPE_LIMITS[sub.planCode] ?? plan.envelopeLimit) + carriedForward;
+      carriedForward = Math.min(Math.max(0, allowance - usedInPeriod), rolloverCap(plan));
       const next = new Date(renewalAt);
       next.setMonth(next.getMonth() + Math.max(1, sub.termMonths));
       renewalAt = next;
     }
-
-    // Unused = allowance − usage over the period that just closed.
-    const periodFrom = periodStart(sub);
-    const usedInPeriod = await db.envelope.count({
-      where: { tenantId: sub.tenantId, createdAt: { gte: periodFrom, lt: sub.renewalAt } },
-    });
-    const plan = planDef(sub.planCode);
-    const allowance = (ENVELOPE_LIMITS[sub.planCode] ?? plan.envelopeLimit) + sub.carriedForwardEnvelopes;
-    const unused = Math.max(0, allowance - usedInPeriod);
-    const carriedForward = Math.min(unused, rolloverCap(plan));
-
-    await db.subscription.update({
-      where: { id: sub.id },
+    const changed = await tx.subscription.updateMany({
+      where: { id: sub.id, renewalAt: sub.renewalAt, status: "ACTIVE" },
       data: { renewalAt, carriedForwardEnvelopes: carriedForward, lastInvoiceAt: new Date() },
     });
-    await db.auditEvent.create({
+    if (changed.count !== 1) return null;
+    await tx.auditEvent.create({
       data: {
         actor: "Docurama Billing",
         actorRole: "SYSTEM",
@@ -129,14 +143,16 @@ export async function renewDueSubscriptions(limit = 50): Promise<RenewalOutcome[
           `Used ${usedInPeriod}/${allowance} envelopes in the closed period; ${carriedForward} carried forward (cap ${rolloverCap(plan)}).`,
       },
     });
-    results.push({
+    return {
       subscriptionId: sub.id,
       tenantSlug: sub.tenant.slug,
       planCode: sub.planCode,
       carriedForward,
       usedInPeriod,
       renewedUntil: renewalAt,
+    };
     });
+    if (outcome) results.push(outcome);
   }
   return results;
 }
@@ -165,12 +181,14 @@ export interface SeatCapacity {
  * member on acceptance), so the invitation path enforces capacity against
  * members + outstanding invites.
  */
-export async function seatCapacity(tenantId: string): Promise<SeatCapacity> {
-  const tenant = await db.tenant.findUnique({ where: { id: tenantId } });
+export async function seatCapacity(tenantId: string, client: Prisma.TransactionClient = db): Promise<SeatCapacity> {
+  const tenant = await client.tenant.findUnique({ where: { id: tenantId } });
   const plan = planDef(tenant?.planCode ?? "STARTER");
   const [members, pendingInvites] = await Promise.all([
-    db.member.count({ where: { tenantId } }),
-    db.invitation.count({ where: { tenantId, status: "PENDING" } }),
+    // Pending mailbox proof reserves a seat but grants no access. Disabled
+    // memberships release their seat; reactivation must re-check capacity.
+    client.member.count({ where: { tenantId, status: { in: ["ACTIVE", "PENDING_VERIFICATION"] } } }),
+    client.invitation.count({ where: { tenantId, status: "PENDING", expiresAt: { gt: new Date() } } }),
   ]);
   const used = members + pendingInvites;
   return {
@@ -181,4 +199,10 @@ export async function seatCapacity(tenantId: string): Promise<SeatCapacity> {
     used,
     remaining: Math.max(0, plan.seatLimit - used),
   };
+}
+
+/** Entitlement check for issuance and every authenticated integration request. */
+export async function apiAccessAllowed(tenantId: string): Promise<boolean> {
+  const tenant = await db.tenant.findUnique({ where: { id: tenantId }, select: { status: true, planCode: true } });
+  return Boolean(tenant && tenant.status !== "SUSPENDED" && planDef(tenant.planCode).apiAccess);
 }

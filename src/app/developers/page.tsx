@@ -9,6 +9,7 @@ import { API_REFERENCE } from "@/lib/api-reference";
 import { ScrollTop } from "@/components/marketing/scroll-top";
 
 export const metadata: Metadata = {
+  alternates: { canonical: "/developers" },
   title: "Developers · Docurama",
   description:
     "The Docurama API: envelopes, templates, public verification, signed webhooks and an MCP server, behind X-API-Key authentication. REST endpoints, code examples and the full reference.",

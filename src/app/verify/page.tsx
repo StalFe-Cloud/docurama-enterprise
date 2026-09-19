@@ -6,6 +6,7 @@ import { PublicVerify } from "@/components/marketing/public-verify";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
+  alternates: { canonical: "/verify" },
   title: "Verify a document",
   description:
     "Check a Docurama verification code and confirm the signatures, seal and SHA-256 digest of a completed document. No account needed.",

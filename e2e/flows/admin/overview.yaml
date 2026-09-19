@@ -11,6 +11,11 @@ tags:
     visible: Sign in to your portal
     timeout: 30000
 
+- extendedWaitUntil:
+    visible:
+      id: password
+    timeout: 15000
+
 - tapOn:
     id: email
 - inputText: e2e-admin@docurama.eu

@@ -14,7 +14,7 @@ export async function POST(req: NextRequest) {
   const session = await db.session.findUnique({ where: { id: sessionId } });
   if (!session || session.revokedAt || session.expiresAt <= new Date()) return jsonError("Not authenticated", 401);
   const user = await db.user.findUnique({ where: { id: session.userId } });
-  if (!user) return jsonError("Not authenticated", 401);
+  if (!user || user.status !== "ACTIVE") return jsonError("Not authenticated", 401);
   if (user.emailVerifiedAt) return jsonError("Your email is already verified");
 
   // Rate limit: at most one fresh verification email per minute.

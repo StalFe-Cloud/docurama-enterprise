@@ -1,6 +1,7 @@
 /* Docurama portal seed · realistic demo dataset */
 import { PrismaClient } from "@prisma/client";
 import { createHash } from "crypto";
+import { PLAN_CATALOG, PLAN_ORDER } from "../src/lib/plans";
 import { foldForSearch } from "../src/lib/search";
 
 const db = new PrismaClient();
@@ -24,16 +25,15 @@ async function main() {
   ]);
 
   // ── Plans ──────────────────────────────────────────────────────────────
-  // Mirrors src/lib/plans.ts PLAN_CATALOG (cycle 10): SOLO added (Starter
-  // feature set at one seat), STARTER envelopes 25 → 50 with the 35-day
-  // weekends-on-us framing, outcome bullets on every plan.
+  // Use the same catalogue as checkout and quotas.
   await db.plan.createMany({
-    data: [
-      { code: "SOLO", name: "Solo", monthlyEur: 19, seatLimit: 1, envelopeLimit: 50, storageGb: 5, apiAccess: false, slaUptime: "99.5%", support: "Email support", features: "1 seat|50 envelopes/month|35 sending days a month — weekends on us|Envelope rollover on renewal (up to 50)|PAdES B-B sealing|Email signing|Public verify portal|2 templates", outcomes: "Sign client contracts yourself without paying for seats you don't have|Keep every unused envelope — a quiet month is never a lost month|Look professional from day one with branded signing pages and public verification" },
-      { code: "STARTER", name: "Starter", monthlyEur: 19, seatLimit: 3, envelopeLimit: 50, storageGb: 5, apiAccess: false, slaUptime: "99.5%", support: "Email support", features: "3 seats|50 envelopes/month|35 sending days a month — weekends on us|Envelope rollover on renewal (up to 50)|PAdES B-B sealing|Email signing|Public verify portal|2 templates", outcomes: "Get your first contracts signed this week, as a team|Never lose unused envelopes — they roll over on renewal|Give clients a verifiable, EU-compliant signing experience without IT help" },
-      { code: "BUSINESS", name: "Business", monthlyEur: 79, seatLimit: 10, envelopeLimit: 250, storageGb: 50, apiAccess: true, slaUptime: "99.9%", support: "Priority email support", features: "10 seats|250 envelopes/month (rollover on renewal, up to 250)|PAdES B-LT sealing|SMS + WhatsApp delivery|API + webhooks|Unlimited templates|DNS domain attestation", outcomes: "Run your whole contract operation in one place|Automate signing into your own tools with the REST API and webhooks|Send from your own verified domain so invitations carry your brand" },
-      { code: "ENTERPRISE", name: "Enterprise", monthlyEur: 349, seatLimit: 100, envelopeLimit: 5000, storageGb: 500, apiAccess: true, slaUptime: "99.99%", support: "24/7 support + TAM", features: "100 seats|5000 envelopes/month (rollover on renewal, up to 5000)|PAdES B-LTA sealing|BYO certificate|SSO/SAML|21 CFR Part 11 mode|Audit chain exports|Custom retention|Legal hold workflows", outcomes: "Pass audits — every signature manifests who signed, when and what it means|Keep counsel happy with legal holds, retention policies and evidence packs|Bring your own certificates and SSO, on EU infrastructure" },
-    ],
+    data: PLAN_ORDER.map((code) => {
+      const p = PLAN_CATALOG[code];
+      return { code, name: p.name, monthlyEur: p.monthlyEur, seatLimit: p.seatLimit,
+        envelopeLimit: p.envelopeLimit, storageGb: p.storageGb, apiAccess: p.apiAccess,
+        slaUptime: p.slaUptime, support: p.support,
+        features: p.features.join("|"), outcomes: p.outcomes.join("|") };
+    }),
   });
 
   // ── Tenants ────────────────────────────────────────────────────────────
@@ -99,19 +99,19 @@ async function main() {
 
   // ── Subscriptions ──────────────────────────────────────────────────────
   // Cycle 10: term/discount fields demo the promotional switch (committed
-  // 3/6/12-month terms at −5/−10/−15%); rollover fields demo envelope
+  // 3/6/12-month terms at −5/−10/−20%); rollover fields demo envelope
   // carry-forward on renewal.
   const subData: [string, string, number, number, number, number, number][] = [
     // slug, plan, mrr, seats, termMonths, discountPct, carriedForward
-    ["stalfe", "ENTERPRISE", 349, 18, 12, 15, 820],
+    ["stalfe", "ENTERPRISE", 349, 18, 12, 20, 820],
     ["aurora-legal", "BUSINESS", 79, 7, 6, 10, 140],
-    ["helios-energy", "ENTERPRISE", 349, 42, 12, 15, 2100],
+    ["helios-energy", "ENTERPRISE", 349, 42, 12, 20, 2100],
     ["bayern-immo", "BUSINESS", 79, 5, 3, 5, 0],
-    ["solstice-media", "STARTER", 19, 2, 1, 0, 12],
+    ["solstice-media", "STARTER", 29, 2, 1, 0, 12],
     ["atlas-freight", "BUSINESS", 79, 9, 6, 10, 60],
-    ["verdant-agri", "STARTER", 19, 2, 1, 0, 0],
-    ["corvus-mfg", "ENTERPRISE", 349, 24, 12, 15, 0],
-    ["lefebvre-consulting", "SOLO", 19, 1, 3, 5, 18],
+    ["verdant-agri", "STARTER", 29, 2, 1, 0, 0],
+    ["corvus-mfg", "ENTERPRISE", 349, 24, 12, 20, 0],
+    ["lefebvre-consulting", "SOLO", 12, 1, 3, 5, 18],
   ];
   for (const [slug, plan, mrr, seats, termMonths, discountPct, carried] of subData) {
     const failed = slug === "corvus-mfg";

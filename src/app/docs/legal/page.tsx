@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Centre Juridique & Conformité · Docurama",
-  description: "Politiques publiques de sécurité (PSSI), protection des données (RGPD), certification eIDAS et déclaration d'applicabilité ISMS.",
+  description: "Politiques publiques de sécurité (PSSI), protection des données (RGPD), conformité eIDAS et déclaration d'applicabilité ISMS.",
 };
 
 export default async function LegalDocsPage() {
@@ -38,7 +38,7 @@ export default async function LegalDocsPage() {
               <Link href="/security">Portail Sécurité</Link>
             </Button>
             <Button size="sm" asChild>
-              <Link href="/sign-in">Accéder au portail</Link>
+              <Link href="/login">Accéder au portail</Link>
             </Button>
           </div>
         </div>
@@ -54,7 +54,7 @@ export default async function LegalDocsPage() {
             Politiques de Sécurité, RGPD & Engagements eIDAS
           </h1>
           <p className="text-base text-muted-foreground max-w-3xl">
-            Docurama SAS opère dans le respect strict des réglementations européennes en matière de signature électronique qualifiée, de souveraineté des données et de protection de la vie privée.
+            Docurama SAS met en œuvre des workflows de signature électronique alignés eIDAS, avec un traitement et un hébergement des données dans l'Union européenne. Docurama n'est pas un prestataire de services de confiance qualifié et n'émet pas de certificats qualifiés.
           </p>
         </div>
 

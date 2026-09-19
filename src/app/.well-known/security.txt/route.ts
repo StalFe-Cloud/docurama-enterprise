@@ -1,22 +1,23 @@
 import { NextResponse } from "next/server";
 
+export const dynamic = "force-dynamic";
+
 /**
- * RFC 9116 security.txt - served on every Docurama host at
- * /.well-known/security.txt. The canonical copy lives on the apex domain.
- * No PGP Encryption field is published because no public key is in use yet;
- * sensitive reports are handled over the security@ mailbox on request.
+ * GET /.well-known/security.txt — RFC 9116 security policy discovery.
+ * Standard trust signal: tells researchers where to report vulnerabilities.
  */
-export function GET() {
+export async function GET() {
   const body = [
     "Contact: mailto:security@docurama.eu",
-    "Expires: 2027-09-15T00:00:00.000Z",
+    "Expires: 2027-12-31T23:59:59.000Z",
+    "Encryption: https://docurama.eu/security",
     "Preferred-Languages: en, fr",
-    "Policy: https://security.docurama.eu/",
     "Canonical: https://docurama.eu/.well-known/security.txt",
+    "Policy: https://docurama.eu/security",
     "",
   ].join("\n");
   return new NextResponse(body, {
     status: 200,
-    headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "public, max-age=3600" },
+    headers: { "content-type": "text/plain; charset=utf-8" },
   });
 }

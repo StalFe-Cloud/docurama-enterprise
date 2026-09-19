@@ -8,6 +8,7 @@ import { LanguageSwitcher } from "@/components/i18n/language-switcher";
 import { getDocsNav } from "@/lib/docs";
 
 export const metadata: Metadata = {
+  alternates: { canonical: "/docs" },
   title: "Docurama documentation",
   description:
     "Guides and API reference for Docurama: sending envelopes, templates, verification, sending domains, notifications, the REST API, webhooks, MCP and compliance modes.",
@@ -23,6 +24,12 @@ const SECTIONS = [
   { id: "api", label: "API reference" },
   { id: "webhooks", label: "Webhooks" },
   { id: "mcp", label: "MCP server" },
+  { id: "billing", label: "Billing and plans" },
+  { id: "teams", label: "Teams and roles" },
+  { id: "account", label: "Account and security" },
+  { id: "self-hosting", label: "Self-hosting" },
+  { id: "troubleshooting", label: "Troubleshooting" },
+  { id: "tutorials", label: "Tutorials" },
   { id: "compliance", label: "Compliance modes" },
   { id: "legal", label: "Legal" },
 ];
@@ -180,6 +187,100 @@ export default function DocsPage() {
               viewed, signed) are configured under Settings, Notifications,
               including a full SMTP override per organization.
             </p>
+          </section>
+
+          {/* Billing */}
+          <section>
+            <H2 id="billing">Billing and plans</H2>
+            <p className="mt-4 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+              Five plans from €12 a month, one allowance rule: buy seats, never surprises.
+              Solo and Starter share the same 50-envelope monthly allowance (the only
+              difference is seats), unused envelopes roll over on renewal, and committed
+              terms take 5–20% off. Checkout runs on Stripe where configured, or by bank
+              transfer with admin approval on self-hosted instances.
+            </p>
+            <ul className="mt-3 space-y-1.5 text-sm">
+              <li><Link className="text-primary underline underline-offset-4" href="/docs/billing/plans-and-allowances">Plans and allowances</Link></li>
+              <li><Link className="text-primary underline underline-offset-4" href="/docs/billing/checkout-and-payments">Checkout and payment methods</Link></li>
+              <li><Link className="text-primary underline underline-offset-4" href="/docs/billing/invoices-and-portal">Invoices and payment history</Link></li>
+            </ul>
+          </section>
+
+          {/* Teams */}
+          <section>
+            <H2 id="teams">Teams and roles</H2>
+            <p className="mt-4 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+              Workspaces have three roles — OWNER, ADMIN and MEMBER — and pending
+              invitations hold a seat from the moment they are sent. Smart Team and above
+              can organize members into small team groups (Sales, HR, Legal) so templates
+              and envelope visibility follow your org chart.
+            </p>
+            <ul className="mt-3 space-y-1.5 text-sm">
+              <li><Link className="text-primary underline underline-offset-4" href="/docs/teams/roles-and-invites">Roles, invites and seats</Link></li>
+              <li><Link className="text-primary underline underline-offset-4" href="/docs/teams/team-groups">Team groups</Link></li>
+            </ul>
+          </section>
+
+          {/* Account and security */}
+          <section>
+            <H2 id="account">Account and security</H2>
+            <p className="mt-4 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+              TOTP two-factor authentication with one-time recovery codes (enforceable
+              organization-wide), revocable server-side sessions with a device list,
+              password reset, and single sign-on: OIDC (Microsoft Entra ID, Google
+              Workspace, Okta, Keycloak) and SAML 2.0, bound to your email domain with
+              just-in-time provisioning.
+            </p>
+            <ul className="mt-3 space-y-1.5 text-sm">
+              <li><Link className="text-primary underline underline-offset-4" href="/docs/account/two-factor-authentication">Two-factor authentication</Link></li>
+              <li><Link className="text-primary underline underline-offset-4" href="/docs/account/sessions-and-devices">Sessions and devices</Link></li>
+              <li><Link className="text-primary underline underline-offset-4" href="/docs/account/single-sign-on">Single sign-on (SSO)</Link></li>
+              <li><Link className="text-primary underline underline-offset-4" href="/docs/account/password-and-recovery">Password and account recovery</Link></li>
+            </ul>
+          </section>
+
+          {/* Self-hosting */}
+          <section>
+            <H2 id="self-hosting">Self-hosting</H2>
+            <p className="mt-4 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+              Run Docurama on your own infrastructure: Docker Compose for a single host
+              (with an optional SeaweedFS S3 profile) or Helm for Kubernetes. SQLite by
+              default, PostgreSQL for multi-replica deployments, any S3-compatible object
+              store, your SMTP relay — and signed attestations so counterparties can
+              still verify your documents on a public portal.
+            </p>
+            <ul className="mt-3 space-y-1.5 text-sm">
+              <li><Link className="text-primary underline underline-offset-4" href="/docs/self-hosting/deployment">Deploying Docurama</Link></li>
+              <li><Link className="text-primary underline underline-offset-4" href="/docs/self-hosting/operations">Operating a self-hosted instance</Link></li>
+            </ul>
+          </section>
+
+          {/* Troubleshooting */}
+          <section>
+            <H2 id="troubleshooting">Troubleshooting</H2>
+            <p className="mt-4 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+              The answers we give most often: missing signer emails, quota 402s,
+              NOT_SEALED verification results, deliverability for custom sending
+              domains, 2FA lockouts, and what the verification portal is actually
+              checking.
+            </p>
+            <ul className="mt-3 space-y-1.5 text-sm">
+              <li><Link className="text-primary underline underline-offset-4" href="/docs/troubleshooting/faq">FAQ and troubleshooting</Link></li>
+            </ul>
+          </section>
+
+          {/* Tutorials */}
+          <section>
+            <H2 id="tutorials">Tutorials</H2>
+            <p className="mt-4 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+              Step-by-step walkthroughs for the two moments that matter most: sending
+              your very first envelope, and verifying a completed document as a
+              third party. Each tutorial is a single sitting with exact UI paths.
+            </p>
+            <ul className="mt-3 space-y-1.5 text-sm">
+              <li><Link className="text-primary underline underline-offset-4" href="/docs/getting-started/tutorial-send-first-envelope">Tutorial: send your first envelope</Link></li>
+              <li><Link className="text-primary underline underline-offset-4" href="/docs/getting-started/tutorial-verify-a-document">Tutorial: verify a signed document</Link></li>
+            </ul>
           </section>
 
           {/* API */}

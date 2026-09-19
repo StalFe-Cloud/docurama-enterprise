@@ -9,3 +9,11 @@ skills
 e2e
 test-results
 playwright-report
+backend
+docurama
+skills-external
+.env
+.env.*
+!.env.example
+.kilo
+Archieve - Do not touch

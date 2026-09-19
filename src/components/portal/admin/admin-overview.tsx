@@ -51,7 +51,7 @@ export function AdminOverview({ onNavigate }: { onNavigate: (k: AdminSectionKey)
     day: new Date(s.date).toLocaleDateString("en-GB", { day: "numeric", month: "short" }),
   }));
   const pieData = data.planDist.map((p) => ({ name: p.planCode, value: p._count }));
-  const PIE_COLORS: Record<string, string> = { SOLO: "#d9d5cb", STARTER: "#a4a097", BUSINESS: "#0f7a5a", ENTERPRISE: "#1a1a1a" };
+  const PIE_COLORS: Record<string, string> = { SOLO: "#d9d5cb", STARTER: "#a4a097", SMART: "#7ea898", BUSINESS: "#0f7a5a", ENTERPRISE: "#1a1a1a" };
   const certDays = daysUntil(data.health.certExpiryAt);
 
   return (

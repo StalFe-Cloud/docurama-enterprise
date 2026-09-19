@@ -121,15 +121,46 @@ if [[ "${E2E_SKIP_TSC:-0}" != "1" ]]; then
 fi
 
 # ── 2c. API-layer + evidence-layer + transparency-layer + MCP + visual suites ──
+# Security tests use mocked request context and a fresh database. Keep them
+# in their own process so mocks cannot affect the HTTP regression suites.
+bun test e2e/auth-security.test.ts || { echo "!! authentication security tests failed"; exit 1; }
+bun test e2e/password-security.test.ts || { echo "!! password security tests failed"; exit 1; }
+bun test e2e/quota-security.test.ts || { echo "!! quota and API entitlement tests failed"; exit 1; }
+bun test e2e/blog.test.ts e2e/storage-config.test.ts || { echo "!! content/storage tests failed"; exit 1; }
 if [[ "${E2E_SKIP_API:-0}" != "1" ]]; then
   echo "── e2e: API-layer + evidence-layer + transparency-layer + MCP + visual tests"
-  MAESTRO_BASE_URL="$BASE_URL" bun test e2e/api.test.ts e2e/evidence.test.ts e2e/transparency.test.ts e2e/rekor.test.ts e2e/mcp.test.ts e2e/plans.test.ts e2e/webhooks.test.ts e2e/visual.test.ts || { echo "!! API/evidence/transparency/MCP/plans/webhooks/visual tests failed"; exit 1; }
+  MAESTRO_BASE_URL="$BASE_URL" bun test e2e/api.test.ts e2e/evidence.test.ts e2e/transparency.test.ts e2e/rekor.test.ts e2e/plans.test.ts e2e/webhooks.test.ts e2e/visual.test.ts || { echo "!! API/evidence/transparency/plans/webhooks/visual tests failed"; exit 1; }
 fi
+
+# ── 2c-bis. MCP server (own process: the per-key rate-limit test needs a
+#         deterministic bucket state, which parallel sibling files disturb) ──
+  MAESTRO_BASE_URL="$BASE_URL" bun test e2e/mcp.test.ts || { echo "!! MCP server tests failed"; exit 1; }
 
 # ── 2d. Mail delivery engine (own process: it owns DATABASE_URL + SMTP_URL) ───
 if [[ "${E2E_SKIP_MAIL:-0}" != "1" ]]; then
   echo "── e2e: mail delivery engine (fake SMTP relay)"
   bun test e2e/mail.test.ts || { echo "!! mail delivery tests failed"; exit 1; }
+fi
+
+# ── 2d-bis. Payment rails (own process: it owns PAYMENT_PROVIDER + STRIPE_*
+#        env and runs a stub Stripe API in-process). ──────────────────────────
+if [[ "${E2E_SKIP_BILLING:-0}" != "1" ]]; then
+  echo "── e2e: payment rails (manual mode + stub Stripe + signed webhooks)"
+  bun test e2e/billing.test.ts || { echo "!! payment rails tests failed"; exit 1; }
+fi
+
+# ── 2d-ter. SSO (own process: it owns SSO_TXN_SECRET, spawns a stub OIDC
+#        provider and openssl-generates a SAML IdP keypair). ──────────────────
+if [[ "${E2E_SKIP_SSO:-0}" != "1" ]]; then
+  echo "── e2e: SSO (stub OIDC provider + samlify round-trip)"
+  bun test e2e/sso.test.ts || { echo "!! SSO tests failed"; exit 1; }
+fi
+
+# ── 2d-quater. Bot guard (own process: it owns NEXT_PUBLIC_DEMO_MODE +
+#        TURNSTILE_* env). ────────────────────────────────────────────────────
+if [[ "${E2E_SKIP_BOTGUARD:-0}" != "1" ]]; then
+  echo "── e2e: bot guard (honeypot, time trap, Turnstile stub)"
+  bun test e2e/bot-guard.test.ts || { echo "!! bot guard tests failed"; exit 1; }
 fi
 
 # ── 2e. S3 storage backend (own process: spawns a REAL SeaweedFS `weed
@@ -150,6 +181,10 @@ fi
 export MAESTRO_BASE_URL="$BASE_URL"
 export MAESTRO_CLI_NO_ANALYTICS=1
 export PATH="$HOME/.maestro/bin:$PATH"
+
+# Compile each public signer route before launching a fresh browser. This
+# avoids a cold Turbopack navigation stalling Maestro's CDP initialization.
+curl -fsS -o /dev/null "$BASE_URL/sign/e2e-fixed-decline-token-0000000000000001"
 
 if ! command -v maestro >/dev/null 2>&1; then
   if [[ "${E2E_SKIP_MAESTRO:-0}" == "1" ]]; then

@@ -76,6 +76,7 @@ const STATUS_STYLES: Record<string, string> = {
   PASS: "bg-success-soft text-success",
   // plans / severity / health
   STARTER: "bg-muted text-muted-foreground",
+  SMART: "bg-info-soft text-info",
   BUSINESS: "bg-primary-soft text-primary",
   ENTERPRISE: "bg-nautical text-white dark:bg-primary-soft dark:text-primary",
   SEV1: "bg-destructive/10 text-destructive",
@@ -132,6 +133,7 @@ const STATUS_LABELS: Record<string, string> = {
   REJECTED: "Rejected",
   PASS: "Pass",
   STARTER: "Starter",
+  SMART: "Smart Team",
   BUSINESS: "Business",
   ENTERPRISE: "Enterprise",
   SEV1: "SEV1",

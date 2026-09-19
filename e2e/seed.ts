@@ -8,7 +8,8 @@
  *    The demo dataset (StålFe, Aurora, …) is never touched.
  *  - Re-running wipes the tenant's envelopes/templates first, so every
  *    `maestro test` cycle starts from the same state.
- *  - Passwords use the same sha256 scheme as src/lib/auth.ts (hashPassword).
+ *  - Demo passwords retain the legacy SHA-256 fixture format; successful
+ *    password login upgrades them through src/lib/auth.ts to salted scrypt.
  *  - Fixed publicCodes (DOC-E2E0001/0002/0003) make verify-portal flows
  *    deterministic without scraping codes out of the UI.
  *  - Fixed signing tokens (E2E_SIGNER_TOKEN / E2E_DECLINE_TOKEN) make the
@@ -30,6 +31,7 @@ import {
   GENESIS_HEAD, TRANSPARENCY_FORMAT,
 } from "../src/lib/transparency";
 import { storeUpload } from "../src/lib/document-store";
+import { PLAN_CATALOG, PLAN_ORDER } from "../src/lib/plans";
 
 const run = promisify(execFile);
 
@@ -45,7 +47,7 @@ const E2E_MCP_RATE_KEY_SECRET = "dk_e2e_mcp_rate_0000000000000000000000000000001
 const E2E_QUOTA_TENANT_SLUG = "e2e-quota";
 const E2E_QUOTA_USER_EMAIL = "e2e-quota@docurama.eu";
 const E2E_QUOTA_USER_PASSWORD = "e2eQuota1234!";
-const E2E_QUOTA_FILLER = 50; // == PLAN_CATALOG.STARTER.envelopeLimit (src/lib/plans.ts)
+const E2E_QUOTA_FILLER = 100; // == PLAN_CATALOG.STARTER.envelopeLimit (src/lib/plans.ts)
 
 // Fixed doc ids (doc_ + 32 hex, per DOC_ID_RE) so re-seeds overwrite the same
 // storage keys instead of accumulating files.
@@ -135,6 +137,16 @@ const E2E_ADMIN_EMAIL = "e2e-admin@docurama.eu";
 const E2E_ADMIN_PASSWORD = "e2eAdmin1234!";
 
 async function main() {
+  // Catalog rows are fixtures too: branch-local committed DBs can contain
+  // an older catalogue. Do not rewrite existing subscriptions here.
+  for (const code of PLAN_ORDER) {
+    const p = PLAN_CATALOG[code];
+    const data = { name: p.name, monthlyEur: p.monthlyEur, seatLimit: p.seatLimit,
+      envelopeLimit: p.envelopeLimit, storageGb: p.storageGb, apiAccess: p.apiAccess,
+      slaUptime: p.slaUptime, support: p.support,
+      features: p.features.join("|"), outcomes: p.outcomes.join("|") };
+    await db.plan.upsert({ where: { code }, create: { code, ...data }, update: data });
+  }
   /* ── Tenant ──────────────────────────────────────────────────────── */
   const tenant =
     (await db.tenant.findUnique({ where: { slug: E2E_TENANT_SLUG } })) ??

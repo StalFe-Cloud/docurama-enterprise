@@ -212,3 +212,17 @@ ladder.
 | Verify-UI registry lines | `public-verify.tsx`, `user-verify.tsx`, v1 + workspace verify responses |
 | Tests (chain, proofs, rewrite 409, tamper) | `e2e/transparency.test.ts` (13 tests, wired into `e2e/run.sh`) |
 | Tests (witness happy path, idempotency, tamper, offline, disabled, endpoints) | `e2e/rekor.test.ts` (10 tests, hermetic mock log) |
+
+## Go-live cycle (feat/go-live-platform)
+
+| Change | Surface |
+|---|---|
+| Final 5-plan ladder restored (Solo €12, Starter €19 same-allowance, Smart Team €79, Business €199, Enterprise custom) | `src/lib/plans.ts`, marketing grid + FAQ + same-allowance note, i18n, seed, admin console, `e2e/plans.test.ts`, `pricing.yaml` |
+| Pricing as structured data (one Offer per plan, generated from the catalogue) | `src/app/page.tsx` Product JSON-LD |
+| Payment rails: Stripe Checkout + signed webhooks + manual bank-transfer mode, shared activation path | `src/lib/payments.ts`, `/api/billing/*`, Settings → Billing, admin Billing (`payment.approve`), `e2e/billing.test.ts` (14) |
+| SSO: OIDC (PKCE + nonce + JWKS) and SAML (samlify), domain-bound JIT provisioning | `src/lib/sso.ts`, `/api/auth/sso/*`, Settings → SSO, sign-in IdP offer, `e2e/sso.test.ts` (12) |
+| Bot protection on public forms (honeypot, time trap, optional Turnstile) | `src/lib/bot-guard.ts`, signup + enterprise-lead routes/forms, `e2e/bot-guard.test.ts` (10) |
+| Knowledge base completed (19 articles, 5 new sections) + markdown rendering | `content/docs/**`, `src/components/docs/markdown-body.tsx`, docs index |
+| Blog engine + six launch posts | `/blog`, `src/lib/blog.ts`, `content/blog/*.md`, sitemap + footer |
+| Operator runbooks (operations, deployment, security, payments, SSO, go-live checklist) | `docs/*.md` |
+| RFC 9116 security policy discovery | `/.well-known/security.txt` |

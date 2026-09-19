@@ -1,0 +1,38 @@
+# Public enterprise page — lead capture form lands in the admin pipeline.
+url: ${MAESTRO_BASE_URL}/enterprise
+name: Enterprise lead form submits and confirms
+tags:
+  - e2e
+  - public
+---
+- launchApp
+
+- extendedWaitUntil:
+    visible: ".*Enterprise.*"
+    timeout: 30000
+
+# The form sits below the hero - scroll it into view first
+- scrollUntilVisible:
+    element: ".*Send to the Enterprise team.*"
+    direction: DOWN
+    timeout: 15000
+
+- tapOn:
+    id: el-contact
+- inputText: Erika Werner
+- tapOn:
+    id: el-email
+- inputText: e2e-lead-noreply@example.com
+- tapOn:
+    id: el-company
+- inputText: Werner Stahlbau GmbH
+
+# Wait for the button's enabled state (React re-render after the last input)
+- extendedWaitUntil:
+    visible: ".*Send to the Enterprise team.*"
+    timeout: 8000
+- tapOn: "Send to the Enterprise team"
+
+- extendedWaitUntil:
+    visible: ".*Request received.*"
+    timeout: 20000

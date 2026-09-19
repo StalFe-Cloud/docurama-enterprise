@@ -3,6 +3,7 @@ import { createHash } from "crypto";
 import { db } from "@/lib/db";
 import { publicRecipient, iso, isos, jsonError, jsonOk } from "@/lib/serializers";
 import { buildEvidencePack, recordEvidencePackExport, EvidencePackError } from "@/lib/evidence-pack";
+import { apiAccessAllowed } from "@/lib/billing";
 
 /**
  * Public integration API (v1) - the surface documented in Settings → API.
@@ -34,6 +35,7 @@ async function resolveApiKey(req: NextRequest) {
     include: { tenant: true },
   });
   if (!row || !row.tenant) return { error: jsonError("Invalid or revoked API key", 401) };
+  if (!(await apiAccessAllowed(row.tenant.id))) return { error: jsonError("API access is unavailable for this workspace plan or status", 403) };
   await db.apiKey.update({ where: { id: row.id }, data: { lastUsedAt: new Date() } }).catch(() => undefined);
   return { row };
 }

@@ -58,6 +58,17 @@ model EmailVerification {
   @@index([userId])
 }
 
+// Single-use SSO state, consumed atomically before issuing a session.
+model SsoTransaction {
+  id           String   @id
+  connectionId String
+  expiresAt    DateTime
+  consumedAt   DateTime?
+  createdAt    DateTime @default(now())
+
+  @@index([expiresAt])
+}
+
 model Session {
   id         String    @id @default(cuid())
   userId     String
@@ -208,6 +219,9 @@ model Tenant {
   documents    Document[]
   domains      Domain[]
   subscriptions Subscription[]
+  payments Payment[]
+  paymentCustomers PaymentCustomer[]
+  ssoConnections SsoConnection[]
   apiKeys      ApiKey[]
   webhookEndpoints WebhookEndpoint[]
   legalHolds   LegalHold[]
@@ -713,7 +727,83 @@ model Subscription {
   // renewal (capped at one monthly allowance — see src/lib/billing.ts).
   carriedForwardEnvelopes Int @default(0)
 
+  // Payment provider rails: "manual" (bank transfer / out-of-band, renewed
+  // by the platform's own engine or an admin approval) or "stripe"
+  // (auto-charged each term by Stripe — renewal is webhook-driven).
+  provider    String? @default("manual")
+  providerRef String? // Stripe subscription id (sub_...) when provider = stripe
+
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+// One row per tenant × payment provider customer mapping (Stripe cus_...).
+model PaymentCustomer {
+  id         String   @id @default(cuid())
+  tenantId   String
+  provider   String // stripe
+  externalId String // provider customer id (cus_...)
+  createdAt  DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, provider])
+}
+
+// Every money-relevant event: checkout attempts, paid terms (Stripe or
+// admin-approved manual), failed charges, refunds. The tenant-facing
+// Settings → Billing history and the admin billing console both read this.
+model Payment {
+  id           String    @id @default(cuid())
+  tenantId     String
+  provider     String // stripe | manual
+  kind         String // checkout | renewal | adjustment
+  planCode     String
+  termMonths   Int       @default(1)
+  amountCents  Int
+  currency     String    @default("EUR")
+  status       String    @default("PENDING") // PENDING | PAID | FAILED | CANCELED | REFUNDED
+  reference    String?   // Stripe session/invoice/subscription id or manual bank reference
+  description  String
+  checkoutUrl  String?   // Stripe Checkout URL for PENDING checkouts
+  approverNote String?   // who approved a manual payment and why
+  createdAt    DateTime  @default(now())
+  paidAt       DateTime?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+  @@index([status, createdAt])
+  @@index([reference])
+}
+
+// ── SSO (go-live cycle) ──────────────────────────────────────────────────────
+// Per-tenant (or platform-wide when tenantId is null) single sign-on.
+// OIDC: issuer + clientId/secret, discovery-driven code flow with PKCE.
+// SAML: IdP metadata XML; this instance is the SP (metadata at
+// /api/auth/sso/metadata/saml). Users whose email domain matches a
+// connection authenticate through it and are JIT-provisioned into the
+// connection's tenant.
+model SsoConnection {
+  id          String   @id @default(cuid())
+  tenantId    String? // Legacy null rows are untrusted; authentication requires a tenant.
+  protocol    String // OIDC | SAML
+  label       String // e.g. "Microsoft Entra ID"
+  emailDomain String // users@this-domain authenticate via this connection
+  // OIDC fields
+  issuerUrl   String?
+  clientId    String?
+  clientSecret String?
+  // SAML fields
+  idpMetadataXml String?
+  // Status
+  status      String   @default("ACTIVE") // ACTIVE | DISABLED
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([protocol, emailDomain])
+  @@index([emailDomain, status])
 }
 
 // Enterprise pipeline (cycle 10): prospects from the /enterprise onboarding

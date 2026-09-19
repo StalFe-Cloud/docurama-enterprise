@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { BrandLogo, BRAND_LEGAL_NAME } from "@/components/brand/logo";
 import { getDocArticle, getDocsNav } from "@/lib/docs";
+import { MarkdownBody } from "@/components/docs/markdown-body";
 import { ScrollTop } from "@/components/marketing/scroll-top";
 import { ArrowLeft, BookOpen, ChevronRight, FileCode, Search, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -140,10 +141,8 @@ export default async function DocArticlePage({ params }: Props) {
           </div>
 
           {/* Body Content */}
-          <div className="mt-8 prose prose-neutral dark:prose-invert max-w-none space-y-6 text-sm leading-relaxed">
-            <div className="whitespace-pre-wrap font-sans">
-              {doc.content}
-            </div>
+          <div className="mt-8 max-w-none">
+            <MarkdownBody>{doc.content}</MarkdownBody>
           </div>
 
           {/* Footer navigation */}

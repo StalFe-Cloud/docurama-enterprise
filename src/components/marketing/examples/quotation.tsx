@@ -163,7 +163,7 @@ export function ExampleQuotation() {
             <div style={{ marginTop: "auto", paddingTop: 10, borderTop: `1px solid ${HAIR}` }}>
               <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={EMERALD} strokeWidth="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                <span style={{ fontSize: 8, fontWeight: 600, color: EMERALD }}>eIDAS & PAdES Compliant</span>
+                <span style={{ fontSize: 8, fontWeight: 600, color: EMERALD }}>eIDAS-aligned · PAdES</span>
               </div>
               <p style={{ fontSize: 7.5, color: FAINT, marginTop: 3, lineHeight: 1.4 }}>
                 Qualified timestamp and SHA-256 seal upon approval.

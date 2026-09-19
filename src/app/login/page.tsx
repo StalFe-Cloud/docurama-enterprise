@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { PortalRoot } from "@/components/portal/portal-root";
 
 export const metadata: Metadata = {
+  alternates: { canonical: "/login" },
   title: "Sign in - Docurama",
   description: "Sign in to the Docurama portal.",
 };

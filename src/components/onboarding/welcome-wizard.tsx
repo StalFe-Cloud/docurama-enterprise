@@ -26,6 +26,7 @@ import { BrandLogo } from "@/components/brand/logo";
 import { PortalProviders } from "@/components/portal/providers";
 import { planDef, planGuide } from "@/lib/plans";
 import { cn } from "@/lib/utils";
+import { TURNSTILE_ENABLED, TurnstileField } from "@/components/ui/turnstile-field";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -377,6 +378,11 @@ function AccountStep({ invite, inviteTokenRef, planRef, onDone }: { invite: Invi
     organization: "",
     consent: false,
   });
+  // Bot guard: the moment this step rendered + an offscreen honeypot.
+  const [signupStartedAt] = useState(() => Date.now());
+  const [honeypot, setHoneypot] = useState("");
+  const [turnstileToken, setTurnstileToken] = useState("");
+  const [verificationReset, setVerificationReset] = useState(0);
 
   const [corporateDomain, setCorporateDomain] = useState<{
     autoJoin: boolean;
@@ -425,16 +431,21 @@ function AccountStep({ invite, inviteTokenRef, planRef, onDone }: { invite: Invi
       qc.invalidateQueries({ queryKey: ["onboarding"] });
       toast.success(
         corporateDomain?.autoJoin
-          ? `Welcome to ${corporateDomain.tenantName}! Your account has been activated.`
+          ? `Confirm your email to join ${corporateDomain.tenantName}.`
           : "Account created - let's set up your workspace"
       );
       onDone();
     },
-    onError: (err: ApiError) => toast.error(err.message),
+    onError: (err: ApiError) => {
+      setTurnstileToken("");
+      setVerificationReset((value) => value + 1);
+      toast.error(err.message);
+    },
   });
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (signup.isPending || (TURNSTILE_ENABLED && !turnstileToken)) return;
     signup.mutate({
       firstName: form.firstName,
       lastName: form.lastName,
@@ -442,6 +453,10 @@ function AccountStep({ invite, inviteTokenRef, planRef, onDone }: { invite: Invi
       password: form.password,
       organization: corporateDomain?.autoJoin ? corporateDomain.tenantName : form.organization,
       consent: form.consent,
+      // Bot guard (src/lib/bot-guard.ts): honeypot + render timestamp.
+      website: honeypot,
+      formStartedAt: signupStartedAt,
+      turnstileToken,
       ...(viaInvite ? { inviteToken: inviteTokenRef.current } : {}),
       // ?plan= prefill from the pricing page (SOLO). Ignored when joining
       // via invitation or corporate domain — the existing workspace wins.
@@ -462,11 +477,19 @@ function AccountStep({ invite, inviteTokenRef, planRef, onDone }: { invite: Invi
         viaInvite
           ? "Your teammates are already here - create your login with the invited email address."
           : corporateDomain?.autoJoin
-          ? `Welcome to ${corporateDomain.tenantName}. Your corporate domain @${corporateDomain.domain} gives you direct access to your company workspace.`
+          ? `Confirm your @${corporateDomain.domain} email address to access ${corporateDomain.tenantName}.`
           : "You'll be the owner of a new organization on a 14-day trial of the Starter plan. No credit card required."
       }
     >
       <form onSubmit={submit} className="space-y-4" noValidate>
+        {/* Honeypot: invisible to humans, irresistible to bots. */}
+        <div aria-hidden="true" className="absolute -left-[9999px] h-0 w-0 overflow-hidden">
+          <label htmlFor="su-website">Website</label>
+          <input
+            id="su-website" name="website" type="text" tabIndex={-1} autoComplete="off"
+            value={honeypot} onChange={(e) => setHoneypot(e.target.value)}
+          />
+        </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-1.5">
             <Label htmlFor="su-first">First name</Label>
@@ -496,7 +519,7 @@ function AccountStep({ invite, inviteTokenRef, planRef, onDone }: { invite: Invi
                 Approved company workspace: {corporateDomain.tenantName}
               </p>
               <p className="text-xs text-emerald-800 dark:text-emerald-300">
-                Your email domain (@{corporateDomain.domain}) is registered. You will join the shared company workspace directly with no individual billing or payment required.
+                Your email domain (@{corporateDomain.domain}) is registered. After you verify your email, you can join the company workspace without an individual subscription.
               </p>
             </div>
           </div>
@@ -527,11 +550,15 @@ function AccountStep({ invite, inviteTokenRef, planRef, onDone }: { invite: Invi
             className="mt-0.5 h-4 w-4 accent-[#0f7a5a]"
           />
           <span className="text-muted-foreground">
-            I agree to the Docurama Terms of Service and Privacy Policy, and I consent to the processing of my
-            account data as described there (GDPR Art. 6(1)(b)).
+            I agree to the Docurama{" "}
+            <a href="/terms" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-foreground">Terms of Service</a>{" "}
+            and{" "}
+            <a href="/privacy" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-foreground">Privacy Policy</a>,
+            and I consent to the processing of my account data as described there (GDPR Art. 6(1)(b)).
           </span>
         </label>
-        <Button type="submit" className="w-full" disabled={signup.isPending}>
+        <TurnstileField onToken={setTurnstileToken} resetKey={verificationReset} />
+        <Button type="submit" className="w-full" disabled={signup.isPending || (TURNSTILE_ENABLED && !turnstileToken)}>
           {signup.isPending ? (
             <><Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Creating your account…</>
           ) : (
@@ -549,7 +576,6 @@ function AccountStep({ invite, inviteTokenRef, planRef, onDone }: { invite: Invi
 // ─── Step 2: verify email ─────────────────────────────────────────────────────
 
 function VerifyStep({ state, onDone }: { state: OnboardingData; onDone: () => void }) {
-  const act = useOnboardingAct();
   const [cooldown, setCooldown] = useState(0);
 
   useEffect(() => {
@@ -606,17 +632,10 @@ function VerifyStep({ state, onDone }: { state: OnboardingData; onDone: () => vo
             {resend.isPending ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Mail className="h-4 w-4" aria-hidden />}
             {cooldown > 0 ? `Resend in ${cooldown}s` : "Resend email"}
           </Button>
-          {!state.smtpTransportConfigured && (
-            <Button variant="outline" onClick={() => act.mutate({ op: "verify.demo" })} disabled={act.isPending}>
-              {act.isPending ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <CheckCircle2 className="h-4 w-4" aria-hidden />}
-              Verify now - demo shortcut
-            </Button>
-          )}
         </div>
         <p className="rounded-lg border border-dashed bg-muted/40 p-3 text-xs leading-relaxed text-muted-foreground">
-          Platform SMTP delivery isn&apos;t connected yet, so outbound mail is queued in the platform outbox
-          (audit-logged) instead of being delivered. The shortcut above verifies your address in-session so you can
-          complete setup; the audit entry notes how it was verified.
+          If the verification email does not arrive after you resend it, contact your workspace administrator.
+          Workspace access requires confirmation through the link sent to your email address.
         </p>
         <Button variant="ghost" size="sm" onClick={onDone} className="text-muted-foreground">
           I&apos;ll do this later - continue setup

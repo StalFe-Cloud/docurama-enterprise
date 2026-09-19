@@ -1,0 +1,48 @@
+# Public blog: index lists the launch posts and an article renders with
+# markdown content, metadata and the shared trust footer.
+url: ${MAESTRO_BASE_URL}/blog
+name: Blog index and article render launch posts
+tags:
+  - e2e
+  - public
+  - blog
+---
+- launchApp
+
+- extendedWaitUntil:
+    visible: Evidence-grade signing, explained.
+    timeout: 30000
+
+# The index lists launch posts; scroll to each card before asserting.
+- scrollUntilVisible:
+    element: " ?Docurama is live.*"
+    direction: DOWN
+    timeout: 15000
+
+# Open the launch post
+- tapOn: " ?Docurama is live.*"
+- extendedWaitUntil:
+    visible: " ?Docurama is live: sign documents, prove everything.*"
+    timeout: 15000
+- assertVisible: " ?Docurama Team"
+
+# Markdown body rendered (not raw markdown text)
+- scrollUntilVisible:
+    element: " ?What we built.*"
+    direction: DOWN
+    timeout: 15000
+
+# The pricing table inside the post renders its rows
+- scrollUntilVisible:
+    element: " ?Business.*"
+    direction: DOWN
+    timeout: 15000
+
+- scrollUntilVisible:
+    element: " ?All posts.*"
+    direction: DOWN
+    timeout: 15000
+- tapOn: " ?All posts.*"
+- extendedWaitUntil:
+    visible: Evidence-grade signing, explained.
+    timeout: 15000

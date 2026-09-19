@@ -50,20 +50,26 @@ const login = async (email: string, password: string) => {
 // ─── 1. Plan catalog (pure functions, no server needed) ──────────────────────
 
 describe("plan catalog (src/lib/plans.ts)", () => {
-  test("SOLO is the Starter feature set capped at exactly one seat", () => {
+  test("SOLO is sized for 1 seat with strategic friction vs STARTER", () => {
     const solo = PLAN_CATALOG.SOLO;
     const starter = PLAN_CATALOG.STARTER;
+    expect(solo.monthlyEur).toBe(12);
+    expect(starter.monthlyEur).toBe(29);
     expect(solo.seatLimit).toBe(1);
     expect(starter.seatLimit).toBe(3);
-    // Everything else about the plan is the same.
-    for (const key of ["monthlyEur", "envelopeLimit", "storageGb", "apiAccess", "slaUptime", "support"] as const) {
+    expect(solo.envelopeLimit).toBe(30);
+    expect(starter.envelopeLimit).toBe(100);
+    expect(solo.storageGb).toBe(5);
+    expect(starter.storageGb).toBe(10);
+    for (const key of ["apiAccess", "slaUptime", "support"] as const) {
       expect(solo[key]).toBe(starter[key]);
     }
   });
 
-  test("STARTER carries 50 envelopes and the 35-day weekends-on-us framing", () => {
-    expect(PLAN_CATALOG.STARTER.envelopeLimit).toBe(50);
-    expect(PLAN_CATALOG.STARTER.features.some((f) => f.includes("50 envelopes"))).toBe(true);
+  test("STARTER carries 100 envelopes and the 35-day weekends-on-us framing", () => {
+    expect(PLAN_CATALOG.STARTER.envelopeLimit).toBe(100);
+    expect(PLAN_CATALOG.STARTER.features.some((f) => f.includes("100 envelopes"))).toBe(true);
+    expect(PLAN_CATALOG.SOLO.features.some((f) => f.includes("30 envelopes"))).toBe(true);
     expect(PLAN_CATALOG.SOLO.features.some((f) => f.toLowerCase().includes("weekends are on us"))).toBe(true);
     expect(PLAN_CATALOG.STARTER.features.some((f) => f.toLowerCase().includes("weekends are on us"))).toBe(true);
   });
@@ -75,18 +81,24 @@ describe("plan catalog (src/lib/plans.ts)", () => {
     expect(PLAN_ORDER).toEqual(["SOLO", "STARTER", "BUSINESS", "ENTERPRISE"]);
   });
 
-  test("billing terms are incremental: 1mo 0%, 3mo −5%, 6mo −10%, 12mo −15%", () => {
-    expect(BILLING_TERMS.map((t) => [t.months, t.discountPct])).toEqual([[1, 0], [3, 5], [6, 10], [12, 15]]);
+  test("billing terms are incremental: 1mo 0%, 3mo -5%, 6mo -10%, 12mo -20%", () => {
+    expect(BILLING_TERMS.map((t) => [t.months, t.discountPct])).toEqual([[1, 0], [3, 5], [6, 10], [12, 20]]);
   });
 
-  test("term price math: monthly is untouched, 12-month Starter is 16.15/mo saving 34.20", () => {
+  test("term price math: monthly is untouched, 12-month Starter is 23.20/mo saving 69.60", () => {
     const starter = PLAN_CATALOG.STARTER;
+    const solo = PLAN_CATALOG.SOLO;
     const monthly = BILLING_TERMS[0];
     const annual = BILLING_TERMS[3];
-    expect(effectiveMonthlyEur(starter, monthly)).toBe(19);
-    expect(effectiveMonthlyEur(starter, annual)).toBe(16.15);
-    expect(termTotalEur(starter, annual)).toBe(193.8);
-    expect(termSavingsEur(starter, annual)).toBe(34.2);
+    expect(effectiveMonthlyEur(solo, monthly)).toBe(12);
+    expect(effectiveMonthlyEur(solo, annual)).toBe(9.6);
+    expect(termTotalEur(solo, annual)).toBe(115.2);
+    expect(termSavingsEur(solo, annual)).toBe(28.8);
+
+    expect(effectiveMonthlyEur(starter, monthly)).toBe(29);
+    expect(effectiveMonthlyEur(starter, annual)).toBe(23.2);
+    expect(termTotalEur(starter, annual)).toBe(278.4);
+    expect(termSavingsEur(starter, annual)).toBe(69.6);
   });
 
   test("term price math: 6-month Business is 71.10/mo", () => {
@@ -134,7 +146,8 @@ describe("pricing and enterprise pages (marketing surface)", () => {
     for (const name of ["Solo", "Starter", "Business", "Enterprise"]) expect(html).toContain(name);
     expect(html).toContain("No engagement");
     expect(html).toContain("cancel anytime");
-    expect(html).toContain("50 envelopes");
+    expect(html).toContain("100 envelopes");
+    expect(html).toContain("30 envelopes");
     expect(html).toContain("weekends are on us");
     expect(html).toContain("roll over");
     // The badge is gone: value framing took its place.
@@ -142,7 +155,7 @@ describe("pricing and enterprise pages (marketing surface)", () => {
     // The three committed discount slabs are communicated.
     expect(html).toContain("−5%");
     expect(html).toContain("−10%");
-    expect(html).toContain("−15%");
+    expect(html).toContain("−20%");
   });
 
   test("/enterprise onboarding page renders the guided pipeline and lead form", async () => {
@@ -289,8 +302,8 @@ describe("envelope rollover on renewal (src/lib/billing.ts)", () => {
     const stamp = Date.now();
     const days = (n: number) => new Date(Date.now() + n * 86400000);
     try {
-      // Fixture A: STARTER, 1-month term elapsed 5 days ago, 20 of 50 used
-      // → 30 carry forward.
+      // Fixture A: STARTER, 1-month term elapsed 5 days ago, 20 of 100 used
+      // → 80 carry forward.
       const tenantA = await direct.tenant.create({
         data: { name: "E2E Renew A", slug: `e2e-renew-a-${stamp}`, planCode: "STARTER", status: "ACTIVE" },
       });
@@ -303,7 +316,7 @@ describe("envelope rollover on renewal (src/lib/billing.ts)", () => {
       await direct.member.create({ data: { userId: ownerA.id, tenantId: tenantA.id, role: "OWNER" } });
       const subA = await direct.subscription.create({
         data: {
-          tenantId: tenantA.id, planCode: "STARTER", status: "ACTIVE", mrrEur: 19, seats: 3,
+          tenantId: tenantA.id, planCode: "STARTER", status: "ACTIVE", mrrEur: 29, seats: 3,
           termMonths: 1, discountPct: 0, renewalAt: days(-5),
         },
       });
@@ -316,15 +329,15 @@ describe("envelope rollover on renewal (src/lib/billing.ts)", () => {
         });
       }
 
-      // Fixture B: allowance already 100 (50 plan + 50 carried), nothing used
-      // → unused 100 carries forward capped at 50.
+      // Fixture B: allowance already 200 (100 plan + 100 carried), nothing used
+      // → unused 200 carries forward capped at 100.
       const tenantB = await direct.tenant.create({
         data: { name: "E2E Renew B", slug: `e2e-renew-b-${stamp}`, planCode: "STARTER", status: "ACTIVE" },
       });
       const subB = await direct.subscription.create({
         data: {
-          tenantId: tenantB.id, planCode: "STARTER", status: "ACTIVE", mrrEur: 19, seats: 3,
-          termMonths: 1, discountPct: 0, carriedForwardEnvelopes: 50, renewalAt: days(-1),
+          tenantId: tenantB.id, planCode: "STARTER", status: "ACTIVE", mrrEur: 29, seats: 3,
+          termMonths: 1, discountPct: 0, carriedForwardEnvelopes: 100, renewalAt: days(-1),
         },
       });
 
@@ -332,27 +345,27 @@ describe("envelope rollover on renewal (src/lib/billing.ts)", () => {
       const outcomeA = results.find((r) => r.subscriptionId === subA.id);
       const outcomeB = results.find((r) => r.subscriptionId === subB.id);
       expect(outcomeA).toBeDefined();
-      expect(outcomeA!.carriedForward).toBe(30);
+      expect(outcomeA!.carriedForward).toBe(80);
       expect(outcomeA!.usedInPeriod).toBe(20);
       expect(outcomeB).toBeDefined();
-      expect(outcomeB!.carriedForward).toBe(50); // capped: min(100 unused, 50 cap)
+      expect(outcomeB!.carriedForward).toBe(100); // capped: min(200 unused, 100 cap)
 
       const afterA = await direct.subscription.findUnique({ where: { id: subA.id } });
       expect(afterA!.renewalAt.getTime()).toBeGreaterThan(Date.now());
       expect(afterA!.lastInvoiceAt).not.toBeNull();
 
-      // The current allowance includes the rollover: 50 plan + 30 carried.
+      // The current allowance includes the rollover: 100 plan + 80 carried.
       const allowance = await currentAllowance(tenantA.id);
-      expect(allowance.total).toBe(80);
-      expect(allowance.carriedForward).toBe(30);
-      expect(allowance.remaining).toBe(80); // nothing used inside the fresh period
+      expect(allowance.total).toBe(180);
+      expect(allowance.carriedForward).toBe(80);
+      expect(allowance.remaining).toBe(180); // nothing used inside the fresh period
 
       // The renewal is audited.
       const audit = await direct.auditEvent.findFirst({
         where: { action: "subscription.renewed", resource: `subscription:${subA.id}` },
       });
       expect(audit).not.toBeNull();
-      expect(audit!.detail).toContain("30 carried forward");
+      expect(audit!.detail).toContain("80 carried forward");
 
       // Idempotency: nothing is due anymore; a second pass is a no-op.
       const second = await renewDueSubscriptions();
@@ -371,8 +384,9 @@ describe("envelope rollover on renewal (src/lib/billing.ts)", () => {
 describe("small team groups (workspace settings ops)", () => {
   test("owner creates a team, assigns a member, then deleting unassigns", async () => {
     const token = await login("alex@stalfe.example", "demo1234");
+    const teamName = `E2E Pod ${Date.now()}`;
     const created = await post("/api/workspace/settings", {
-      op: "team.create", data: { name: `E2E Pod ${Date.now()}` },
+      op: "team.create", data: { name: teamName },
     }, { "Content-Type": "application/json", Authorization: `Bearer ${token}` });
     expect(created.status).toBe(200);
     const teamId = String(created.body.id);
@@ -396,7 +410,7 @@ describe("small team groups (workspace settings ops)", () => {
 
       // Duplicate names are refused.
       const dupe = await post("/api/workspace/settings", {
-        op: "team.create", data: { name: "Sales" },
+        op: "team.create", data: { name: teamName },
       }, { "Content-Type": "application/json", Authorization: `Bearer ${token}` });
       expect(dupe.status).toBe(400);
 

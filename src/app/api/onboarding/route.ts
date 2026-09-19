@@ -4,7 +4,7 @@ import { getSessionUser, recordAudit } from "@/lib/auth";
 import { jsonError, jsonOk } from "@/lib/serializers";
 import {
   computeOnboardingState, getOnboardingFlags, setOnboardingFlags,
-  createInvitation, requestOrigin, SMTP_TRANSPORT_CONFIGURED,
+  createInvitation, requestOrigin,
 } from "@/lib/onboarding";
 import { seatCapacity } from "@/lib/billing";
 import { planDef } from "@/lib/plans";
@@ -18,8 +18,6 @@ import { planDef } from "@/lib/plans";
  *   invite.skip
  *   signature.save  {kind, method, value, font}
  *   security.skip
- *   verify.demo     - in-session verification shortcut while no SMTP
- *                     transport is wired (clearly audit-flagged)
  *   complete        - marks onboarding finished
  */
 export async function GET() {
@@ -42,7 +40,12 @@ export async function POST(req: NextRequest) {
   const op = body.op ?? "";
   const data = body.data ?? {};
   const id = body.id ?? "";
+  if (op === "verify.demo") return jsonError("Verify your email using the link sent to your mailbox", 403);
   if (!me.tenantId) return jsonError("No workspace membership for this account", 403);
+  if (["org.update", "invite.send", "invite.revoke"].includes(op) &&
+      !["OWNER", "ADMIN"].includes(me.workspaceRole ?? "") && me.role !== "PLATFORM_ADMIN") {
+    return jsonError("Workspace administrator access required", 403);
+  }
 
   const flags = await getOnboardingFlags(me.id);
 
@@ -86,11 +89,12 @@ export async function POST(req: NextRequest) {
         403,
       );
     }
-    await createInvitation({
+    const invitation = await createInvitation({
       tenantId: me.tenantId, email, role,
       invitedBy: `${me.firstName} ${me.lastName}`, invitedById: me.id,
       origin: requestOrigin(req),
     });
+    if (!invitation) return jsonError("No available seats remain in this workspace", 403);
     await recordAudit({
       actor: `${me.firstName} ${me.lastName}`, actorRole: me.role,
       action: "invite.sent", resource: `invite:${email}`, tenantName: me.tenantName,
@@ -142,28 +146,6 @@ export async function POST(req: NextRequest) {
     }
     await setOnboardingFlags(me.id, { ...flags, skippedSecurity: true });
     return jsonOk({ ok: true, message: "Skipped for now - you can enable 2FA anytime in Settings → Profile" });
-  }
-
-  // ── In-session email verification (demo shortcut) ──
-  if (op === "verify.demo") {
-    if (SMTP_TRANSPORT_CONFIGURED) {
-      return jsonError("SMTP delivery is live - use the link from your inbox", 400);
-    }
-    const user = await db.user.findUnique({ where: { id: me.id } });
-    if (!user) return jsonError("Not authenticated", 401);
-    if (user.emailVerifiedAt) return jsonOk({ ok: true, message: "Email already verified" });
-    await db.user.update({ where: { id: me.id }, data: { emailVerifiedAt: new Date() } });
-    await db.emailVerification.updateMany({
-      where: { userId: me.id, purpose: "SIGNUP", consumedAt: null },
-      data: { consumedAt: new Date() },
-    });
-    await recordAudit({
-      actor: `${me.firstName} ${me.lastName}`, actorRole: me.role,
-      action: "user.email.verified", resource: `user:${me.email}`,
-      severity: "WARNING",
-      detail: "Verified in-session (no SMTP transport configured - demo shortcut)",
-    });
-    return jsonOk({ ok: true, message: "Email verified in-session" });
   }
 
   // ── Complete ──

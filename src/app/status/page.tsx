@@ -7,6 +7,7 @@ import { CheckCircle2, AlertTriangle, CircleDashed } from "lucide-react";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
+  alternates: { canonical: "/status" },
   title: "Docurama status",
   description:
     "Live availability of Docurama services: signing portal, REST API, verification service, mail delivery and timestamp relay. Incidents and history are published here.",

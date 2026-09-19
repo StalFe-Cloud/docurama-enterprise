@@ -353,7 +353,7 @@ describe("monthly envelope quota (402, spent STARTER plan)", () => {
       const token = String((login.body as { token?: string }).token);
 
       const before = await direct.envelope.count({ where: { tenantId: quotaTenant.id } });
-      expect(before).toBe(50); // the fixture's fully-spent period
+      expect(before).toBe(100); // the fixture's fully-spent period
 
       const res = await fetch(`${BASE}/api/workspace/envelopes`, {
         method: "POST",
@@ -372,7 +372,7 @@ describe("monthly envelope quota (402, spent STARTER plan)", () => {
 
       // Refused means refused: nothing was created, no recipient rows, nothing.
       const after = await direct.envelope.count({ where: { tenantId: quotaTenant.id } });
-      expect(after).toBe(50);
+      expect(after).toBe(100);
     } finally {
       await direct.$disconnect();
     }

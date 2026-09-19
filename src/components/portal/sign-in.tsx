@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ShieldCheck, Loader2, Lock, KeyRound, ArrowLeft } from "lucide-react";
@@ -110,6 +111,20 @@ export function SignIn() {
     onError: (err: ApiError) => {
       toast.error(err.message || "Sign-in failed");
     },
+  });
+
+  // Domain-aware SSO: when the typed email's domain has a connection, offer
+  // the IdP path alongside the password form (looked up live, cached).
+  const emailOk = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim());
+  const { data: sso } = useQuery({
+    queryKey: ["sso-lookup", email.trim().toLowerCase()],
+    queryFn: () =>
+      fetch(`/api/auth/sso/lookup?email=${encodeURIComponent(email.trim())}`)
+        .then((r) => r.json())
+        .catch(() => ({ sso: false })) as Promise<{ sso: boolean; label?: string; protocol?: string }>,
+    enabled: emailOk,
+    staleTime: 60_000,
+    retry: false,
   });
 
   const submit = (e: React.FormEvent) => {
@@ -319,6 +334,23 @@ export function SignIn() {
                       onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com"
                     />
                   </div>
+                  {sso?.sso && (
+                    <div className="space-y-2" data-testid="sso-offer">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="w-full"
+                        onClick={() => {
+                          window.location.href = `/api/auth/sso/start?email=${encodeURIComponent(email.trim())}`;
+                        }}
+                      >
+                        Continue with {sso.label ?? "single sign-on"}
+                      </Button>
+                      <p className="text-center text-xs text-muted-foreground">
+                        {email.trim().split("@")[1]} uses {sso.protocol === "SAML" ? "SAML" : "OIDC"} single sign-on — continue with your identity provider, or use your password below.
+                      </p>
+                    </div>
+                  )}
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between">
                       <Label htmlFor="password">Password</Label>

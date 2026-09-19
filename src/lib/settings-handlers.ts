@@ -4,7 +4,7 @@ import net from "net";
 import QRCode from "qrcode";
 import { db } from "@/lib/db";
 import type { SessionUser } from "@/lib/auth";
-import { hashPassword, recordAudit } from "@/lib/auth";
+import { hashPassword, verifyPassword, recordAudit } from "@/lib/auth";
 import { jsonError, jsonOk, iso, isos } from "@/lib/serializers";
 import { generateTotpSecret, verifyTotp, otpauthUri, generateRecoveryCodes } from "@/lib/totp";
 import { issueSigningCertificate, shortThumbprint } from "@/lib/certificates";
@@ -14,8 +14,9 @@ import { providerByKey } from "@/lib/sms-providers";
 import { MCP_DEFAULT_TOOLS, mcpToolsCatalogue } from "@/lib/mcp";
 import { WEBHOOK_EVENTS } from "@/lib/api-reference";
 import { createInvitation, requestOrigin } from "@/lib/onboarding";
-import { seatCapacity } from "@/lib/billing";
+import { seatCapacity, apiAccessAllowed } from "@/lib/billing";
 import { planDef } from "@/lib/plans";
+import { tenantCreationAllowed } from "@/lib/deployment-policy";
 
 /**
  * Workspace Settings API - GET sections and POST operations behind
@@ -376,6 +377,7 @@ export async function postSettingsOp(
 
   // ── Organizations & multiple companies ──
   if (op === "save-org") {
+    if (!adminRoles(me)) return jsonError("Workspace administrator access required", 403);
     const name = String(data.name ?? "").trim();
     const billingEmail = String(data.billingEmail ?? "").trim();
     if (!name) return jsonError("Organisation name is required");
@@ -385,7 +387,7 @@ export async function postSettingsOp(
 
   if (op === "org.switch") {
     const targetId = String(data.tenantId ?? "");
-    const membership = await db.member.findFirst({ where: { userId: me.id, tenantId: targetId } });
+    const membership = await db.member.findFirst({ where: { userId: me.id, tenantId: targetId, status: "ACTIVE", tenant: { status: { not: "SUSPENDED" } } } });
     if (!membership) return jsonError("You are not a member of that organization", 403);
     await db.user.update({ where: { id: me.id }, data: { activeTenantId: targetId } });
     const tenant = await db.tenant.findUnique({ where: { id: targetId } });
@@ -401,11 +403,16 @@ export async function postSettingsOp(
     if (name.length < 2) return jsonError("Organization name is required");
     const slugBase = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 30) || "org";
     const slug = `${slugBase}-${randomBytes(2).toString("hex")}`;
-    const tenant = await db.tenant.create({
-      data: { name, slug, planCode: "STARTER", status: "TRIAL", trialEndsAt: new Date(Date.now() + 14 * 86400_000) },
+    const tenant = await db.$transaction(async (tx) => {
+      if (!tenantCreationAllowed(me.role, await tx.tenant.count())) return null;
+      const created = await tx.tenant.create({
+        data: { name, slug, planCode: "STARTER", status: "TRIAL", trialEndsAt: new Date(Date.now() + 14 * 86400_000) },
+      });
+      await tx.member.create({ data: { userId: me.id, tenantId: created.id, role: "OWNER", status: "ACTIVE" } });
+      await tx.user.update({ where: { id: me.id }, data: { activeTenantId: created.id } });
+      return created;
     });
-    await db.member.create({ data: { userId: me.id, tenantId: tenant.id, role: "OWNER", status: "ACTIVE" } });
-    await db.user.update({ where: { id: me.id }, data: { activeTenantId: tenant.id } });
+    if (!tenant) return jsonError("Organization creation is disabled for this installation", 403);
     await recordAudit({
       actor, actorRole: me.role, action: "organization.created", resource: `tenant:${slug}`,
       tenantName: name, detail: "New organization created from Settings → Account",
@@ -417,7 +424,7 @@ export async function postSettingsOp(
   if (op === "password.change") {
     const current = String(data.current ?? "");
     const next = String(data.next ?? "");
-    if (user.passwordHash !== hashPassword(current)) {
+    if (!verifyPassword(current, user.passwordHash)) {
       await db.securityEvent.create({
         data: { type: "PASSWORD_CHANGE_FAILED", severity: "MEDIUM", actor: me.email, ip: "10.42.0.7", blocked: true, detail: "Current password did not match" },
       });
@@ -490,7 +497,7 @@ export async function postSettingsOp(
 
   if (op === "2fa.disable") {
     if (!user.totpEnabled) return jsonError("Two-factor authentication is not enabled");
-    if (user.passwordHash !== hashPassword(String(data.password ?? ""))) {
+    if (!verifyPassword(String(data.password ?? ""), user.passwordHash)) {
       return jsonError("Password is incorrect", 401);
     }
     if (!verifyTotp(user.totpSecret ?? "", String(data.code ?? ""))) {
@@ -589,6 +596,7 @@ export async function postSettingsOp(
   }
 
   if (op === "invite-member") {
+    if (!adminRoles(me)) return jsonError("Only workspace owners and admins can invite members", 403);
     const email = String(data.email ?? "").trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return jsonError("A valid email is required");
     const exists = await db.user.findUnique({ where: { email } });
@@ -610,11 +618,12 @@ export async function postSettingsOp(
     // the invited person creates their own password at /invite/<token> - the
     // workspace never fabricates accounts or credentials on their behalf.
     const role = ["ADMIN", "MEMBER"].includes(String(data.role)) ? String(data.role) : "MEMBER";
-    await createInvitation({
+    const invitation = await createInvitation({
       tenantId, email, role,
       invitedBy: `${user.firstName} ${user.lastName}`, invitedById: me.id,
       origin: requestOrigin(req),
     });
+    if (!invitation) return jsonError("No available seats remain in this workspace", 403);
     await recordAudit({
       actor: `${me.firstName} ${me.lastName}`, actorRole: me.role,
       action: "invite.sent", resource: `invite:${email}`, tenantName: me.tenantName,
@@ -624,6 +633,7 @@ export async function postSettingsOp(
   }
 
   if (op === "invite-revoke") {
+    if (!adminRoles(me)) return jsonError("Only workspace owners and admins can revoke invitations", 403);
     const inv = await db.invitation.findFirst({ where: { id, tenantId, status: "PENDING" } });
     if (!inv) return jsonError("Invitation not found", 404);
     await db.invitation.update({ where: { id: inv.id }, data: { status: "REVOKED" } });
@@ -819,7 +829,7 @@ export async function postSettingsOp(
   // ── RFC 3161 Timestamp Authority ──
   if (op === "tsa.save") {
     const url = String(data.url ?? "").trim();
-    if (!/^https?:\/\//.test(url)) return jsonError("TSA URL must start with http:// or https://");
+    if (!/^https?:\/\//.test(url)) return jsonError("TSA URL must use https:// - timestamp responses must be integrity-protected");
     const hashAlgorithm = ["SHA-256", "SHA-384", "SHA-512"].includes(String(data.hashAlgorithm)) ? String(data.hashAlgorithm) : "SHA-256";
     const authType = data.authType === "basic" ? "basic" : "none";
     const username = authType === "basic" ? String(data.username ?? "").trim() || null : null;
@@ -1133,6 +1143,8 @@ export async function postSettingsOp(
 
   // ── API keys ──
   if (op === "create-key") {
+    if (!adminRoles(me)) return jsonError("Only workspace owners and admins can create API keys", 403);
+    if (!(await apiAccessAllowed(tenantId))) return jsonError("Your workspace plan does not include API access. Upgrade to Business or Enterprise.", 403);
     const name = String(data.name ?? "").trim();
     const scope = ["READONLY", "ENVELOPES", "TEMPLATES", "FULL"].includes(String(data.scope)) ? String(data.scope) : "READONLY";
     if (!name) return jsonError("Key name is required");
@@ -1148,6 +1160,7 @@ export async function postSettingsOp(
   }
 
   if (op === "revoke-key") {
+    if (!adminRoles(me)) return jsonError("Only workspace owners and admins can revoke API keys", 403);
     const k = await db.apiKey.findFirst({ where: { id, tenantId } });
     if (!k) return jsonError("Key not found", 404);
     await db.apiKey.update({ where: { id }, data: { status: "REVOKED" } });

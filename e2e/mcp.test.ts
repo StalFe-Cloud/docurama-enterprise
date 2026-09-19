@@ -228,8 +228,16 @@ describe("MCP server (/api/mcp)", () => {
       if (!cfg) throw new Error("MCP config fixture missing — seed first");
       await direct.mcpConfig.update({ where: { id: cfg.id }, data: { rateLimitPerMin: 2 } });
 
-      // The rate key's in-server bucket is cold (no other test used it), so
-      // requests 1-2 pass and request 3 trips the limit.
+      // The rate key's bucket may be warm on a long-lived dev server (a
+      // previous run already spent requests in the 60s window). Drain first:
+      // fire until the key is limited, then wait out the whole window so the
+      // canonical sequence starts from a verifiably cold bucket. (A single
+      // probe is NOT enough - the probe itself consumes one of the 2 slots.)
+      for (let i = 0; i < 6; i++) {
+        const drain = await rpc({ jsonrpc: "2.0", id: 16, method: "ping" }, { "X-API-Key": E2E_MCP_RATE_KEY });
+        if (drain.status === 429) break;
+      }
+      await new Promise((r) => setTimeout(r, 61_000));
       const r1 = await rpc({ jsonrpc: "2.0", id: 17, method: "ping" }, { "X-API-Key": E2E_MCP_RATE_KEY });
       const r2 = await rpc({ jsonrpc: "2.0", id: 18, method: "ping" }, { "X-API-Key": E2E_MCP_RATE_KEY });
       const r3 = await rpc({ jsonrpc: "2.0", id: 19, method: "ping" }, { "X-API-Key": E2E_MCP_RATE_KEY });
@@ -244,5 +252,7 @@ describe("MCP server (/api/mcp)", () => {
       });
       await direct.$disconnect();
     }
-  });
+    // The 61s window wait (when the bucket is warm from a previous run on a
+    // long-lived server) needs a timeout above the 5s default.
+  }, 90_000);
 });

@@ -1,6 +1,6 @@
 # Enterprise application synchronization provenance
 
-Prepared 2026-09-19 for `codex/reconcile-release-hardening`, proposed as a draft pull request to Enterprise `quality`. This source port does not promote `main` or deploy an installation.
+Prepared 2026-09-19 for the reviewed application port. PR #1 merged into Enterprise `quality`, then `main` was fast-forwarded to the same result at the user's instruction. Only `main` and `quality` are retained as branches. The reviewed source is preserved at tag `archive/2026-09-19/reconcile-release-hardening`. No installation was deployed.
 
 ## Source and destination
 
@@ -42,7 +42,7 @@ The final five-file follow-up enables GFM in the shared Markdown renderer so blo
 
 Dependencies were installed with the frozen lockfile. Prisma client generation, full TypeScript and ESLint checks passed. Generation does not update the retained database. Security/provider suites run as separate processes with their own scratch schemas:
 
-Local isolated validation: **89 tests passed, 561 assertions, zero failures**, covering authentication (11), passwords (9), quota (6), SSO (23), bot protection (10), payment events (23), blog (4) and storage configuration (3). The blog tests were rerun after the GFM follow-up; the unchanged security suites retain their earlier results. `scripts/test-entrypoint.sh` also passed its schema-failure, success and explicit-skip cases. Shared source, schema, tests, content, scripts and configuration were compared against `4303be8` with no content differences after normalizing line endings. The retained database hash remained unchanged.
+Local isolated validation: **89 tests passed, 461 assertions, zero failures**, covering authentication (11), passwords (9), quota (6), SSO (23), bot protection (10), payment events (23), blog (4) and storage configuration (3). The blog tests were rerun after the GFM follow-up; the unchanged security suites retain their earlier results. `scripts/test-entrypoint.sh` also passed its schema-failure, success and explicit-skip cases. Shared source, schema, tests, content, scripts and configuration were compared against `4303be8` with no content differences after normalizing line endings. The retained database hash remained unchanged.
 
 ```sh
 node node_modules/typescript/bin/tsc --noEmit
@@ -56,4 +56,4 @@ bun --no-env-file test e2e/billing.test.ts
 bun --no-env-file test e2e/blog.test.ts e2e/storage-config.test.ts
 ```
 
-CI and release-gate results for the current head are reported on the draft PR. Enterprise CI at `b28d0bf` passed the production-image build, fresh-container health/blog/bootstrap checks and PostgreSQL schema-portability job; the final Markdown follow-up is rechecked by CI. Real external IdP/Cloudflare browser validation, SMTP/payment activation, customer installation, independent PDF validation and restore drill remain gates until separately recorded. No live deployment or data migration is part of this port.
+Enterprise [CI run 35450255485](https://github.com/StalFe-Cloud/docurama-enterprise/actions/runs/35450255485) passed at final application source `e870d7d6d46fc3ef57ab9a94bdff73a9b7a767fb`: 214 automated tests with 1063 assertions, all 29 Maestro browser flows, production-image build and fresh-container health/blog/bootstrap checks, and PostgreSQL schema portability. The merge tree was verified identical to this tested source; subsequent provenance corrections change documentation only. Real external IdP/Cloudflare browser validation, SMTP/payment activation, customer installation, independent PDF validation and restore drill remain gates until separately recorded. No live deployment or data migration is part of this port.

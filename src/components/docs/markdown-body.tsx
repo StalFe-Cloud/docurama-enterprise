@@ -1,4 +1,5 @@
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 /**
  * Shared markdown renderer for the knowledge base (/docs) and the blog.
@@ -9,6 +10,7 @@ export function MarkdownBody({ children }: { children: string }) {
   return (
     <div className="docurama-prose max-w-none text-sm leading-relaxed text-foreground">
       <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
         components={{
           h1: (p) => <h1 className="mt-10 scroll-mt-24 text-2xl font-bold tracking-tight sm:text-3xl" {...p} />,
           h2: (p) => <h2 className="mt-8 scroll-mt-24 border-b pb-2 text-xl font-semibold tracking-tight" {...p} />,

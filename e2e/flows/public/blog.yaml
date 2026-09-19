@@ -22,9 +22,9 @@ tags:
 # Open the launch post
 - tapOn: " ?Docurama is live.*"
 - extendedWaitUntil:
-    visible: " ?sign documents, prove everything.*"
+    visible: " ?Docurama is live: sign documents, prove everything.*"
     timeout: 15000
-- assertVisible: Docurama Team
+- assertVisible: " ?Docurama Team"
 
 # Markdown body rendered (not raw markdown text)
 - scrollUntilVisible:
@@ -38,4 +38,11 @@ tags:
     direction: DOWN
     timeout: 15000
 
-- assertVisible: " ?All posts.*"
+- scrollUntilVisible:
+    element: " ?All posts.*"
+    direction: DOWN
+    timeout: 15000
+- tapOn: " ?All posts.*"
+- extendedWaitUntil:
+    visible: Evidence-grade signing, explained.
+    timeout: 15000

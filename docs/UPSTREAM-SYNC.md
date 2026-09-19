@@ -10,7 +10,8 @@ Prepared 2026-09-19 for `codex/reconcile-release-hardening`, proposed as a draft
 | Enterprise existing `origin/quality` | `242724e` (seven commits behind that main) |
 | Docurama comparison base `origin/main` | `d1912f9c48e54738f98c39f3ff62de4168249cde` |
 | Initial integrated application snapshot | `a7f88c4322ea478e6571938f7569121e8e742800` |
-| Final integrated Docurama application source | `d023128d4da899b59a5e95d2ddb433845a6e6e2b` |
+| Hardened Docurama application snapshot | `d023128d4da899b59a5e95d2ddb433845a6e6e2b` |
+| Final Docurama source, including Markdown/browser follow-up | `4303be8f79be79e0461ed5a0be2389487c3ef316` |
 
 The repositories have unrelated Git histories. Enterprise's `upstream` remote points to the local Docurama checkout; the source objects and immutable commit were verified. This was an explicit source port, without an unrelated-history merge. Starting at Enterprise main retains its seven main-only fixes when reviewed against quality.
 
@@ -35,11 +36,13 @@ Enterprise `docker-compose.yml`, deployment directories/configuration and `db/cu
 
 The final source includes the 27-file follow-up from the initial snapshot: strict OIDC verification, JIT capacity, password storage/migration, payment replay/order handling, Windows CRLF blog frontmatter parsing, production image/bootstrap checks and corrected rollout documentation. `e2e/billing.test.ts` creates a fresh temporary schema and explicit owner/tenant fixtures instead of copying Enterprise's committed database. Payment environment state is cleared before using its local Stripe stub. This test-isolation adjustment was contributed back to Docurama and is included in the final source commit above.
 
+The final five-file follow-up enables GFM in the shared Markdown renderer so blog/documentation tables produce semantic table headers and cells, adds a rendering regression, and corrects the blog browser flow's full article heading and return-link scrolling. Its source commit is `4303be8`. The corrected blog flow passed a native Maestro 2.10.0 run against the base application's scratch database, including the Business table row and navigation back to the index.
+
 ## Validation
 
 Dependencies were installed with the frozen lockfile. Prisma client generation, full TypeScript and ESLint checks passed. Generation does not update the retained database. Security/provider suites run as separate processes with their own scratch schemas:
 
-Final local run: **88 tests passed, 557 assertions, zero failures**, covering authentication (11), passwords (9), quota (6), SSO (23), bot protection (10), payment events (23), blog (3) and storage configuration (3). `scripts/test-entrypoint.sh` also passed its schema-failure, success and explicit-skip cases. Shared source, schema, tests, content, scripts and configuration were compared against `d023128` with no content differences after normalizing line endings. The retained database hash remained unchanged.
+Local isolated validation: **89 tests passed, 561 assertions, zero failures**, covering authentication (11), passwords (9), quota (6), SSO (23), bot protection (10), payment events (23), blog (4) and storage configuration (3). The blog tests were rerun after the GFM follow-up; the unchanged security suites retain their earlier results. `scripts/test-entrypoint.sh` also passed its schema-failure, success and explicit-skip cases. Shared source, schema, tests, content, scripts and configuration were compared against `4303be8` with no content differences after normalizing line endings. The retained database hash remained unchanged.
 
 ```sh
 node node_modules/typescript/bin/tsc --noEmit
@@ -53,4 +56,4 @@ bun --no-env-file test e2e/billing.test.ts
 bun --no-env-file test e2e/blog.test.ts e2e/storage-config.test.ts
 ```
 
-CI and release-gate results are reported on the draft PR. A production-image build, real external IdP/Cloudflare browser validation, SMTP/payment activation, customer installation, independent PDF validation and restore drill remain gates until separately recorded. No live deployment or data migration is part of this port.
+CI and release-gate results for the current head are reported on the draft PR. Enterprise CI at `b28d0bf` passed the production-image build, fresh-container health/blog/bootstrap checks and PostgreSQL schema-portability job; the final Markdown follow-up is rechecked by CI. Real external IdP/Cloudflare browser validation, SMTP/payment activation, customer installation, independent PDF validation and restore drill remain gates until separately recorded. No live deployment or data migration is part of this port.

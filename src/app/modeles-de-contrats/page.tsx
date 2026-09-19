@@ -8,6 +8,7 @@ import { LanguageSwitcher } from "@/components/i18n/language-switcher";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
+  alternates: { canonical: "/modeles-de-contrats" },
   title: "Modèles de Contrats Juridiques Français · Docurama",
   description: "Bibliothèque de modèles de contrats rédigés sous le droit français : accords de confidentialité, CDI, CDD, baux commerciaux, CGV et pactes d'associés prêts à signer.",
 };

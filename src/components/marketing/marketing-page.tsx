@@ -29,6 +29,7 @@ import { TableDemo } from "@/components/marketing/table-demo";
 import { VerifyDemo } from "@/components/marketing/verify-demo";
 import { LiveExamples } from "@/components/marketing/live-examples";
 import { ScrollTop } from "@/components/marketing/scroll-top";
+import { CookieNotice } from "@/components/marketing/cookie-notice";
 import { LanguageSwitcher } from "@/components/i18n/language-switcher";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -118,12 +119,16 @@ const COMPLIANCE = [
 
 const FAQS = [
   {
+    q: "What's the difference between Solo and Starter?",
+    a: "Solo includes one seat and 30 envelopes for €12/month. Starter includes three seats and 100 envelopes for €29/month. Both include 35 sending days and rollover; Business supports larger teams.",
+  },
+  {
     q: "Is Docurama an EU company, and where is my data?",
     a: "Docurama SAS is registered at 1 Rue Marguerin, 75014 Paris, France. Customer data is processed and stored in the European Union, with no transatlantic transfers of your documents.",
   },
   {
     q: "Are the signatures legally valid?",
-    a: "Docurama implements eIDAS-aligned electronic signature workflows (Simple, Advanced, Qualified-aligned) with cryptographic sealing and RFC 3161 timestamps. For most B2B contracts across the EU, Simple and Advanced eSignatures are sufficient and fully enforceable. The signing level applied to each document is reported honestly in its evidence record.",
+    a: "Docurama implements eIDAS-aligned electronic signature workflows (Simple and Advanced) with cryptographic sealing and RFC 3161 timestamps. For most B2B contracts across the EU, Simple and Advanced eSignatures are sufficient and fully enforceable. The signing level applied to each document is reported honestly in its evidence record.",
   },
   {
     q: "We're a regulated company. Can you support 21 CFR Part 11?",
@@ -475,6 +480,10 @@ export function MarketingPage() {
             ))}
           </div>
           <p className="mt-6 text-xs text-muted-foreground">
+            <strong className="font-semibold text-foreground">Choose the allowance your team needs</strong> —
+            Solo includes 30 envelopes and one seat; Starter includes 100 envelopes and three seats.
+          </p>
+          <p className="mt-3 text-xs text-muted-foreground">
             Unused envelopes roll over to the next period on renewal (up to one
             monthly allowance) — a quiet month is never a lost month. Need more
             envelopes, self-hosting or on-premises deployment?{" "}
@@ -535,7 +544,7 @@ export function MarketingPage() {
           <nav aria-label="Product">
             <p className="mb-4 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Product</p>
             <ul className="space-y-2.5 text-sm">
-              {[["Features", "#product"], ["Live examples", "#examples"], ["Compliance", "#compliance"], ["Pricing", "#pricing"], ["Contract templates", "/modeles-de-contrats"], ["Developers", "/developers"], ["Verify a document", "/verify"], ["Documentation", "/docs"], ["Create account", "/welcome"]].map(([l, h]) => (
+              {[["Features", "#product"], ["Live examples", "#examples"], ["Compliance", "#compliance"], ["Pricing", "#pricing"], ["Contract templates", "/modeles-de-contrats"], ["Developers", "/developers"], ["Verify a document", "/verify"], ["Documentation", "/docs"], ["Blog", "/blog"], ["Create account", "/welcome"]].map(([l, h]) => (
                 <li key={l}><a className="text-muted-foreground transition-colors hover:text-foreground" href={h}>{l}</a></li>
               ))}
             </ul>
@@ -551,10 +560,10 @@ export function MarketingPage() {
           <nav aria-label="Legal and trust">
             <p className="mb-4 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Legal and trust</p>
             <ul className="space-y-2.5 text-sm">
-              <li><a className="text-muted-foreground transition-colors hover:text-foreground" href="/docs#legal">Terms of Service</a></li>
-              <li><a className="text-muted-foreground transition-colors hover:text-foreground" href="/docs#legal">Privacy Policy</a></li>
-              <li><a className="text-muted-foreground transition-colors hover:text-foreground" href="/docs#legal">Data Processing Agreement</a></li>
-              <li><a className="text-muted-foreground transition-colors hover:text-foreground" href="/docs#legal">Subprocessor list</a></li>
+              <li><a className="text-muted-foreground transition-colors hover:text-foreground" href="/terms">Terms of Service</a></li>
+              <li><a className="text-muted-foreground transition-colors hover:text-foreground" href="/privacy">Privacy Policy</a></li>
+              <li><a className="text-muted-foreground transition-colors hover:text-foreground" href="mailto:legal@docurama.eu">Data Processing Agreement (on request)</a></li>
+              <li><a className="text-muted-foreground transition-colors hover:text-foreground" href="/privacy">Subprocessor list (Privacy Policy, §5)</a></li>
               <li><a className="text-muted-foreground transition-colors hover:text-foreground" href="/modeles-de-contrats">French legal templates</a></li>
               <li><a className="text-muted-foreground transition-colors hover:text-foreground" href="/security">Security policy</a></li>
               <li><a className="text-muted-foreground transition-colors hover:text-foreground" href="/status">Platform status</a></li>
@@ -573,6 +582,7 @@ export function MarketingPage() {
         </div>
       </footer>
 
+      <CookieNotice />
       <ScrollTop />
     </div>
   );

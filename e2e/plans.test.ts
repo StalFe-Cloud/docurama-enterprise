@@ -384,8 +384,9 @@ describe("envelope rollover on renewal (src/lib/billing.ts)", () => {
 describe("small team groups (workspace settings ops)", () => {
   test("owner creates a team, assigns a member, then deleting unassigns", async () => {
     const token = await login("alex@stalfe.example", "demo1234");
+    const teamName = `E2E Pod ${Date.now()}`;
     const created = await post("/api/workspace/settings", {
-      op: "team.create", data: { name: `E2E Pod ${Date.now()}` },
+      op: "team.create", data: { name: teamName },
     }, { "Content-Type": "application/json", Authorization: `Bearer ${token}` });
     expect(created.status).toBe(200);
     const teamId = String(created.body.id);
@@ -409,7 +410,7 @@ describe("small team groups (workspace settings ops)", () => {
 
       // Duplicate names are refused.
       const dupe = await post("/api/workspace/settings", {
-        op: "team.create", data: { name: "Sales" },
+        op: "team.create", data: { name: teamName },
       }, { "Content-Type": "application/json", Authorization: `Bearer ${token}` });
       expect(dupe.status).toBe(400);
 

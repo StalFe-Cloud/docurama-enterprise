@@ -1,10 +1,46 @@
-import { createHash } from "crypto";
+import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { cookies, headers } from "next/headers";
 import { db } from "@/lib/db";
 
 export const SESSION_COOKIE = "docurama_session";
 export const SESSION_TOKEN_STORE = "docurama_token";
-export const hashPassword = (pw: string) => createHash("sha256").update(pw).digest("hex");
+const PASSWORD_SCRYPT = { N: 32768, r: 8, p: 3, maxmem: 64 * 1024 * 1024 } as const;
+const PASSWORD_KEY_BYTES = 32;
+const PASSWORD_HASH_PREFIX = "scrypt$1$32768$8$3$";
+const LEGACY_PASSWORD_HASH = /^[a-f0-9]{64}$/i;
+const SCRYPT_PASSWORD_HASH = /^scrypt\$1\$32768\$8\$3\$([a-f0-9]{32})\$([a-f0-9]{64})$/;
+
+/** Versioned, salted scrypt. Keep this synchronous for existing password writers. */
+export function hashPassword(password: string): string {
+  const salt = randomBytes(16);
+  const key = scryptSync(password, salt, PASSWORD_KEY_BYTES, PASSWORD_SCRYPT);
+  return `${PASSWORD_HASH_PREFIX}${salt.toString("hex")}$${key.toString("hex")}`;
+}
+
+/** Legacy digests are readable only; successful complete sign-in upgrades them. */
+export function passwordNeedsUpgrade(storedHash: string): boolean {
+  return typeof storedHash === "string" && LEGACY_PASSWORD_HASH.test(storedHash);
+}
+
+/**
+ * Compare fixed-length derived keys in constant time. Only this version's cost
+ * profile is accepted: corrupted/untrusted records cannot request arbitrary
+ * CPU or memory. Passwords retain their exact UTF-8 bytes, without truncation.
+ */
+export function verifyPassword(password: string, storedHash: string): boolean {
+  if (typeof password !== "string" || typeof storedHash !== "string" || storedHash.length > 256) return false;
+  try {
+    if (passwordNeedsUpgrade(storedHash)) {
+      return timingSafeEqual(createHash("sha256").update(password).digest(), Buffer.from(storedHash, "hex"));
+    }
+    const match = SCRYPT_PASSWORD_HASH.exec(storedHash);
+    if (!match) return false;
+    const actual = scryptSync(password, Buffer.from(match[1], "hex"), PASSWORD_KEY_BYTES, PASSWORD_SCRYPT);
+    return timingSafeEqual(actual, Buffer.from(match[2], "hex"));
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Build the Set-Cookie attribute string for the session cookie.
@@ -44,7 +80,7 @@ export type SessionUser = {
   tenantSlug: string | null;
   tenantPlan: string | null;
   workspaceRole: string | null;
-  /** Id of the server-side session row backing this request (null for legacy tokens). */
+  /** Id of the unrevoked server-side session row backing this request. */
   sessionId: string | null;
   /** Every organization this account belongs to - powers the workspace switcher. */
   orgs: SessionOrg[];
@@ -55,8 +91,7 @@ export type SessionUser = {
  * `Authorization: Bearer <token>` fallback used in embedding contexts).
  *
  * Tokens are server-side Session rows - revocable, expiring, carrying device
- * metadata for Settings → Account → Access security. Legacy tokens that hold
- * a raw user id (issued before the session table existed) keep working.
+ * metadata for Settings → Account → Access security. User IDs are never tokens.
  */
 export async function getSessionUser(): Promise<SessionUser | null> {
   const jar = await cookies();
@@ -72,24 +107,23 @@ export async function getSessionUser(): Promise<SessionUser | null> {
   }
   if (!token) return null;
 
-  let user: Awaited<ReturnType<typeof loadUser>> = null;
-  let sessionId: string | null = null;
+  return resolveSessionUser(token);
+}
 
+/** Resolve only persisted, live sessions; also used by non-cookie consumers. */
+export async function resolveSessionUser(token: string): Promise<SessionUser | null> {
   const session = await db.session.findUnique({ where: { id: token } });
-  if (session) {
-    if (session.revokedAt || session.expiresAt <= new Date()) return null;
-    sessionId = session.id;
-    user = await loadUser(session.userId);
-    // Touch the session at most once a minute to keep the activity list fresh.
-    if (session.lastSeenAt.getTime() < Date.now() - 60_000) {
-      await db.session.update({ where: { id: session.id }, data: { lastSeenAt: new Date() } }).catch(() => undefined);
-    }
-  } else {
-    // Legacy token (raw user id) - still valid, but no session row to revoke.
-    user = await loadUser(token);
+  if (!session || session.revokedAt || session.expiresAt <= new Date()) return null;
+  const user = await loadUser(session.userId);
+  // Touch only still-live sessions; a concurrent revocation must stay revoked.
+  if (session.lastSeenAt.getTime() < Date.now() - 60_000) {
+    await db.session.updateMany({
+      where: { id: session.id, revokedAt: null, expiresAt: { gt: new Date() } },
+      data: { lastSeenAt: new Date() },
+    }).catch(() => undefined);
   }
 
-  if (!user || user.status === "SUSPENDED") return null;
+  if (!user || user.status !== "ACTIVE") return null;
   const activeTenantId = user.activeTenantId;
   const active =
     user.memberships.find((m) => m.tenantId === activeTenantId) ?? user.memberships[0];
@@ -106,7 +140,7 @@ export async function getSessionUser(): Promise<SessionUser | null> {
     tenantSlug: active?.tenant.slug ?? null,
     tenantPlan: active?.tenant.planCode ?? null,
     workspaceRole: active?.role ?? null,
-    sessionId,
+    sessionId: session.id,
     orgs: user.memberships.map((m) => ({
       id: m.tenantId, name: m.tenant.name, slug: m.tenant.slug, role: m.role, planCode: m.tenant.planCode,
     })),
@@ -116,7 +150,7 @@ export async function getSessionUser(): Promise<SessionUser | null> {
 function loadUser(userId: string) {
   return db.user.findUnique({
     where: { id: userId },
-    include: { memberships: { include: { tenant: true } } },
+    include: { memberships: { where: { status: "ACTIVE", tenant: { status: { not: "SUSPENDED" } } }, include: { tenant: true } } },
   });
 }
 

@@ -70,7 +70,7 @@ export function previewFilename(
 
 export const TSA_PRESETS: { key: string; name: string; url: string; note: string }[] = [
   { key: "digicert", name: "DigiCert", url: "https://timestamp.digicert.com", note: "Industry default, high availability" },
-  { key: "sectigo", name: "Sectigo", url: "http://timestamp.sectigo.com", note: "Generous rate limits" },
+  { key: "sectigo", name: "Sectigo", url: "https://timestamp.sectigo.com", note: "Generous rate limits" },
   { key: "globalsign", name: "GlobalSign", url: "https://timestamp.globalsign.com/tsa/rsladvanced/rfc3161", note: "SHA-256 advanced" },
   { key: "freetsa", name: "FreeTSA.org", url: "https://freetsa.org", note: "Free community TSA - fine for QA, not for qualified seals" },
 ];

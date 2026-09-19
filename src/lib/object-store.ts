@@ -4,11 +4,10 @@
  *
  * Design mirrors src/lib/mail.ts:
  *   - Configuration is env-driven and read AT CALL TIME (test-friendly,
- *     hot-reloadable, and a partial config degrades loudly-but-safely).
- *   - All-or-nothing: S3_BUCKET + S3_ACCESS_KEY_ID + S3_SECRET_ACCESS_KEY
- *     must ALL be set, otherwise the app stays on the local filesystem
- *     backend and a single console.warn explains why. A half-configured
- *     production must never half-work.
+ *     hot-reloadable; partial configuration fails closed).
+ *   - Set S3_BUCKET with a complete static key pair or explicitly select
+ *     S3_CREDENTIALS_MODE=default for the AWS SDK instance/task role chain.
+ *     Local storage is selected only when S3 is not configured at all.
  *   - forcePathStyle defaults to true when a custom endpoint is set — every
  *     self-hostable engine (SeaweedFS, MinIO, Garage, Ceph RGW) and
  *     Cloudflare R2 need it; AWS native S3 gets the default (false).
@@ -33,12 +32,15 @@ export type S3Mode =
       region: string;
       forcePathStyle: boolean;
       autoCreateBucket: boolean;
+      credentialsMode: "static" | "default";
+      serverSideEncryption?: "AES256" | "aws:kms";
+      kmsKeyId?: string;
     }
   | { configured: false };
 
 /**
- * Parsed view of the S3_* environment. Required: S3_BUCKET,
- * S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY. Optional: S3_ENDPOINT,
+ * Parsed view of the S3_* environment. Required: S3_BUCKET and either
+ * static credentials or S3_CREDENTIALS_MODE=default. Optional: S3_ENDPOINT,
  * S3_REGION (default us-east-1), S3_FORCE_PATH_STYLE (default: with a
  * custom endpoint), S3_AUTO_CREATE_BUCKET (default on).
  *
@@ -49,21 +51,21 @@ export function s3Mode(): S3Mode {
   const bucket = process.env.S3_BUCKET?.trim();
   const accessKeyId = process.env.S3_ACCESS_KEY_ID?.trim();
   const secretAccessKey = process.env.S3_SECRET_ACCESS_KEY?.trim();
-  const set: Record<string, string | undefined> = {
-    S3_BUCKET: bucket,
-    S3_ACCESS_KEY_ID: accessKeyId,
-    S3_SECRET_ACCESS_KEY: secretAccessKey,
-  };
-  const missing = Object.entries(set)
-    .filter(([, v]) => !v)
-    .map(([k]) => k);
-  if (missing.length > 0 && missing.length < 3) {
-    // Partial configuration is an operator error worth one clear line, not a
-    // crash: stay on the local filesystem backend and say so.
-    console.warn(`[storage] S3 backend partially configured (${missing.join(", ")} unset) — staying on the local filesystem backend`);
-    return { configured: false };
+  const configuredMode = process.env.S3_CREDENTIALS_MODE?.trim() || "static";
+  if (!["static", "default"].includes(configuredMode)) throw new Error("Invalid S3_CREDENTIALS_MODE");
+  if (!bucket && !accessKeyId && !secretAccessKey && !process.env.S3_ENDPOINT?.trim() && !process.env.S3_SSE_KMS_KEY_ID?.trim()) return { configured: false };
+  if (!bucket) throw new Error("S3_BUCKET is required for S3 storage");
+  if (configuredMode === "static" && (!accessKeyId || !secretAccessKey)) {
+    throw new Error("S3 storage requires a complete static credential pair or S3_CREDENTIALS_MODE=default");
   }
-  if (!bucket || !accessKeyId || !secretAccessKey) return { configured: false };
+  if (configuredMode === "default" && (accessKeyId || secretAccessKey)) {
+    throw new Error("S3 static credentials must be unset when using the default credential chain");
+  }
+  const encryption = process.env.S3_SERVER_SIDE_ENCRYPTION?.trim();
+  const kmsKeyId = process.env.S3_SSE_KMS_KEY_ID?.trim() || undefined;
+  if (encryption && encryption !== "AES256" && encryption !== "aws:kms") throw new Error("Invalid S3_SERVER_SIDE_ENCRYPTION");
+  if (kmsKeyId && encryption !== "aws:kms") throw new Error("S3_SSE_KMS_KEY_ID requires aws:kms encryption");
+  if (encryption === "aws:kms" && !kmsKeyId) throw new Error("S3_SSE_KMS_KEY_ID is required for aws:kms encryption");
 
   const endpoint = process.env.S3_ENDPOINT?.trim() || null;
   const forcePathStyle = process.env.S3_FORCE_PATH_STYLE
@@ -76,6 +78,9 @@ export function s3Mode(): S3Mode {
     region: process.env.S3_REGION?.trim() || "us-east-1",
     forcePathStyle,
     autoCreateBucket: process.env.S3_AUTO_CREATE_BUCKET !== "0",
+    credentialsMode: configuredMode as "static" | "default",
+    serverSideEncryption: encryption as "AES256" | "aws:kms" | undefined,
+    kmsKeyId,
   };
 }
 
@@ -90,17 +95,18 @@ function loadSdk(): Promise<S3Sdk> {
 }
 
 async function clientFor(mode: Extract<S3Mode, { configured: true }>): Promise<S3Client> {
-  const key = `${mode.endpoint ?? "aws"}|${mode.region}|${mode.bucket}|${mode.forcePathStyle}`;
+  const key = `${mode.endpoint ?? "aws"}|${mode.region}|${mode.bucket}|${mode.forcePathStyle}|${mode.credentialsMode}|${process.env.S3_ACCESS_KEY_ID ?? ""}|${process.env.S3_SECRET_ACCESS_KEY ?? ""}|${process.env.S3_SESSION_TOKEN ?? ""}`;
   if (cachedClient?.key === key) return cachedClient.client;
   const sdk = await loadSdk();
   const client = new sdk.S3Client({
     ...(mode.endpoint ? { endpoint: mode.endpoint } : {}),
     region: mode.region,
     forcePathStyle: mode.forcePathStyle,
-    credentials: {
+    ...(mode.credentialsMode === "static" ? { credentials: {
       accessKeyId: process.env.S3_ACCESS_KEY_ID!.trim(),
       secretAccessKey: process.env.S3_SECRET_ACCESS_KEY!.trim(),
-    },
+      ...(process.env.S3_SESSION_TOKEN?.trim() ? { sessionToken: process.env.S3_SESSION_TOKEN.trim() } : {}),
+    } } : {}),
   });
   cachedClient = { key, client };
   return client;
@@ -168,7 +174,10 @@ export async function s3PutBytes(
 ): Promise<void> {
   const [client, sdk] = await Promise.all([clientFor(mode), loadSdk()]);
   await client.send(
-    new sdk.PutObjectCommand({ Bucket: mode.bucket, Key: key, Body: body, ContentType: contentType }),
+    new sdk.PutObjectCommand({ Bucket: mode.bucket, Key: key, Body: body, ContentType: contentType,
+      ...(mode.serverSideEncryption ? { ServerSideEncryption: mode.serverSideEncryption } : {}),
+      ...(mode.kmsKeyId ? { SSEKMSKeyId: mode.kmsKeyId } : {}),
+    }),
   );
 }
 

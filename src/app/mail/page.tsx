@@ -4,6 +4,7 @@ import { BrandLogo, BRAND_LEGAL_NAME } from "@/components/brand/logo";
 import { Mail, Server, ShieldCheck } from "lucide-react";
 
 export const metadata: Metadata = {
+  alternates: { canonical: "/mail" },
   title: "Docurama mail service",
   description:
     "Mail infrastructure for docurama.eu: the outbound relay identity, client autoconfiguration and postmaster contacts.",

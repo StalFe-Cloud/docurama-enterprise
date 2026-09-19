@@ -4,6 +4,7 @@ import { BrandLogo, BRAND_LEGAL_NAME, BRAND_ADDRESS } from "@/components/brand/l
 import { ShieldCheck, Lock, FileCheck2, Timer, KeyRound, ScrollText, Mail } from "lucide-react";
 
 export const metadata: Metadata = {
+  alternates: { canonical: "/security" },
   title: "Docurama security",
   description:
     "How Docurama protects signed documents: disclosure policy, security.txt, platform security practices and responsible reporting for security@docurama.eu.",

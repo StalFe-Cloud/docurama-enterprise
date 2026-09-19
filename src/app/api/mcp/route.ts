@@ -3,6 +3,7 @@ import { createHash } from "crypto";
 import { db } from "@/lib/db";
 import { handleMcpRequest } from "@/lib/mcp";
 import { jsonError } from "@/lib/serializers";
+import { apiAccessAllowed } from "@/lib/billing";
 
 /**
  * MCP (Model Context Protocol) server endpoint - JSON-RPC 2.0 over HTTP.
@@ -43,6 +44,7 @@ export async function POST(req: NextRequest) {
       where: { secretHash: sha(key), status: "ACTIVE", tenantId: { not: null } },
     });
     if (!apiKey || !apiKey.tenantId) return jsonError("Invalid or revoked API key", 401);
+    if (!(await apiAccessAllowed(apiKey.tenantId))) return jsonError("API access is unavailable for this workspace plan or status", 403);
 
     const config = await db.mcpConfig.findUnique({ where: { tenantId: apiKey.tenantId } });
     if (!config || !config.enabled) {

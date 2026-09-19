@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { ApiError } from "@/lib/client";
+import { TURNSTILE_ENABLED, TurnstileField } from "@/components/ui/turnstile-field";
 
 /**
  * Enterprise lead form (cycle 10). Posts to /api/enterprise-lead, which
@@ -26,6 +27,10 @@ const VOLUME_OPTIONS = [
 ];
 
 export function EnterpriseLeadForm() {
+  const [formStartedAt] = useState(() => Date.now());
+  const [honeypot, setHoneypot] = useState("");
+  const [turnstileToken, setTurnstileToken] = useState("");
+  const [verificationReset, setVerificationReset] = useState(0);
   const [form, setForm] = useState({
     company: "",
     contactName: "",
@@ -42,7 +47,13 @@ export function EnterpriseLeadForm() {
       fetch("/api/enterprise-lead", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          ...form,
+          // Bot guard: honeypot + the moment the form rendered.
+          website: honeypot,
+          formStartedAt,
+          turnstileToken,
+        }),
       }).then(async (res) => {
         const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
         if (!res.ok) throw new ApiError(body.error ?? `Request failed (HTTP ${res.status})`, res.status);
@@ -52,7 +63,11 @@ export function EnterpriseLeadForm() {
       setDone(true);
       toast.success(body.message ?? "Request received — we'll reply within one business day");
     },
-    onError: (err: ApiError) => toast.error(err.message),
+    onError: (err: ApiError) => {
+      setTurnstileToken("");
+      setVerificationReset((value) => value + 1);
+      toast.error(err.message);
+    },
   });
 
   if (done) {
@@ -73,13 +88,21 @@ export function EnterpriseLeadForm() {
     );
   }
 
-  const valid = form.company.trim() && form.contactName.trim() && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(form.email);
+  const valid = form.company.trim() && form.contactName.trim() && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(form.email) && (!TURNSTILE_ENABLED || turnstileToken);
 
   return (
     <form
       className="mt-8 space-y-5 rounded-xl border bg-card p-6"
-      onSubmit={(e) => { e.preventDefault(); if (valid) submit.mutate(); }}
+      onSubmit={(e) => { e.preventDefault(); if (valid && !submit.isPending) submit.mutate(); }}
     >
+      {/* Honeypot: invisible to humans, irresistible to bots. */}
+      <div aria-hidden="true" className="absolute -left-[9999px] h-0 w-0 overflow-hidden">
+        <label htmlFor="el-website">Website</label>
+        <input
+          id="el-website" name="website" type="text" tabIndex={-1} autoComplete="off"
+          value={honeypot} onChange={(e) => setHoneypot(e.target.value)}
+        />
+      </div>
       <div className="grid gap-5 sm:grid-cols-2">
         <div className="space-y-1.5">
           <Label htmlFor="el-company">Company *</Label>
@@ -122,6 +145,8 @@ export function EnterpriseLeadForm() {
           onChange={(e) => setForm({ ...form, requirements: e.target.value })}
           placeholder="We're a medical-device company, 40 seats, need Part 11 mode and our own certificates; possible self-hosting later." />
       </div>
+      <TurnstileField onToken={setTurnstileToken} resetKey={verificationReset} />
+      {submit.isError && <p role="alert" className="text-sm text-destructive">{submit.error.message}</p>}
       <div className="flex flex-wrap items-center gap-3">
         <Button type="submit" disabled={!valid || submit.isPending}>
           {submit.isPending ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Send className="h-4 w-4" aria-hidden />}

@@ -1,0 +1,56 @@
+# Settings → Billing (go-live cycle): the workspace owner sees the current
+# plan, allowance and seat meters, the plan/term picker and the payment
+# history card. Manual mode on this deployment shows the bank-transfer
+# framing (Request activation button + billing contact copy).
+url: ${MAESTRO_BASE_URL}/login
+name: Settings billing shows plan, usage meters and payment history
+tags:
+  - e2e
+  - workspace
+  - billing
+---
+- launchApp
+
+- extendedWaitUntil:
+    visible: Sign in to your portal
+    timeout: 30000
+
+- tapOn:
+    id: email
+- inputText: e2e@docurama.eu
+- tapOn:
+    id: password
+- inputText: "e2ePass1234!"
+- tapOn: " ?Sign in securely ?"
+- extendedWaitUntil:
+    visible: "Welcome back.*"
+    timeout: 15000
+
+- tapOn: " ?Settings ?"
+- extendedWaitUntil:
+    visible: " ?Account.*"
+    timeout: 15000
+
+# The Billing tab exists in the settings tab bar
+- tapOn: " ?Billing ?"
+- extendedWaitUntil:
+    visible: " ?Current plan.*"
+    timeout: 15000
+
+# Usage meters for envelopes and seats
+- assertVisible: " ?Usage this period.*"
+- assertVisible: " ?Envelopes.*"
+- assertVisible: " ?Seats.*"
+
+# Plan change surface: manual mode asks for a transfer reference
+- scrollUntilVisible:
+    element: " ?Change plan.*"
+    direction: DOWN
+    timeout: 15000
+- assertVisible: " ?Request activation.*"
+
+# Payment history card is present (may be empty for a fresh workspace)
+- scrollUntilVisible:
+    element: " ?Payment history.*"
+    direction: DOWN
+    timeout: 15000

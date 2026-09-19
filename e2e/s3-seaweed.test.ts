@@ -157,7 +157,7 @@ async function* chunksOf(buf: Buffer, size = 64 * 1024): AsyncIterable<Uint8Arra
 /* ── Suite ─────────────────────────────────────────────────────────────────── */
 
 describe.skipIf(!RUN_S3_E2E)("S3 backend configuration (s3Mode)", () => {
-  test("full config engages S3; partial config degrades to local", async () => {
+  test("full config engages S3; partial config fails closed", async () => {
     objectStore = await import("../src/lib/object-store");
     const { s3Mode } = objectStore;
 
@@ -171,11 +171,10 @@ describe.skipIf(!RUN_S3_E2E)("S3 backend configuration (s3Mode)", () => {
       expect(mode.autoCreateBucket).toBe(true);
     }
 
-    // Partial: drop the secret → local backend, no half-working S3.
+    // A broken S3 configuration must never redirect evidence to local disk.
     const saved = process.env.S3_SECRET_ACCESS_KEY;
     delete process.env.S3_SECRET_ACCESS_KEY;
-    mode = s3Mode();
-    expect(mode.configured).toBe(false);
+    expect(() => s3Mode()).toThrow("complete static credential pair");
     process.env.S3_SECRET_ACCESS_KEY = saved;
 
     // Nothing configured at all → local.

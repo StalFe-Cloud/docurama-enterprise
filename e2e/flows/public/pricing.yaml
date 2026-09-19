@@ -1,0 +1,44 @@
+# Public pricing section — catalogue, promotional term switch with
+# incremental discounts, outcome framing (no "most popular" badge).
+url: ${MAESTRO_BASE_URL}/marketing
+name: Pricing shows plans, term discounts and outcome framing
+tags:
+  - e2e
+  - public
+---
+- launchApp
+
+# Jump via the nav anchor (hero-fold layout makes raw scrolling flaky here)
+- tapOn: " ?Pricing ?"
+- extendedWaitUntil:
+    visible: Simple, EU-priced plans
+    timeout: 20000
+
+# Four plans from the catalogue
+- assertVisible: Solo
+- assertVisible: Starter
+- assertVisible: Business
+- assertVisible: Enterprise
+
+# No-engagement default is visible next to the switch (above the fold)
+- assertVisible: ".*no engagement.*"
+
+# The promotional term switch applies the 12-month discount
+- tapOn: "12 months.*"
+- assertVisible: ".*20%.*"
+
+# Back to the no-engagement monthly default
+- tapOn: "Monthly.*"
+
+# Outcome framing replaces the "most popular" highlight (bottom of cards)
+- scrollUntilVisible:
+    element: "With Solo you.*"
+    direction: DOWN
+    timeout: 15000
+- assertVisible: "With Starter you.*"
+
+# 35-day framing on Solo/Starter
+- scrollUntilVisible:
+    element: ".*weekends are on us.*"
+    direction: DOWN
+    timeout: 15000

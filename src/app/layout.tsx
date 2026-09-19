@@ -23,7 +23,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://app.docurama.eu"),
+  // The canonical public origin: OG images and relative canonicals resolve here.
+  metadataBase: new URL("https://docurama.eu"),
   title: "Docurama: Enterprise Portal and Admin Console",
   description:
     "Docurama platform console by Docurama SAS (Paris, France): document signing, PAdES cryptographic verification, tenant administration, compliance operations and trust analytics.",

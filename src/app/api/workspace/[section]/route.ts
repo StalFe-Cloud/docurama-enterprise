@@ -454,7 +454,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         // All workspace settings mutations (profile, signatures, orgs, 2FA,
         // sessions, domains, certificates, TSA, eSign, notifications, SMS,
         // API keys, MCP) live in the dedicated handlers module.
-        if (!tenantId) return jsonError("No workspace membership for this account", 403);
+          if (!tenantId && !(op === "org.create" && me.role === "PLATFORM_ADMIN")) return jsonError("No workspace membership for this account", 403);
         return postSettingsOp(me, { op, id, data }, req);
       }
 

@@ -1,8 +1,8 @@
 import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
-import { SESSION_COOKIE, hashPassword, recordAudit, sessionCookieAttributes } from "@/lib/auth";
+import { SESSION_COOKIE, hashPassword, passwordNeedsUpgrade, verifyPassword, recordAudit, sessionCookieAttributes } from "@/lib/auth";
 import { jsonError, jsonOk } from "@/lib/serializers";
-import { verifyTotp, matchRecoveryCode, sha256 } from "@/lib/totp";
+import { verifyTotp, matchRecoveryCode } from "@/lib/totp";
 
 export async function POST(req: NextRequest) {
   let body: { email?: string; password?: string; otp?: string; challenge?: string };
@@ -11,13 +11,18 @@ export async function POST(req: NextRequest) {
   } catch {
     return jsonError("Invalid request body");
   }
+  if (!body || typeof body.email !== "string" || typeof body.password !== "string" ||
+      (body.otp !== undefined && typeof body.otp !== "string") ||
+      (body.challenge !== undefined && typeof body.challenge !== "string")) {
+    return jsonError("Invalid request body");
+  }
   const email = (body.email ?? "").trim().toLowerCase();
   const password = body.password ?? "";
   if (!email || !password) return jsonError("Email and password are required");
 
   const user = await db.user.findUnique({ where: { email } });
   // Uniform error - never reveal whether the account exists.
-  if (!user || user.passwordHash !== hashPassword(password)) {
+  if (!user || !verifyPassword(password, user.passwordHash)) {
     await db.securityEvent.create({
       data: {
         type: "FAILED_LOGIN", severity: "LOW", actor: email || "unknown",
@@ -26,7 +31,7 @@ export async function POST(req: NextRequest) {
     });
     return jsonError("Invalid email or password", 401);
   }
-  if (user.status === "SUSPENDED") {
+  if (user.status !== "ACTIVE") {
     return jsonError("This account has been deactivated. Contact your administrator.", 403);
   }
 
@@ -78,6 +83,16 @@ export async function POST(req: NextRequest) {
         detail: usedRecovery ? "Signed in with a recovery code" : "Signed in with TOTP",
       },
     });
+  }
+
+  // Upgrade only after every required factor succeeds. Compare-and-swap avoids
+  // overwriting a password changed/reset concurrently with this sign-in.
+  if (passwordNeedsUpgrade(user.passwordHash)) {
+    const upgraded = await db.user.updateMany({
+      where: { id: user.id, passwordHash: user.passwordHash },
+      data: { passwordHash: hashPassword(password) },
+    });
+    if (upgraded.count !== 1) return jsonError("Invalid email or password", 401);
   }
 
   const ip = req.headers.get("x-forwarded-for")?.split(",")[0].trim() ?? "127.0.0.1";

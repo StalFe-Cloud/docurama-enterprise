@@ -79,6 +79,17 @@ export async function apiPost<T>(path: string, body: { op: string; id?: string; 
   return handle<T>(res);
 }
 
+/** POST an arbitrary JSON body (non-settings routes: billing checkout, etc.). */
+export async function apiJsonPost<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...authHeaders() },
+    credentials: "same-origin",
+    body: JSON.stringify(body),
+  });
+  return handle<T>(res);
+}
+
 export async function apiUpload<T>(path: string, formData: FormData): Promise<T> {
   const res = await fetch(path, {
     method: "POST",

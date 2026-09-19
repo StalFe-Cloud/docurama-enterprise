@@ -10,6 +10,7 @@ import { EnterpriseLeadForm } from "@/components/marketing/enterprise-lead-form"
 import { PortalProviders } from "@/components/portal/providers";
 
 export const metadata: Metadata = {
+  alternates: { canonical: "/enterprise" },
   title: "Enterprise onboarding - Docurama",
   description:
     "Audit-grade eSignature for regulated teams: SSO/SAML, BYO certificates, 21 CFR Part 11 mode, legal holds and self-hosting. Guided onboarding from first call to rollout.",

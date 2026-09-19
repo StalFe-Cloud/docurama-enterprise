@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { recordAudit } from "@/lib/auth";
 import { jsonError, jsonOk } from "@/lib/serializers";
 import { queueMail } from "@/lib/onboarding";
+import { checkBotGuard } from "@/lib/bot-guard";
 
 /**
  * POST /api/enterprise-lead — public Enterprise pipeline intake (cycle 10).
@@ -11,8 +12,8 @@ import { queueMail } from "@/lib/onboarding";
  * leads section) and queues a notification to sales@docurama.eu in the mail
  * outbox so nothing is lost while SMTP delivery is not wired. Rate-limit
  * honesty: a soft throttle rejects a repeat submission for the same email
- * within 10 minutes; there is no paid bot-protection layer in front of this
- * endpoint yet (documented in IMPROVEMENT-PLAN).
+ * within 10 minutes. Bot protection (go-live cycle): honeypot + time trap +
+ * optional Cloudflare Turnstile — see src/lib/bot-guard.ts.
  */
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -24,6 +25,16 @@ export async function POST(req: NextRequest) {
   } catch {
     return jsonError("Invalid request body");
   }
+
+  // Bot guard: honeypot, time trap, optional Turnstile. Runs before any
+  // validation or DB access.
+  const guard = await checkBotGuard({
+    website: String(body.website ?? ""),
+    formStartedAt: Number(body.formStartedAt ?? 0),
+    turnstileToken: String(body.turnstileToken ?? ""),
+    ip: req.headers.get("x-forwarded-for")?.split(",")[0].trim(),
+  });
+  if (!guard.ok) return jsonError(guard.error, guard.status);
 
   const company = String(body.company ?? "").trim();
   const contactName = String(body.contactName ?? "").trim();

@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
 
 type Ctx = { params: Promise<{ section: string }> };
 
-const PLAN_MRR: Record<string, number> = { SOLO: 19, STARTER: 19, BUSINESS: 79, ENTERPRISE: 349 };
+const PLAN_MRR: Record<string, number> = { SOLO: 12, STARTER: 19, SMART: 79, BUSINESS: 199, ENTERPRISE: 349 };
 
 // ─────────────────────────────────────────────────────────── GET (read) ──
 export async function GET(req: NextRequest, ctx: Ctx) {
@@ -221,15 +221,22 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       }
 
       case "billing": {
-        const [plans, subs] = await Promise.all([
+        const [plans, subs, payments, pendingCount] = await Promise.all([
           db.plan.findMany({ orderBy: { monthlyEur: "asc" } }),
           db.subscription.findMany({ include: { tenant: { select: { name: true, slug: true, status: true } } }, orderBy: { renewalAt: "asc" } }),
+          db.payment.findMany({
+            include: { tenant: { select: { name: true, slug: true } } },
+            orderBy: { createdAt: "desc" }, take: 50,
+          }),
+          db.payment.count({ where: { status: "PENDING" } }),
         ]);
         const stats = await db.dailyStat.findMany({ orderBy: { date: "asc" }, take: 30, select: { date: true, mrrEur: true } });
         return jsonOk({
           plans: isos(plans),
           subscriptions: subs.map((s) => ({ ...iso(s), tenantName: s.tenant.name, tenantSlug: s.tenant.slug, tenantStatus: s.tenant.status })),
           mrrTrend: isos(stats),
+          payments: payments.map((p) => ({ ...iso(p), tenantName: p.tenant.name, tenantSlug: p.tenant.slug })),
+          pendingPayments: pendingCount,
         });
       }
 
@@ -803,6 +810,35 @@ export async function POST(req: NextRequest, ctx: Ctx) {
           await db.subscription.update({ where: { id }, data: { failedPayment: false, status: "ACTIVE" } });
           await recordAudit({ actor, actorRole: "PLATFORM_ADMIN", action: "billing.payment_retried", resource: `subscription:${id}`, severity: "INFO" });
           return jsonOk({ ok: true, message: "Payment retried - invoice settled" });
+        }
+        if (op === "payment.approve") {
+          // Manual (bank-transfer) checkouts: approving a PENDING payment runs
+          // the exact same activation path as a Stripe checkout completion.
+          const payment = await db.payment.findUnique({ where: { id } });
+          if (!payment) return jsonError("Payment not found", 404);
+          if (payment.status !== "PENDING") return jsonError(`Payment is ${payment.status} — only PENDING payments can be approved`);
+          const note = String(data.note ?? "").trim();
+          if (!note) return jsonError("A confirmation note is required (bank reference or receipt id)");
+          const { activateSubscription } = await import("@/lib/payments");
+          await activateSubscription({
+            tenantId: payment.tenantId,
+            planCode: payment.planCode,
+            termMonths: payment.termMonths,
+            provider: "manual",
+            paymentId: payment.id,
+            actor,
+            actorRole: "PLATFORM_ADMIN",
+            note,
+          });
+          return jsonOk({ ok: true, message: `Payment ${payment.reference} approved — plan activated` });
+        }
+        if (op === "payment.cancel") {
+          const payment = await db.payment.findUnique({ where: { id } });
+          if (!payment) return jsonError("Payment not found", 404);
+          if (payment.status !== "PENDING") return jsonError("Only PENDING payments can be canceled");
+          await db.payment.update({ where: { id }, data: { status: "CANCELED", approverNote: String(data.note ?? "Canceled by admin") } });
+          await recordAudit({ actor, actorRole: "PLATFORM_ADMIN", action: "billing.payment_canceled", resource: `payment:${payment.reference}`, severity: "WARNING", detail: String(data.note ?? "") });
+          return jsonOk({ ok: true, message: "Payment canceled" });
         }
         if (op === "cancel-subscription") {
           const reason = String(data.reason ?? "").trim();

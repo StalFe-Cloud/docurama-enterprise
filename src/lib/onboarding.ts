@@ -17,8 +17,7 @@ import { seatCapacity } from "@/lib/billing";
 
 export const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 
-/** True when a platform-level SMTP transport is configured. It is not yet -
- *  see note above. Drives the in-session "demo verify" shortcut visibility. */
+/** Informational delivery state; never authorizes a mailbox-verification bypass. */
 export const SMTP_TRANSPORT_CONFIGURED = false;
 
 export type OnboardingFlags = {
@@ -79,7 +78,7 @@ export async function computeOnboardingState(userId: string): Promise<Onboarding
   const user = await db.user.findUnique({
     where: { id: userId },
     include: {
-      memberships: { include: { tenant: true } },
+      memberships: { where: { status: "ACTIVE", tenant: { status: { not: "SUSPENDED" } } }, include: { tenant: true } },
       signatures: { select: { id: true } },
     },
   });
@@ -207,14 +206,39 @@ export async function issueEmailVerification(userId: string, email: string, orig
 
 /** Consume a verification token. Returns the userId on success. */
 export async function consumeVerificationToken(token: string): Promise<{ userId: string; email: string } | null> {
-  const row = await db.emailVerification.findUnique({ where: { tokenHash: sha(token) } });
-  if (!row || row.consumedAt || row.expiresAt < new Date()) return null;
-  await db.emailVerification.update({ where: { id: row.id }, data: { consumedAt: new Date() } });
-  await db.user.update({
-    where: { id: row.userId },
-    data: { emailVerifiedAt: new Date(), status: "ACTIVE" },
+  return db.$transaction(async (tx) => {
+    const now = new Date();
+    const row = await tx.emailVerification.findUnique({ where: { tokenHash: sha(token) }, include: { user: true } });
+    if (!row || row.purpose !== "SIGNUP" || row.consumedAt || row.expiresAt <= now ||
+        row.user.status !== "ACTIVE" || row.email.toLowerCase() !== row.user.email.toLowerCase()) return null;
+    const consumed = await tx.emailVerification.updateMany({
+      where: { id: row.id, consumedAt: null, expiresAt: { gt: now } },
+      data: { consumedAt: now },
+    });
+    if (consumed.count !== 1) return null;
+
+    // Only domain joins explicitly staged by signup can be promoted. Never
+    // reactivate revoked/suspended memberships or rely on a stale domain claim.
+    const domain = row.email.split("@")[1]?.toLowerCase();
+    const approvedDomains = await tx.domain.findMany({
+      where: { domain, status: "VERIFIED", purpose: { in: ["AUTO_JOIN", "JOIN"] }, tenant: { status: { not: "SUSPENDED" } } },
+      select: { tenantId: true },
+    });
+    const approvedTenantIds = approvedDomains.map((entry) => entry.tenantId);
+    const pending = await tx.member.findMany({
+      where: { userId: row.userId, status: "PENDING_VERIFICATION", tenantId: { in: approvedTenantIds } },
+      select: { id: true, tenantId: true },
+    });
+    await tx.member.updateMany({
+      where: { id: { in: pending.map((entry) => entry.id) }, status: "PENDING_VERIFICATION" },
+      data: { status: "ACTIVE" },
+    });
+    await tx.user.update({
+      where: { id: row.userId },
+      data: { emailVerifiedAt: now, ...(!row.user.activeTenantId && pending[0] ? { activeTenantId: pending[0].tenantId } : {}) },
+    });
+    return { userId: row.userId, email: row.email };
   });
-  return { userId: row.userId, email: row.email };
 }
 
 /** Create an invitation for an email (or refresh an existing pending one). */
@@ -227,18 +251,18 @@ export async function createInvitation(input: {
   origin: string;
 }) {
   const email = input.email.trim().toLowerCase();
-  const existing = await db.invitation.findFirst({
-    where: { tenantId: input.tenantId, email, status: "PENDING" },
-  });
-  if (existing) {
-    // Refresh: rotate the token and extend the expiry.
-    const token = newInvitationToken();
-    await db.invitation.update({ where: { id: existing.id }, data: { token, role: input.role, expiresAt: new Date(Date.now() + 14 * 24 * 3600_000) } });
-    await queueInvitationMail({ ...input, email, token, tenantName: await tenantName(input.tenantId) });
-    return existing;
-  }
   const token = newInvitationToken();
-  const inv = await db.invitation.create({
+  const inv = await db.$transaction(async (tx) => {
+    const existing = await tx.invitation.findFirst({
+      where: { tenantId: input.tenantId, email, status: "PENDING" },
+    });
+    // A live invitation already holds a seat; refreshing it consumes no extra
+    // seat. A new/expired invite and its capacity check must share a transaction.
+    if ((!existing || existing.expiresAt <= new Date()) && (await seatCapacity(input.tenantId, tx)).remaining <= 0) return null;
+    if (existing) {
+      return tx.invitation.update({ where: { id: existing.id }, data: { token, role: input.role, expiresAt: new Date(Date.now() + 14 * 24 * 3600_000) } });
+    }
+    return tx.invitation.create({
     data: {
       tenantId: input.tenantId,
       email,
@@ -248,7 +272,9 @@ export async function createInvitation(input: {
       invitedById: input.invitedById,
       expiresAt: new Date(Date.now() + 14 * 24 * 3600_000),
     },
+    });
   });
+  if (!inv) return null;
   await queueInvitationMail({ ...input, email, token, tenantName: await tenantName(input.tenantId) });
   return inv;
 }

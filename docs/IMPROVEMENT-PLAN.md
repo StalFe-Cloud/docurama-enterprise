@@ -666,7 +666,34 @@ discount slabs, a one-seat Solo plan, and outcome framing instead of the
   flows** (marketing re-validated green standalone — the Maestro-beta
   dev-compile flake class, forensics in the worklog).
 
-**Deferred (revenue-triggered, unchanged):** payment provider integration
-(Stripe/SEPA rails), SSO/SAML implementation (Enterprise console + docs
-exist, wiring is the paid rung), bot-protection in front of the public
-lead form.
+**Deferred → shipped (go-live cycle, this branch):** all three revenue
+rungs landed on `feat/go-live-platform`:
+
+- **Payment provider rails** — Stripe Checkout (subscription mode, per-term
+  charges), signature-verified webhooks (activation, invoice.paid renewal
+  with rollover, payment_failed → PAST_DUE + dunning, cancellation) and a
+  manual bank-transfer mode for self-host deployments that funnels through
+  the exact same activation path via admin approval. Settings → Billing tab
+  + admin payments ledger. `e2e/billing.test.ts` (14 tests, stub Stripe API
+  + signed webhook events). See `docs/PAYMENTS.md`.
+- **SSO/SAML wiring** — OIDC (discovery, PKCE, nonce, jose JWKS
+  verification; Entra ID / Google / Okta / Keycloak) and SAML 2.0
+  (samlify SP, metadata endpoint, signature-verified ACS), domain-bound,
+  JIT-provisioned, with the sign-in screen offering the IdP path. Settings
+  → SSO tab. `e2e/sso.test.ts` (12 tests, stub OIDC provider + samlify
+  round-trip). See `docs/SSO.md`.
+- **Bot protection** — honeypot + time trap + optional Cloudflare Turnstile
+  on signup and the enterprise lead form. `e2e/bot-guard.test.ts`
+  (10 tests).
+
+Plus the go-live content surface: the user's final 5-plan ladder restored
+everywhere (Solo €12 / Starter €19 same-allowance / Smart Team €79 /
+Business €199 / Enterprise custom, Product/offers JSON-LD generated from the
+catalogue), the knowledge base completed (19 new articles across Billing,
+Teams, Account & security, Self-hosting, Troubleshooting, Templates,
+Domains, Notifications, Webhooks, MCP + 2 tutorials), a blog engine with
+six launch posts, `/.well-known/security.txt`, the full markdown renderer
+for docs, and the internal operator runbooks (`docs/OPERATIONS-RUNBOOK.md`,
+`docs/DEPLOYMENT.md`, `docs/SECURITY.md`, `docs/PAYMENTS.md`, `docs/SSO.md`,
+`docs/GO-LIVE-CHECKLIST.md`). Battery at this cycle: **149 bun tests**
+across 13 files + 29 Maestro flows (CI).

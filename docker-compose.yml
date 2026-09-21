@@ -9,6 +9,10 @@ services:
       - "0.0.0.0:3003:3000"
     environment:
       - NODE_ENV=production
+      # Values live in the untracked .env next to this file (SMTP_URL,
+      # ROOT_DOMAIN) so checkouts/deploys never strand local config.
+      - SMTP_URL=${SMTP_URL:-}
+      - ROOT_DOMAIN=${ROOT_DOMAIN:-}
       - DATABASE_URL=file:/app/db/custom.db
       - STORAGE_DIR=/app/storage
       - NEXT_PUBLIC_DEMO_MODE=false

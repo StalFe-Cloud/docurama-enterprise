@@ -1,175 +1,107 @@
-/**
- * Mail delivery engine — drains the MailOutbox over a real SMTP transport.
- *
- * Modes, in order of precedence:
- *   1. SMTP_URL is set          → real delivery via nodemailer, with
- *                                 attempt counting, exponential backoff and
- *                                 terminal FAILED after 5 attempts.
- *   2. SMTP_URL unset           → outbox-only mode: rows stay QUEUED and
- *                                 (demo / air-gapped / pre-configuration) and
- *                                 remain inspectable in the admin console.
- *                                 Nothing is silently dropped.
- *
- * SMTP_URL grammar:
- *   smtp://user:pass@host:587[?tls=off]   — STARTTLS when the server offers it
- *   smtps://user:pass@host:465            — implicit TLS
- * `?tls=off` disables STARTTLS negotiation (hermetic test transports).
- *
- * Triggers: the background worker (src/instrumentation.ts) calls
- * processOutbox() every 30s; request paths that just queued mail (envelope
- * send, password reset…) call it inline fire-and-forget so a configured
- * relay delivers within the same second in the common case. Both paths are
- * safe to race: a row is claimed by its status transition (QUEUED → SENT /
- * FAILED / QUEUED+nextAttemptAt), never by row locking.
- */
-
-import { createTransport, type Transporter } from "nodemailer";
+import { createTransport } from "nodemailer";
+import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db";
 
 export const MAX_MAIL_ATTEMPTS = 5;
-
-/** Backoff for attempt n (1-based): 30s, 2m, 8m, 30m — capped at 30m. */
+const MAIL_LEASE_MS = 90_000;
+const SEND_DEADLINE_MS = 30_000;
 export function mailBackoffMs(attempt: number): number {
-  return Math.min(30_000 * Math.pow(4, Math.max(0, attempt - 1)), 30 * 60_000);
+  return Math.min(30_000 * 4 ** Math.max(0, attempt - 1), 30 * 60_000);
 }
-
 export type SmtpMode = { configured: true; url: URL; tls: boolean } | { configured: false };
-
-/** Parsed view of SMTP_URL, read at call time (test-friendly, hot-reloadable). */
 export function smtpMode(): SmtpMode {
   const raw = process.env.SMTP_URL?.trim();
   if (!raw) return { configured: false };
   try {
     const url = new URL(raw);
-    if (url.protocol !== "smtp:" && url.protocol !== "smtps:") return { configured: false };
+    if (!["smtp:", "smtps:"].includes(url.protocol)) return { configured: false };
     return { configured: true, url, tls: url.searchParams.get("tls") !== "off" };
   } catch {
-    console.warn("[mail] SMTP_URL is set but not a valid URL — falling back to outbox-only mode");
+    console.warn("[mail] Invalid SMTP_URL; messages remain in the outbox");
     return { configured: false };
   }
 }
+export type OutboxMessage = { id: string; toEmail: string; fromEmail: string; subject: string; bodyText: string };
 
-let cachedTransporter: { key: string; transporter: Transporter } | null = null;
-
-function transporterFor(mode: Extract<SmtpMode, { configured: true }>): Transporter {
-  const key = mode.url.href;
-  if (cachedTransporter?.key === key) return cachedTransporter.transporter;
+/** A dedicated transport lets a deadline close only this message's connection. */
+export async function sendViaSmtp(mode: Extract<SmtpMode, { configured: true }>, msg: OutboxMessage): Promise<void> {
   const secure = mode.url.protocol === "smtps:";
   const transporter = createTransport({
-    host: mode.url.hostname,
-    port: Number(mode.url.port || (secure ? 465 : 587)),
-    secure,
-    // STARTTLS is opportunistic: offered → used; `?tls=off` opts out entirely
-    // (local test transports). Never requireTLS — a plain relay still works.
-    requireTLS: false,
-    ignoreTLS: !mode.tls,
-    auth: mode.url.username
-      ? { user: decodeURIComponent(mode.url.username), pass: decodeURIComponent(mode.url.password) }
-      : undefined,
-    connectionTimeout: 10_000,
-    greetingTimeout: 10_000,
-    socketTimeout: 20_000,
-    pool: true,
-    maxConnections: 3,
+    host: mode.url.hostname, port: Number(mode.url.port || (secure ? 465 : 587)),
+    secure, requireTLS: mode.tls && !secure, ignoreTLS: !mode.tls,
+    auth: mode.url.username ? { user: decodeURIComponent(mode.url.username), pass: decodeURIComponent(mode.url.password) } : undefined,
+    connectionTimeout: 8_000, greetingTimeout: 8_000, socketTimeout: 15_000,
+    pool: false,
   });
-  cachedTransporter = { key, transporter };
-  return transporter;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      transporter.sendMail({ from: msg.fromEmail, to: msg.toEmail, subject: msg.subject, text: msg.bodyText,
+        messageId: `<${msg.id}@outbox.docurama>` }),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => { transporter.close(); reject(new Error("SMTP delivery deadline exceeded")); }, SEND_DEADLINE_MS);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    transporter.close();
+  }
 }
 
-export type OutboxMessage = {
-  id: string;
-  toEmail: string;
-  fromEmail: string;
-  subject: string;
-  bodyText: string;
-};
-
-/** Send one message through the configured transport. Throws on failure. */
-export async function sendViaSmtp(mode: Extract<SmtpMode, { configured: true }>, msg: OutboxMessage): Promise<void> {
-  await transporterFor(mode).sendMail({
-    from: msg.fromEmail,
-    to: msg.toEmail,
-    subject: msg.subject,
-    text: msg.bodyText,
-  });
-}
-
-export type ProcessOutboxResult = {
-  mode: "smtp" | "outbox-only";
-  processed: number;
-  sent: number;
-  failed: number;
-  deferred: number; // still QUEUED with a future nextAttemptAt or attempt budget left
-};
-
-/**
- * Drain due QUEUED rows. Idempotent and safe to call from the worker, from
- * request paths, or manually — everything is journal through the table.
- */
+export type ProcessOutboxResult = { mode: "smtp" | "outbox-only"; processed: number; sent: number; failed: number; deferred: number };
+/** At least once. A crash after SMTP accepts but before acknowledgement may retry. */
 export async function processOutbox(limit = 20): Promise<ProcessOutboxResult> {
   const mode = smtpMode();
   if (!mode.configured) return { mode: "outbox-only", processed: 0, sent: 0, failed: 0, deferred: 0 };
-
-  const due = await db.mailOutbox.findMany({
-    where: {
-      status: "QUEUED",
-      OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: new Date() } }],
-      attempts: { lt: MAX_MAIL_ATTEMPTS },
-    },
-    orderBy: { createdAt: "asc" },
-    take: limit,
-  });
-
-  let sent = 0;
-  let failed = 0;
-  let deferred = 0;
-
-  for (const row of due) {
+  const now = new Date();
+  const unclaimed = { OR: [{ claimUntil: null }, { claimUntil: { lte: now } }] };
+  await db.mailOutbox.updateMany({ where: { status: "QUEUED", attempts: { gte: MAX_MAIL_ATTEMPTS }, ...unclaimed },
+    data: { status: "FAILED", nextAttemptAt: null, claimToken: null, claimUntil: null, lastError: "Attempt budget exhausted; last acknowledgement unavailable" } });
+  const due = { OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: now } }] };
+  const candidates = await db.mailOutbox.findMany({ where: {
+    status: "QUEUED", attempts: { lt: MAX_MAIL_ATTEMPTS }, AND: [due, unclaimed],
+  }, orderBy: { createdAt: "asc" }, take: Math.max(0, Math.min(limit, 100)) });
+  const result: ProcessOutboxResult = { mode: "smtp", processed: 0, sent: 0, failed: 0, deferred: 0 };
+  for (const row of candidates) {
+    const claimToken = randomUUID();
+    const claimedAt = new Date();
+    const claimed = await db.mailOutbox.updateMany({ where: {
+      id: row.id, status: "QUEUED", attempts: row.attempts,
+      AND: [
+        { OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: claimedAt } }] },
+        { OR: [{ claimUntil: null }, { claimUntil: { lte: claimedAt } }] },
+      ],
+    }, data: { claimToken, claimUntil: new Date(Date.now() + MAIL_LEASE_MS), attempts: { increment: 1 } } });
+    if (claimed.count !== 1) continue;
+    result.processed++;
     const attempt = row.attempts + 1;
+    let lastError: string | null = null;
     try {
-      await sendViaSmtp(mode, {
-        id: row.id,
-        toEmail: row.toEmail,
-        fromEmail: row.fromEmail,
-        subject: row.subject,
-        bodyText: row.bodyText,
-      });
-      await db.mailOutbox.update({
-        where: { id: row.id },
-        data: { status: "SENT", sentAt: new Date(), attempts: attempt, lastError: null },
-      });
-      sent++;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      const terminal = attempt >= MAX_MAIL_ATTEMPTS;
-      await db.mailOutbox.update({
-        where: { id: row.id },
-        data: {
-          status: terminal ? "FAILED" : "QUEUED",
-          attempts: attempt,
-          lastError: message.slice(0, 500),
-          nextAttemptAt: terminal ? null : new Date(Date.now() + mailBackoffMs(attempt)),
-        },
-      });
-      if (terminal) failed++;
-      else deferred++;
-      console.warn(`[mail] send attempt ${attempt} failed for ${row.toEmail}: ${message}`);
+      await sendViaSmtp(mode, row);
+    } catch (error) {
+      lastError = (error instanceof Error ? error.message : "SMTP delivery failed").slice(0, 500);
     }
+    const success = lastError === null;
+    const terminal = !success && attempt >= MAX_MAIL_ATTEMPTS;
+    const acknowledged = await db.mailOutbox.updateMany({ where: { id: row.id, claimToken, status: "QUEUED" }, data: {
+      status: success ? "SENT" : terminal ? "FAILED" : "QUEUED",
+      sentAt: success ? new Date() : null, lastError,
+      nextAttemptAt: success || terminal ? null : new Date(Date.now() + mailBackoffMs(attempt)),
+      claimToken: null, claimUntil: null,
+    } });
+    if (acknowledged.count !== 1) continue;
+    if (success) result.sent++;
+    else if (terminal) result.failed++;
+    else result.deferred++;
   }
-
-  return { mode: "smtp", processed: due.length, sent, failed, deferred };
+  return result;
 }
 
-/** Queue depth for the health endpoint / admin console. */
 export async function outboxStats() {
   const [queued, failed, oldestQueued] = await Promise.all([
     db.mailOutbox.count({ where: { status: "QUEUED" } }),
     db.mailOutbox.count({ where: { status: "FAILED" } }),
     db.mailOutbox.findFirst({ where: { status: "QUEUED" }, orderBy: { createdAt: "asc" }, select: { createdAt: true } }),
   ]);
-  return {
-    queued,
-    failed,
-    oldestQueuedAt: oldestQueued?.createdAt?.toISOString() ?? null,
-  };
+  return { queued, failed, oldestQueuedAt: oldestQueued?.createdAt.toISOString() ?? null };
 }

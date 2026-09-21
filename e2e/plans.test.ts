@@ -23,7 +23,7 @@ import {
   effectiveMonthlyEur, termTotalEur, termSavingsEur, rolloverCap, planGuide,
 } from "../src/lib/plans";
 
-const BASE = process.env.MAESTRO_BASE_URL ?? "http://127.0.0.1:3000";
+const BASE = process.env.E2E_BASE_URL ?? "http://127.0.0.1:3000";
 
 const get = async (path: string, headers: Record<string, string> = {}) => {
   const res = await fetch(`${BASE}${path}`, { headers });

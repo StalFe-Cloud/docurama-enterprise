@@ -1,6 +1,7 @@
+import { requestClientIp } from "@/lib/request-metadata";
 import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
-import { SESSION_COOKIE, hashPassword, recordAudit, sessionCookieAttributes } from "@/lib/auth";
+import { SESSION_COOKIE, hashPasswordAsync, recordAudit, sessionCookieAttributes } from "@/lib/auth";
 import { jsonError, jsonOk } from "@/lib/serializers";
 import { issueEmailVerification, requestOrigin } from "@/lib/onboarding";
 import { checkBotGuard } from "@/lib/bot-guard";
@@ -18,7 +19,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
  * Bot protection (go-live cycle): honeypot + time trap + optional Turnstile —
  * see src/lib/bot-guard.ts.
  */
-export async function POST(req: NextRequest) {
+async function handlePost(req: NextRequest) {
   let body: {
     firstName?: string; lastName?: string; email?: string; password?: string;
     organization?: string; inviteToken?: string; consent?: boolean;
@@ -78,12 +79,13 @@ export async function POST(req: NextRequest) {
   }
 
   const origin = requestOrigin(req);
-  const ip = req.headers.get("x-forwarded-for")?.split(",")[0].trim() ?? "127.0.0.1";
+  const ip = requestClientIp(req);
   const userAgent = req.headers.get("user-agent")?.slice(0, 250) ?? null;
 
   // ── Tenant: invited workspace, company domain match, or fresh organization ──
   let isAutoJoin = false;
 
+  const passwordHash = await hashPasswordAsync(password);
   const created = await db.$transaction(async (tx) => {
     let tenantId: string;
     let membershipRole: string;
@@ -150,7 +152,7 @@ export async function POST(req: NextRequest) {
     const user = await tx.user.create({
       data: {
         email,
-        passwordHash: hashPassword(password),
+        passwordHash,
         firstName,
         lastName,
         role: "MEMBER",
@@ -185,7 +187,7 @@ export async function POST(req: NextRequest) {
 
   if (!invitation) await issueEmailVerification(user.id, email, origin);
 
-  await recordAudit({
+  await recordAudit({ actorUserId: user.id, subjectUserId: user.id, tenantId: user.activeTenantId,
     actor: `${firstName} ${lastName}`,
     actorRole: "MEMBER",
     action: invitation
@@ -204,7 +206,7 @@ export async function POST(req: NextRequest) {
   });
   await db.securityEvent.create({
     data: {
-      type: "SIGNUP", severity: "INFO", actor: email, ip, blocked: false,
+      type: "SIGNUP", actorUserId: user.id, subjectUserId: user.id, tenantId: user.activeTenantId, severity: "INFO", actor: email, ip, blocked: false,
       detail: invitation
         ? `Signup via invitation to ${tenantNameForLog}`
         : isAutoJoin
@@ -221,4 +223,13 @@ export async function POST(req: NextRequest) {
   });
   res.headers.append("set-cookie", `${SESSION_COOKIE}=${session.id}; ${sessionCookieAttributes(req)}`);
   return res;
+}
+
+export async function POST(req: NextRequest) {
+  try { return await handlePost(req); }
+  catch (error) {
+    if (error instanceof Response) return error;
+    console.error("[auth] request failed", error);
+    return jsonError("Authentication request failed", 500);
+  }
 }

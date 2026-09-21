@@ -333,11 +333,16 @@ For two-factor signing verification and OTP delivery, Docurama integrates 14 car
 
 ---
 
-## 10. Platform Enhancements & Architectural Advancements (Cycles 1–10)
+## 10. Platform Enhancements & Architectural Advancements (Cycles 1–11)
 
 The following engineering history describes the implemented surfaces. Their production acceptance criteria and outstanding installation-specific validation are tracked separately in the go-live checklist:
 
-1. **Maestro Browser E2E Automation Suite (Cycle 1):**
+1. **Upstream Quality-Hardening Port (Cycle 11, 2026-09-21):**
+   - Synchronized with Docurama `quality` @ `34086af` (three-way port from base `4303be8`; provenance and validation in [docs/UPSTREAM-SYNC.md](docs/UPSTREAM-SYNC.md)).
+   - Versioned Prisma migrations with a boot-blocking entrypoint policy (schema failure refuses startup; explicit skip available), replacing silent boot-time schema pushes.
+   - Delivery and billing hardening: transactional webhook outbox with fenced leases and stable delivery identities, SSRF-pinned webhook transport, atomic quota reservation with independent UTC monthly rollover, leased mail outbox with attempt budgets, bounded database-transaction admission, worker shutdown fencing, and versioned async password hashing.
+   - Local validation: `tsc`/`eslint` clean, entrypoint policy pass, isolated suites 91/91. Upstream GitHub Actions validation is pending restoration of the account's Actions billing.
+2. **Maestro Browser E2E Automation Suite (Cycle 1):**
    - 25 end-to-end browser flows verifying the entire user journey: authentication, document drafting, template instantiation, multi-recipient handoffs, decline workflows, and administrative console operations.
    - Deterministic fixtures seeded in `e2e/seed.ts` with strict type gates (`tsc --noEmit`) and visual regression baseline comparisons.
 2. **Public Signer Portal & Core Signing Loop (Cycle 2):**

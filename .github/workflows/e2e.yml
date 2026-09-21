@@ -1,11 +1,20 @@
-name: E2E (Maestro)
+name: E2E
 
 on:
   push:
-    branches: [main, quality]
+    branches: [main, quality, quality-remediation-20260920]
   pull_request:
-    branches: [main, quality]
+    branches: [main, quality, quality-remediation-20260920]
   workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Superseded commits must not keep consuming runners or produce misleading
+# old-revision results while the pull request is being corrected.
+concurrency:
+  group: e2e-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   production-image:
@@ -15,7 +24,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: "1.2.22"
       - run: bun install --frozen-lockfile
       - run: bunx prisma generate
       - run: bun run lint
@@ -44,19 +53,19 @@ jobs:
         if: always()
         run: docker rm -f docurama-ci || true
 
-  maestro:
+  e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     env:
-      MAESTRO_CLI_NO_ANALYTICS: "1"
-      MAESTRO_BASE_URL: http://127.0.0.1:3000
+      E2E_BASE_URL: http://127.0.0.1:3000
       NEXT_PUBLIC_DEMO_MODE: "true"
+      DOCURAMA_ALLOW_PRIVATE_WEBHOOKS: "1"
     steps:
       - uses: actions/checkout@v4
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: "1.2.22"
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -72,15 +81,10 @@ jobs:
           mkdir -p db && touch db/custom.db
           bunx prisma db push --accept-data-loss
 
-      - name: Install Maestro
-        run: |
-          curl -Ls 'https://get.maestro.mobile.dev' | bash
-          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
-
       - name: Install Chrome + no-sandbox wrapper
         run: |
-          # Maestro web needs a `chromium`/`google-chrome` binary. GH runners
-          # ship Chrome; we wrap it to inject container-safe flags.
+          # The browser suites need a `chromium`/`google-chrome` binary. GH
+          # runners ship Chrome; we wrap it to inject container-safe flags.
           CHROME_BIN="$(readlink -f "$(which google-chrome || which chromium || which chromium-browser)")"
           echo "Chrome at: $CHROME_BIN"
           mkdir -p "$HOME/.local/bin"
@@ -90,7 +94,8 @@ jobs:
           EOF
           chmod +x "$HOME/.local/bin/chromium"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          # The visual-regression suite drives the same binary via Playwright.
+          # The browser and visual-regression suites both drive this binary
+          # via Playwright; CHROME_BIN is what e2e/browser/harness.ts checks first.
           echo "CHROME_BIN=$CHROME_BIN" >> "$GITHUB_ENV"
 
       - name: Install SeaweedFS (S3 backend E2E)
@@ -107,21 +112,13 @@ jobs:
       - name: Run E2E suite
         run: bash e2e/run.sh
 
-      - name: Upload Maestro debug artifacts
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: maestro-debug
-          path: ~/.maestro/tests/
-          retention-days: 7
 
-  # ── Schema portability gate (PRODUCTION-PLAN §9) ──────────────────────────
-  # This validates schema shape only. A PostgreSQL release also needs a
-  # provider-specific generated client and the full runtime regression suite.
-  # The supplied SQLite image must not be pointed at PostgreSQL unchanged.
-  postgres-portability:
+  # The HTTP/browser tier covers PostgreSQL. Additional provider-independent
+  # transaction, mail and migration cases run in release-verification.yml.
+  # Suites that deliberately create their own SQLite files remain in e2e.
+  postgres:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:16-alpine
@@ -132,29 +129,81 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U docurama -d docurama_test"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+    env:
+      PGURL: postgresql://docurama:docurama@localhost:5432/docurama_test
+      DOCURAMA_ALLOW_PRIVATE_WEBHOOKS: "1"
     steps:
       - uses: actions/checkout@v4
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: "1.2.22"
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Apply schema to PostgreSQL
+      - name: Generate the PostgreSQL schema and client
         run: |
-          # Provider swap is the ONLY edit — portability must survive it.
-          sed 's/provider = "sqlite"/provider = "postgresql"/' prisma/schema.prisma > prisma/schema.pg.prisma
-          bunx prisma db push --schema prisma/schema.pg.prisma --skip-generate
+          # scripts/schema-for.mjs rejects non-portable schema constructs.
+          node scripts/schema-for.mjs postgresql
+          bunx prisma generate --schema prisma/schema.postgresql.prisma
         env:
-          DATABASE_URL: postgresql://docurama:docurama@localhost:5432/docurama_test
+          DATABASE_URL: ${{ env.PGURL }}
+
+      - name: Apply schema to PostgreSQL
+        run: bunx prisma db push --schema prisma/schema.postgresql.prisma --skip-generate
+        env:
+          DATABASE_URL: ${{ env.PGURL }}
 
       - name: "Smoke: tables exist"
         run: |
           docker exec ${{ job.services.postgres.id }} psql -U docurama -d docurama_test -c "\dt" | tee /dev/stderr | grep -q "Envelope"
           docker exec ${{ job.services.postgres.id }} psql -U docurama -d docurama_test -c "\dt" | grep -q "TransparencyEntry"
+
+      - name: Install Chrome + no-sandbox wrapper
+        run: |
+          CHROME_BIN="$(readlink -f "$(which google-chrome || which chromium || which chromium-browser)")"
+          mkdir -p "$HOME/.local/bin"
+          cat > "$HOME/.local/bin/chromium" <<EOF
+          #!/bin/bash
+          exec "$CHROME_BIN" --no-sandbox --disable-gpu --disable-dev-shm-usage "\$@"
+          EOF
+          chmod +x "$HOME/.local/bin/chromium"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          echo "CHROME_BIN=$CHROME_BIN" >> "$GITHUB_ENV"
+
+      - name: Seed fixtures into PostgreSQL
+        run: bun e2e/seed.ts
+        env:
+          DATABASE_URL: ${{ env.PGURL }}
+
+      - name: Boot the app against PostgreSQL
+        run: |
+          cp .env.example .env
+          REKOR_WITNESS=off NEXT_PUBLIC_DEMO_MODE=true DOCURAMA_WORKER=off DOCURAMA_ALLOW_PRIVATE_WEBHOOKS=1             DATABASE_URL="$PGURL" bun run dev > /tmp/pg-dev.log 2>&1 &
+          for _ in $(seq 1 60); do
+            curl -sf -o /dev/null http://127.0.0.1:3000/login && break
+            sleep 2
+          done
+          curl -sf -o /dev/null http://127.0.0.1:3000/login || { cat /tmp/pg-dev.log; exit 1; }
+
+      - name: HTTP + browser suites against PostgreSQL
+        run: |
+          # Warm the routes first: in dev every route compiles on first hit.
+          for r in / /login /welcome /marketing /blog /docs /developers /status /verify /enterprise /modeles-de-contrats; do
+            curl -s -o /dev/null --max-time 180 "http://127.0.0.1:3000$r" || true
+          done
+          bun test e2e/api.test.ts e2e/evidence.test.ts e2e/transparency.test.ts                    e2e/rekor.test.ts e2e/plans.test.ts e2e/webhooks.test.ts
+          bun test e2e/mcp.test.ts
+          bun test e2e/browser/
+        env:
+          DATABASE_URL: ${{ env.PGURL }}
+          E2E_BASE_URL: http://127.0.0.1:3000
+
+      - name: Dev server log
+        if: failure()
+        run: cat /tmp/pg-dev.log || true

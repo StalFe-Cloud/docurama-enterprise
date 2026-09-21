@@ -1,10 +1,12 @@
 import { NextRequest } from "next/server";
 import { createHash, randomBytes } from "crypto";
-import net from "net";
 import QRCode from "qrcode";
 import { db } from "@/lib/db";
 import type { SessionUser } from "@/lib/auth";
-import { hashPassword, verifyPassword, recordAudit } from "@/lib/auth";
+import { hashPasswordAsync, verifyPasswordAsync, recordAudit } from "@/lib/auth";
+import { requestClientIp } from "@/lib/request-metadata";
+import { isWorkspaceAdmin, settingsOperationAllowed } from "@/lib/settings-policy";
+import { smtpMode } from "@/lib/mail";
 import { jsonError, jsonOk, iso, isos } from "@/lib/serializers";
 import { generateTotpSecret, verifyTotp, otpauthUri, generateRecoveryCodes } from "@/lib/totp";
 import { issueSigningCertificate, shortThumbprint } from "@/lib/certificates";
@@ -13,7 +15,8 @@ import { verifySendingDomain, checkEmailPosture } from "@/lib/dns-check";
 import { providerByKey } from "@/lib/sms-providers";
 import { MCP_DEFAULT_TOOLS, mcpToolsCatalogue } from "@/lib/mcp";
 import { WEBHOOK_EVENTS } from "@/lib/api-reference";
-import { createInvitation, requestOrigin } from "@/lib/onboarding";
+import { assertSafeWebhookUrl } from "@/lib/webhooks";
+import { createInvitation, requestOrigin, slugifyOrg } from "@/lib/onboarding";
 import { seatCapacity, apiAccessAllowed } from "@/lib/billing";
 import { planDef } from "@/lib/plans";
 import { tenantCreationAllowed } from "@/lib/deployment-policy";
@@ -32,7 +35,10 @@ const mask = (v: string | null | undefined) => (v ? `••••••••${v
 const HOSTNAME_RE = /^(?!-)[a-z0-9-]{1,63}(?<!-)(\.(?!-)[a-z0-9-]{1,63}(?<!-))+$/i;
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
-const adminRoles = (me: SessionUser) => me.workspaceRole === "OWNER" || me.workspaceRole === "ADMIN" || me.role === "PLATFORM_ADMIN";
+const adminRoles = isWorkspaceAdmin;
+function requireSettingsPermission(me: SessionUser, op: string): Response | null {
+  return settingsOperationAllowed(me, op) ? null : jsonError("Operation is not permitted", 403);
+}
 
 // ── Lazy per-tenant config rows (created with defaults on first read) ────────
 
@@ -140,11 +146,11 @@ export async function getSettingsSection(
           orderBy: { lastSeenAt: "desc" }, take: 20,
         }),
         db.securityEvent.findMany({
-          where: { OR: [{ actor: me.email }, { actor: `${user.firstName} ${user.lastName}` }] },
+          where: { OR: [{ actorUserId: me.id }, { subjectUserId: me.id }] },
           orderBy: { at: "desc" }, take: 10,
         }),
         db.auditEvent.findMany({
-          where: { OR: [{ resource: `user:${me.email}` }, { actor: `${user.firstName} ${user.lastName}` }] },
+          where: { OR: [{ actorUserId: me.id }, { subjectUserId: me.id }] },
           orderBy: { at: "desc" }, take: 8,
         }),
         db.tenant.findUnique({ where: { id: tenantId } }),
@@ -225,6 +231,7 @@ export async function getSettingsSection(
       const n = await ensureNotificationSettings(tenantId);
       return jsonOk({
         settings: {
+          smtpOverrideActive: false, transportSource: "SMTP_URL",
           smtpHost: n.smtpHost, smtpPort: n.smtpPort, smtpUser: n.smtpUser,
           smtpPasswordMasked: mask(n.smtpPassword), smtpHasPassword: Boolean(n.smtpPassword),
           smtpFrom: n.smtpFrom, smtpSecure: n.smtpSecure,
@@ -318,6 +325,12 @@ export async function postSettingsOp(
   const id = body.id ?? "";
   const data = body.data ?? {};
   const actor = `${me.firstName} ${me.lastName}`;
+  const ip = requestClientIp(req);
+  const audit = (input: Parameters<typeof recordAudit>[0]) => recordAudit({
+    ...input, actorUserId: me.id, tenantId: input.tenantId ?? me.tenantId, ip,
+  });
+  const denied = requireSettingsPermission(me, op);
+  if (denied) return denied;
   const tenantId = me.tenantId!;
   const user = await db.user.findUnique({ where: { id: me.id } });
   if (!user) return jsonError("Account not found", 404);
@@ -391,9 +404,9 @@ export async function postSettingsOp(
     if (!membership) return jsonError("You are not a member of that organization", 403);
     await db.user.update({ where: { id: me.id }, data: { activeTenantId: targetId } });
     const tenant = await db.tenant.findUnique({ where: { id: targetId } });
-    await recordAudit({
+    await audit({
       actor, actorRole: me.role, action: "workspace.switched", resource: `tenant:${tenant?.slug ?? targetId}`,
-      tenantName: tenant?.name, detail: `Active organization switched to ${tenant?.name ?? targetId}`,
+      tenantId: targetId, tenantName: tenant?.name, detail: `Active organization switched to ${tenant?.name ?? targetId}`,
     });
     return jsonOk({ ok: true, message: `Switched to ${tenant?.name ?? "workspace"}` });
   }
@@ -401,8 +414,9 @@ export async function postSettingsOp(
   if (op === "org.create") {
     const name = String(data.name ?? "").trim();
     if (name.length < 2) return jsonError("Organization name is required");
-    const slugBase = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 30) || "org";
-    const slug = `${slugBase}-${randomBytes(2).toString("hex")}`;
+    // slugifyOrg (src/lib/onboarding.ts) already does this and is now shared
+    // with the enterprise lead conversion, so both paths mint slugs the same way.
+    const slug = slugifyOrg(name);
     const tenant = await db.$transaction(async (tx) => {
       if (!tenantCreationAllowed(me.role, await tx.tenant.count())) return null;
       const created = await tx.tenant.create({
@@ -413,7 +427,7 @@ export async function postSettingsOp(
       return created;
     });
     if (!tenant) return jsonError("Organization creation is disabled for this installation", 403);
-    await recordAudit({
+    await audit({
       actor, actorRole: me.role, action: "organization.created", resource: `tenant:${slug}`,
       tenantName: name, detail: "New organization created from Settings → Account",
     });
@@ -424,9 +438,9 @@ export async function postSettingsOp(
   if (op === "password.change") {
     const current = String(data.current ?? "");
     const next = String(data.next ?? "");
-    if (!verifyPassword(current, user.passwordHash)) {
+    if (!(await verifyPasswordAsync(current, user.passwordHash))) {
       await db.securityEvent.create({
-        data: { type: "PASSWORD_CHANGE_FAILED", severity: "MEDIUM", actor: me.email, ip: "10.42.0.7", blocked: true, detail: "Current password did not match" },
+        data: { type: "PASSWORD_CHANGE_FAILED", severity: "MEDIUM", actor: me.email, ip, actorUserId: me.id, subjectUserId: me.id, tenantId, blocked: true, detail: "Current password did not match" },
       });
       return jsonError("Current password is incorrect", 401);
     }
@@ -434,7 +448,7 @@ export async function postSettingsOp(
     if (next === current) return jsonError("New password must be different from the current one");
     await db.user.update({
       where: { id: me.id },
-      data: { passwordHash: hashPassword(next), passwordChangedAt: new Date() },
+      data: { passwordHash: await hashPasswordAsync(next), passwordChangedAt: new Date() },
     });
     // Revoke every other session - standard post-credential-change hygiene.
     const others = await db.session.findMany({ where: { userId: me.id, revokedAt: null, NOT: { id: me.sessionId ?? "" } } });
@@ -443,9 +457,9 @@ export async function postSettingsOp(
       data: { revokedAt: new Date() },
     });
     await db.securityEvent.create({
-      data: { type: "PASSWORD_CHANGED", severity: "INFO", actor: me.email, ip: "10.42.0.7", blocked: false, detail: `${others.length} other session(s) revoked` },
+      data: { type: "PASSWORD_CHANGED", severity: "INFO", actor: me.email, ip, actorUserId: me.id, subjectUserId: me.id, tenantId, blocked: false, detail: `${others.length} other session(s) revoked` },
     });
-    await recordAudit({ actor, actorRole: me.role, action: "password.changed", resource: `user:${me.email}`, severity: "WARNING", tenantName: me.tenantName });
+    await audit({ actor, actorRole: me.role, action: "password.changed", resource: `user:${me.email}`, severity: "WARNING", tenantName: me.tenantName });
     return jsonOk({ ok: true, message: `Password changed - ${others.length} other session${others.length === 1 ? "" : "s"} signed out` });
   }
 
@@ -488,16 +502,16 @@ export async function postSettingsOp(
       data: { totpSecret: pending, totpPendingSecret: null, totpEnabled: true, totpRecoveryCodes: JSON.stringify(hashes) },
     });
     await db.securityEvent.create({
-      data: { type: "2FA_ENABLED", severity: "INFO", actor: me.email, ip: "10.42.0.7", blocked: false, detail: "TOTP enrolled from Settings → Profile" },
+      data: { type: "2FA_ENABLED", severity: "INFO", actor: me.email, ip, actorUserId: me.id, subjectUserId: me.id, tenantId, blocked: false, detail: "TOTP enrolled from Settings → Profile" },
     });
-    await recordAudit({ actor, actorRole: me.role, action: "2fa.enabled", resource: `user:${me.email}`, severity: "WARNING", tenantName: me.tenantName });
+    await audit({ actor, actorRole: me.role, action: "2fa.enabled", resource: `user:${me.email}`, severity: "WARNING", tenantName: me.tenantName });
     // Shown exactly once - only the hashes are stored.
     return jsonOk({ ok: true, message: "Two-factor authentication enabled", recoveryCodes: codes });
   }
 
   if (op === "2fa.disable") {
     if (!user.totpEnabled) return jsonError("Two-factor authentication is not enabled");
-    if (!verifyPassword(String(data.password ?? ""), user.passwordHash)) {
+    if (!(await verifyPasswordAsync(String(data.password ?? ""), user.passwordHash))) {
       return jsonError("Password is incorrect", 401);
     }
     if (!verifyTotp(user.totpSecret ?? "", String(data.code ?? ""))) {
@@ -507,7 +521,7 @@ export async function postSettingsOp(
       where: { id: me.id },
       data: { totpEnabled: false, totpSecret: null, totpRecoveryCodes: null, totpPendingSecret: null },
     });
-    await recordAudit({ actor, actorRole: me.role, action: "2fa.disabled", resource: `user:${me.email}`, severity: "WARNING", tenantName: me.tenantName });
+    await audit({ actor, actorRole: me.role, action: "2fa.disabled", resource: `user:${me.email}`, severity: "WARNING", tenantName: me.tenantName });
     return jsonOk({ ok: true, message: "Two-factor authentication disabled" });
   }
 
@@ -515,7 +529,7 @@ export async function postSettingsOp(
     if (!adminRoles(me)) return jsonError("Only workspace owners and admins can change the 2FA policy", 403);
     const enabled = data.enabled === true;
     await db.tenant.update({ where: { id: tenantId }, data: { enforceTwoFactor: enabled } });
-    await recordAudit({
+    await audit({
       actor, actorRole: me.role, action: "policy.two_factor", resource: `tenant:${me.tenantSlug}`,
       severity: "WARNING", tenantName: me.tenantName,
       detail: `2FA enforcement ${enabled ? "required for all members" : "optional"}`,
@@ -564,7 +578,7 @@ export async function postSettingsOp(
       },
     });
     if (result.verified) {
-      await recordAudit({
+      await audit({
         actor, actorRole: me.role, action: "domain.verified", resource: `domain:${d.domain}`,
         severity: "WARNING", tenantName: me.tenantName, detail: "Sending domain authenticated via DNS TXT",
       });
@@ -588,7 +602,7 @@ export async function postSettingsOp(
     if (!m) return jsonError("Member not found", 404);
     if (m.role === "OWNER") return jsonError("The workspace owner's role cannot be changed");
     await db.member.update({ where: { id }, data: { role } });
-    await recordAudit({
+    await audit({
       actor, actorRole: me.role, action: "member.role_changed", resource: `member:${id}`,
       tenantName: me.tenantName, detail: `Role set to ${role}`,
     });
@@ -624,7 +638,7 @@ export async function postSettingsOp(
       origin: requestOrigin(req),
     });
     if (!invitation) return jsonError("No available seats remain in this workspace", 403);
-    await recordAudit({
+    await audit({
       actor: `${me.firstName} ${me.lastName}`, actorRole: me.role,
       action: "invite.sent", resource: `invite:${email}`, tenantName: me.tenantName,
       detail: `Invitation queued for ${email} (${role})`,
@@ -637,7 +651,7 @@ export async function postSettingsOp(
     const inv = await db.invitation.findFirst({ where: { id, tenantId, status: "PENDING" } });
     if (!inv) return jsonError("Invitation not found", 404);
     await db.invitation.update({ where: { id: inv.id }, data: { status: "REVOKED" } });
-    await recordAudit({
+    await audit({
       actor: `${me.firstName} ${me.lastName}`, actorRole: me.role,
       action: "invite.revoked", resource: `invite:${inv.email}`, tenantName: me.tenantName,
     });
@@ -663,7 +677,7 @@ export async function postSettingsOp(
     const dupe = await db.team.findFirst({ where: { tenantId, name } });
     if (dupe) return jsonError(`A team called "${name}" already exists`);
     const team = await db.team.create({ data: { tenantId, name } });
-    await recordAudit({
+    await audit({
       actor, actorRole: me.role, action: "team.created", resource: `team:${name}`,
       tenantName: me.tenantName, detail: "Small team group created",
     });
@@ -680,7 +694,7 @@ export async function postSettingsOp(
     const dupe = await db.team.findFirst({ where: { tenantId, name, NOT: { id } } });
     if (dupe) return jsonError(`A team called "${name}" already exists`);
     await db.team.update({ where: { id }, data: { name } });
-    await recordAudit({
+    await audit({
       actor, actorRole: me.role, action: "team.renamed", resource: `team:${name}`,
       tenantName: me.tenantName, detail: `Team renamed from "${team.name}"`,
     });
@@ -693,7 +707,7 @@ export async function postSettingsOp(
     if (!team) return jsonError("Team not found", 404);
     // Members fall back to no team (onDelete: SetNull in the schema).
     await db.team.delete({ where: { id } });
-    await recordAudit({
+    await audit({
       actor, actorRole: me.role, action: "team.deleted", resource: `team:${team.name}`,
       tenantName: me.tenantName, detail: "Small team group deleted; members unassigned",
     });
@@ -712,7 +726,7 @@ export async function postSettingsOp(
     }
     await db.member.update({ where: { id }, data: { teamId } });
     const teamName = teamId ? (await db.team.findUnique({ where: { id: teamId } }))?.name : null;
-    await recordAudit({
+    await audit({
       actor, actorRole: me.role, action: "member.team_assigned", resource: `member:${id}`,
       tenantName: me.tenantName, detail: teamName ? `Assigned to team "${teamName}"` : "Removed from team",
     });
@@ -725,7 +739,9 @@ export async function postSettingsOp(
     const organization = String(data.organization ?? "").trim() || null;
     const email = String(data.email ?? "").trim() || null;
     const purpose = data.purpose === "sealing" ? "sealing" : "signing";
+    if (purpose === "sealing" && !adminRoles(me)) return jsonError("Workspace administrator access required", 403);
     const days = Math.min(1095, Math.max(30, Number(data.days ?? 365)));
+    if (!Number.isFinite(days)) return jsonError("Invalid certificate lifetime");
     if (commonName.length < 3) return jsonError("Certificate name (CN) is required - e.g. “StålFe Signing 2026”");
     if (email && !/.+@.+\..+/.test(email)) return jsonError("Enter a valid email or leave it empty");
     const pendingCount = await db.signingCertificate.count({ where: { tenantId, status: "PENDING" } });
@@ -739,7 +755,7 @@ export async function postSettingsOp(
         notBefore: new Date(), notAfter: new Date(Date.now() + days * 86400_000),
       },
     });
-    await recordAudit({
+    await audit({
       actor, actorRole: me.role, action: "certificate.requested", resource: `certificate:${cert.id}`,
       tenantName: me.tenantName, detail: `CN=${commonName}, ${days} days, purpose=${purpose}`,
     });
@@ -749,6 +765,8 @@ export async function postSettingsOp(
   if (op === "cert.provision") {
     const cert = await db.signingCertificate.findFirst({ where: { id, tenantId } });
     if (!cert) return jsonError("Certificate not found", 404);
+    if (cert.purpose === "sealing" && !adminRoles(me)) return jsonError("Workspace administrator access required for sealing certificates", 403);
+    if (cert.userId !== me.id && !adminRoles(me)) return jsonError("Only the certificate owner or a workspace admin can provision it", 403);
     if (cert.status !== "PENDING") return jsonError("Only pending certificates can be provisioned");
     const passphrase = String(data.passphrase ?? "");
     try {
@@ -773,7 +791,7 @@ export async function postSettingsOp(
           notAfter: issued.notAfter,
         },
       });
-      await recordAudit({
+      await audit({
         actor, actorRole: me.role, action: "certificate.issued", resource: `certificate:${cert.id}`,
         severity: "WARNING", tenantName: me.tenantName,
         detail: `Serial ${issued.serialNumber.slice(0, 16)}…, RSA-2048/SHA-256, expires ${issued.notAfter.toISOString().slice(0, 10)}`,
@@ -790,6 +808,7 @@ export async function postSettingsOp(
   if (op === "cert.activate") {
     const cert = await db.signingCertificate.findFirst({ where: { id, tenantId } });
     if (!cert) return jsonError("Certificate not found", 404);
+    if (cert.purpose === "sealing" && !adminRoles(me)) return jsonError("Workspace administrator access required for sealing certificates", 403);
     if (cert.status !== "ISSUED") return jsonError("Only issued certificates can be activated");
     if (cert.notAfter.getTime() < Date.now()) return jsonError("This certificate has expired");
     if (cert.userId !== me.id && !adminRoles(me)) return jsonError("Only the certificate owner or a workspace admin can activate it", 403);
@@ -799,7 +818,7 @@ export async function postSettingsOp(
       data: { status: "ISSUED" },
     });
     await db.signingCertificate.update({ where: { id }, data: { status: "ACTIVE" } });
-    await recordAudit({
+    await audit({
       actor, actorRole: me.role, action: "certificate.activated", resource: `certificate:${cert.id}`,
       severity: "WARNING", tenantName: me.tenantName, detail: `${cert.purpose} certificate is now live`,
     });
@@ -809,9 +828,11 @@ export async function postSettingsOp(
   if (op === "cert.revoke") {
     const cert = await db.signingCertificate.findFirst({ where: { id, tenantId } });
     if (!cert) return jsonError("Certificate not found", 404);
+    if (cert.purpose === "sealing" && !adminRoles(me)) return jsonError("Workspace administrator access required for sealing certificates", 403);
+    if (cert.userId !== me.id && !adminRoles(me)) return jsonError("Only the certificate owner or a workspace admin can revoke it", 403);
     if (!["ISSUED", "ACTIVE"].includes(cert.status)) return jsonError("Only issued or active certificates can be revoked");
     await db.signingCertificate.update({ where: { id }, data: { status: "REVOKED", revokedAt: new Date(), pkcs12Base64: null } });
-    await recordAudit({
+    await audit({
       actor, actorRole: me.role, action: "certificate.revoked", resource: `certificate:${cert.id}`,
       severity: "CRITICAL", tenantName: me.tenantName, detail: `Serial ${cert.serialNumber.slice(0, 16)}… revoked`,
     });
@@ -821,6 +842,8 @@ export async function postSettingsOp(
   if (op === "cert.delete") {
     const cert = await db.signingCertificate.findFirst({ where: { id, tenantId } });
     if (!cert) return jsonError("Certificate not found", 404);
+    if (cert.purpose === "sealing" && !adminRoles(me)) return jsonError("Workspace administrator access required for sealing certificates", 403);
+    if (cert.userId !== me.id && !adminRoles(me)) return jsonError("Only the certificate owner or a workspace admin can delete it", 403);
     if (cert.status === "ACTIVE") return jsonError("Revoke the certificate before deleting it");
     await db.signingCertificate.delete({ where: { id } });
     return jsonOk({ ok: true, message: "Certificate deleted" });
@@ -840,7 +863,7 @@ export async function postSettingsOp(
       update: { url, hashAlgorithm, authType, username, enabled, updatedAt: new Date() },
       create: { tenantId, url, hashAlgorithm, authType, username, enabled },
     });
-    await recordAudit({
+    await audit({
       actor, actorRole: me.role, action: "tsa.configured", resource: `tenant:${me.tenantSlug}`,
       tenantName: me.tenantName, detail: `TSA ${url} (${hashAlgorithm}) ${enabled ? "enabled" : "saved disabled"}`,
     });
@@ -891,7 +914,7 @@ export async function postSettingsOp(
       where: { tenantId },
       data: { part11Mode, requireReauth, consentText: consentText || null, updatedAt: new Date() },
     });
-    await recordAudit({
+    await audit({
       actor, actorRole: me.role, action: "part11_mode.updated", resource: `tenant:${me.tenantSlug}`,
       severity: "WARNING", tenantName: me.tenantName,
       detail: `21 CFR Part 11 mode ${part11Mode ? "enabled" : "disabled"}${part11Mode ? ` · re-auth ${requireReauth ? "required" : "optional"}` : ""}`,
@@ -924,7 +947,7 @@ export async function postSettingsOp(
       },
       create: { tenantId, filenameFormat: format, signatureLevel, part11Mode, consentText: consentText || null },
     });
-    await recordAudit({
+    await audit({
       actor, actorRole: me.role, action: "esign_settings.updated", resource: `tenant:${me.tenantSlug}`,
       tenantName: me.tenantName,
       detail: `filename=${format} · level=${signatureLevel} · Part 11 ${part11Mode ? "on" : "off"}`,
@@ -975,41 +998,24 @@ export async function postSettingsOp(
         updatedAt: new Date(),
       },
     });
-    await recordAudit({
+    await audit({
       actor, actorRole: me.role, action: "notification_settings.updated", resource: `tenant:${me.tenantSlug}`,
       tenantName: me.tenantName,
       detail: `SMTP ${smtpHost ? `override (${smtpHost})` : "platform default"} · reminders=${reminderMode} every ${reminderIntervalDays}d (max ${reminderMaxCount})`,
     });
-    return jsonOk({ ok: true, message: "Notification settings saved - including the reminder policy" });
+    return jsonOk({ ok: true, message: "Notification settings saved. SMTP overrides are inactive; delivery uses operator SMTP_URL." });
   }
 
   if (op === "smtp.test") {
-    const n = await db.notificationSettings.findUnique({ where: { tenantId } });
-    const host = n?.smtpHost;
-    if (!host) {
-      // No per-org override: report the platform default state honestly.
-      const platform = await db.platformSetting.findUnique({ where: { id: "singleton" } });
-      return jsonOk({
-        ok: true,
-        message: `No per-organization SMTP override - using the platform relay ${platform?.smtpHost ?? "smtp.eu.mailprovider.io"}:${platform?.smtpPort ?? 587} (${platform?.smtpFrom ?? "Docurama Sign"})`,
-      });
-    }
-    const port = n!.smtpPort;
-    const started = Date.now();
-    const result = await new Promise<{ ok: boolean; note: string }>((resolve) => {
-      const socket = new net.Socket();
-      const finish = (ok: boolean, note: string) => { socket.destroy(); resolve({ ok, note }); };
-      socket.setTimeout(5000);
-      socket.once("connect", () => finish(true, `Connected to ${host}:${port} in ${Date.now() - started} ms - relay reachable`));
-      socket.once("timeout", () => finish(false, `Connection to ${host}:${port} timed out after 5 s`));
-      socket.once("error", (err) => finish(false, `Could not connect to ${host}:${port} - ${err.message}`));
-      socket.connect(port, host);
+    const mode = smtpMode();
+    await ensureNotificationSettings(tenantId);
+    await db.notificationSettings.update({ where: { tenantId }, data: {
+      smtpLastTestAt: new Date(), smtpLastTestStatus: "CONFIGURATION_ONLY",
+    } });
+    return jsonOk({ ok: true, configurationOnly: true, delivered: false,
+      transportConfigured: mode.configured,
+      message: "No test message sent. Delivery uses operator SMTP_URL; per-workspace SMTP fields are stored but inactive.",
     });
-    await db.notificationSettings.update({
-      where: { tenantId },
-      data: { smtpLastTestAt: new Date(), smtpLastTestStatus: result.ok ? "OK" : "FAILED" },
-    });
-    return jsonOk({ ok: result.ok, message: result.note });
   }
 
   if (op === "reminders.run") {
@@ -1094,7 +1100,7 @@ export async function postSettingsOp(
         updatedAt: new Date(),
       },
     });
-    await recordAudit({
+    await audit({
       actor, actorRole: me.role, action: "sms_gateway.updated", resource: `tenant:${me.tenantSlug}`,
       tenantName: me.tenantName, detail: `Provider ${meta.name}${whatsappEnabled ? ` + WhatsApp (${whatsappProvider})` : ""}`,
     });
@@ -1102,46 +1108,18 @@ export async function postSettingsOp(
   }
 
   if (op === "sms.test") {
-    const g = await db.smsGateway.findUnique({ where: { tenantId } });
-    if (!g || !(g.apiKey || g.whatsappApiKey)) return jsonError("Save the gateway credentials first (Settings → SMS)");
+    const gateway = await db.smsGateway.findUnique({ where: { tenantId } });
+    if (!gateway || !(gateway.apiKey || gateway.whatsappApiKey)) return jsonError("Save gateway credentials first");
     const to = String(data.to ?? "").trim();
-    if (!/^\+?[1-9]\d{6,14}$/.test(to.replace(/[\s-]/g, ""))) {
-      return jsonError("Enter the destination in international format, e.g. +33612345678");
-    }
-    const meta = providerByKey(g.provider);
-    let status = "OK";
-    let note = `Configuration accepted for ${meta?.name ?? g.provider} → ${to}. QA sandbox: no live message dispatched; the production job uses these credentials.`;
-
-    // WhatsApp Cloud API tokens can be validated for real against Meta's graph API.
-    if (g.whatsappEnabled && g.whatsappProvider === "whatsapp-cloud" && g.whatsappApiKey) {
-      try {
-        const res = await fetch(
-          `https://graph.facebook.com/v21.0/me?access_token=${encodeURIComponent(g.whatsappApiKey)}`,
-          { signal: AbortSignal.timeout(6000) },
-        );
-        if (res.ok) {
-          note = `WhatsApp Cloud API token validated live against Meta (HTTP ${res.status}) - the channel is production-ready. SMS config accepted → ${to}.`;
-        } else {
-          status = "ERROR";
-          note = `Meta rejected the WhatsApp token (HTTP ${res.status}) - check Settings → SMS credentials.`;
-        }
-      } catch {
-        note = `Could not reach Meta to validate the WhatsApp token (network) - SMS config accepted → ${to}.`;
-      }
-    }
-
-    await db.smsGateway.update({
-      where: { tenantId },
-      data: { lastTestAt: new Date(), lastTestStatus: status, lastTestTo: to, status: status === "OK" ? "tested" : "error" },
+    if (!/^\+?[1-9]\d{6,14}$/.test(to.replace(/[\s-]/g, ""))) return jsonError("Enter an international phone number");
+    await db.smsGateway.update({ where: { tenantId }, data: {
+      lastTestAt: new Date(), lastTestStatus: "CONFIGURATION_ONLY", lastTestTo: to, status: "configured",
+    } });
+    return jsonOk({ ok: true, configurationOnly: true, delivered: false,
+      message: "Configuration saved. No SMS or WhatsApp message was sent; delivery has not been verified.",
     });
-    await recordAudit({
-      actor, actorRole: me.role, action: "sms_gateway.tested", resource: `tenant:${me.tenantSlug}`,
-      tenantName: me.tenantName, detail: `${g.provider} → ${to.replace(/.(?=.{4})/g, "•")}`,
-    });
-    return jsonOk({ ok: status === "OK", message: note, status });
   }
 
-  // ── API keys ──
   if (op === "create-key") {
     if (!adminRoles(me)) return jsonError("Only workspace owners and admins can create API keys", 403);
     if (!(await apiAccessAllowed(tenantId))) return jsonError("Your workspace plan does not include API access. Upgrade to Business or Enterprise.", 403);
@@ -1154,7 +1132,7 @@ export async function postSettingsOp(
     await db.apiKey.create({
       data: { tenantId, name, prefix, secretHash: sha(fullKey), scope, createdBy: actor },
     });
-    await recordAudit({ actor, actorRole: me.role, action: "api_key.created", resource: `api_key:${prefix}`, severity: "WARNING", tenantName: me.tenantName });
+    await audit({ actor, actorRole: me.role, action: "api_key.created", resource: `api_key:${prefix}`, severity: "WARNING", tenantName: me.tenantName });
     // The full key is returned exactly once - only its hash is stored.
     return jsonOk({ ok: true, message: `Key created - copy it now, it will not be shown again`, key: fullKey, prefix });
   }
@@ -1164,7 +1142,7 @@ export async function postSettingsOp(
     const k = await db.apiKey.findFirst({ where: { id, tenantId } });
     if (!k) return jsonError("Key not found", 404);
     await db.apiKey.update({ where: { id }, data: { status: "REVOKED" } });
-    await recordAudit({ actor, actorRole: me.role, action: "api_key.revoked", resource: `api_key:${k.prefix}`, severity: "WARNING", tenantName: me.tenantName });
+    await audit({ actor, actorRole: me.role, action: "api_key.revoked", resource: `api_key:${k.prefix}`, severity: "WARNING", tenantName: me.tenantName });
     return jsonOk({ ok: true, message: `Key ${k.prefix} revoked` });
   }
 
@@ -1172,16 +1150,10 @@ export async function postSettingsOp(
   if (op === "webhook.create") {
     const url = String(data.url ?? "").trim();
     const events = Array.isArray(data.events) ? (data.events as unknown[]).map(String).filter((e) => WEBHOOK_EVENTS.some((w) => w.event === e) || e === "*") : [];
-    let parsed: URL;
     try {
-      parsed = new URL(url);
-    } catch {
-      return jsonError("Endpoint URL is not a valid URL");
-    }
-    // https only, except loopback hosts (local testing / internal networks).
-    const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(parsed.hostname) || parsed.hostname.endsWith(".local") || parsed.hostname.endsWith(".internal");
-    if (parsed.protocol !== "https:" && !loopback) {
-      return jsonError("Endpoint URL must use https (http is allowed for localhost only)");
+      await assertSafeWebhookUrl(url);
+    } catch (err) {
+      return jsonError(err instanceof Error ? err.message : "Endpoint URL is not allowed");
     }
     if (events.length === 0) return jsonError("Subscribe to at least one event");
     const secret = `whsec_${randomBytes(24).toString("hex")}`;
@@ -1194,7 +1166,7 @@ export async function postSettingsOp(
         secretMasked: `••••••${secret.slice(-4)}`,
       },
     });
-    await recordAudit({ actor, actorRole: me.role, action: "webhook.created", resource: `webhook:${endpoint.id}`, severity: "WARNING", tenantName: me.tenantName, detail: url });
+    await audit({ actor, actorRole: me.role, action: "webhook.created", resource: `webhook:${endpoint.id}`, severity: "WARNING", tenantName: me.tenantName, detail: url });
     // The signing secret is returned exactly once — stored retrievable (the
     // dispatcher HMACs with it) but never echoed again by any API.
     return jsonOk({ ok: true, message: `Endpoint registered - copy the signing secret now, it will not be shown again`, secret, endpointId: endpoint.id });
@@ -1204,7 +1176,7 @@ export async function postSettingsOp(
     const h = await db.webhookEndpoint.findFirst({ where: { id, tenantId } });
     if (!h) return jsonError("Endpoint not found", 404);
     await db.webhookEndpoint.delete({ where: { id } });
-    await recordAudit({ actor, actorRole: me.role, action: "webhook.deleted", resource: `webhook:${id}`, severity: "WARNING", tenantName: me.tenantName, detail: h.url });
+    await audit({ actor, actorRole: me.role, action: "webhook.deleted", resource: `webhook:${id}`, severity: "WARNING", tenantName: me.tenantName, detail: h.url });
     return jsonOk({ ok: true, message: "Endpoint deleted" });
   }
 
@@ -1213,7 +1185,7 @@ export async function postSettingsOp(
     if (!h) return jsonError("Endpoint not found", 404);
     const next = h.status === "PAUSED" ? "ACTIVE" : "PAUSED";
     await db.webhookEndpoint.update({ where: { id }, data: { status: next } });
-    await recordAudit({ actor, actorRole: me.role, action: `webhook.${next.toLowerCase()}`, resource: `webhook:${id}`, severity: "INFO", tenantName: me.tenantName });
+    await audit({ actor, actorRole: me.role, action: `webhook.${next.toLowerCase()}`, resource: `webhook:${id}`, severity: "INFO", tenantName: me.tenantName });
     return jsonOk({ ok: true, message: `Endpoint ${next === "PAUSED" ? "paused" : "resumed"}` });
   }
 
@@ -1229,7 +1201,7 @@ export async function postSettingsOp(
       update: { enabled, transport, allowedTools: tools.join(","), rateLimitPerMin, updatedAt: new Date() },
       create: { tenantId, enabled, transport, allowedTools: tools.join(",") || MCP_DEFAULT_TOOLS, rateLimitPerMin },
     });
-    await recordAudit({
+    await audit({
       actor, actorRole: me.role, action: "mcp_server.updated", resource: `tenant:${me.tenantSlug}`,
       severity: "WARNING", tenantName: me.tenantName,
       detail: `MCP ${enabled ? "enabled" : "disabled"} (${transport}, ${tools.length} tools, ${rateLimitPerMin}/min)`,

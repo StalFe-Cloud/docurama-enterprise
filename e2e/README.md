@@ -1,29 +1,45 @@
-# Docurama E2E — Maestro browser suite
+# Docurama E2E — browser suite
 
-End-to-end coverage of the critical user journeys with
-[Maestro](https://github.com/mobile-dev-inc/Maestro) driving headless Chrome
-via CDP/Selenium.
+End-to-end coverage of the critical user journeys. Everything runs under
+`bun test`; the browser suites drive Chromium through Playwright.
+
+> Previously these journeys ran on [Maestro](https://github.com/mobile-dev-inc/Maestro)
+> as YAML flows under `e2e/flows/`. Maestro drove its own bundled browser over
+> CDP and flaked on roughly one flow per CI run — a different flow each time —
+> while the Playwright suites ran green, and a full pass took ~19 minutes
+> against ~95 seconds. All 29 flows were ported and Maestro was removed.
+> `e2e/browser/harness.ts` carries the detail.
+
 
 ## Quick start
 
 ```bash
-bun run test:e2e            # boots a dev server (if needed), seeds, runs all flows
-bash e2e/run.sh e2e/flows/auth/login.yaml   # one flow
-bash e2e/run.sh e2e/flows/public/*.yaml     # a group of flows
+bun run test:e2e                 # boots a dev server (if needed), seeds, runs everything
 ```
 
-The runner accepts any number of flow paths; with no arguments it runs the
-whole suite. Flow order never matters — every flow is self-contained.
+To iterate on one browser suite against a server that is already up:
 
-Requirements: `bun`, `maestro` on PATH
-(`curl -Ls 'https://get.maestro.mobile.dev' | bash`), and a Chrome/Chromium
-binary. In unprivileged containers Chrome needs `--no-sandbox` — a wrapper
-script on `PATH` handles it (see CI notes below).
+```bash
+E2E_BASE_URL=http://127.0.0.1:3000 bun test e2e/browser/public.test.ts
+```
+
+Requirements: `bun` and a Chrome/Chromium binary. Resolution order is
+`CHROME_BIN`, then a Playwright-managed build in `~/.cache/ms-playwright`
+(`bunx playwright install chromium`), then `PATH`, then the well-known Windows
+install locations. In unprivileged containers Chrome needs `--no-sandbox`,
+which the harness passes for you.
 
 ## Layout
 
 ```
 e2e/
+  browser/       Playwright browser suites (bun test) — the critical user
+                 journeys. harness.ts holds the shared browser lifecycle,
+                 Chromium resolution and locator helpers;
+                 public/auth/workspace/admin.test.ts cover the four surfaces.
+                 The workspace suite mutates seeded fixtures and needs a fresh
+                 `bun e2e/seed.ts` per run. E2E_SKIP_BROWSER=1 skips them.
+                 Target origin: E2E_BASE_URL.
   seed.ts        Idempotent Prisma seed. Dedicated "E2E Testing" tenant,
                  e2e@docurama.eu / e2ePass1234! (workspace) and
                  e2e-admin@docurama.eu / e2eAdmin1234! (platform admin),
@@ -102,7 +118,7 @@ e2e/
   run.sh         Orchestrator: env guard → server (DOCURAMA_WORKER=off so
                  retry passes are explicit, not raced with the 30s worker) →
                  warm-up → seed → tsc gate → API + evidence + transparency +
-                 MCP + webhooks tests → mail suite (own process) → maestro →
+                 MCP + webhooks tests → mail suite (own process) → browser →
                  report. Accepts zero or more flow paths (default: all).
   flows/
     public/      No-auth surfaces: marketing, French catalog, verify portal
@@ -118,75 +134,34 @@ e2e/
     admin/       Platform overview, users directory, platform settings.
 ```
 
-## Selector conventions (important)
+## Selector conventions
 
-Maestro matches **element text with full-string regex**. Two Docurama-specific
-rules follow from that:
+Prefer accessible locators — `getByRole`, `getByLabel`, `getByText` — over
+`data-testid`, and add a testid only where no accessible name exists. The
+helpers in `e2e/browser/harness.ts` (`seeText`, `clickByName`, `clickText`,
+`seePlaceholder`, `scrollToText`) cover most cases.
 
-1. **Buttons that render an icon before their label** (`<Lock/> Sign in
-   securely`) carry a leading space in their text node — exact strings fail.
-   Use tolerant regexes: `tapOn: " ?Sign in securely ?"`, `" ?Use template ?"`.
-   Plain-text elements (`Sign in to your portal`) match exactly.
-2. **Prefer `id:` selectors over text.** The web driver resolves `id` against
-   the element `id` attribute, then `aria-label`. All form inputs in the send
-   dialog have stable ids (`doc-title`, `recipient-1-name`,
-   `recipient-1-email`). This is not just style: the driver's
-   `inputText` builds an XPath from the focused element, and for id-less
-   inputs that XPath is class-based **without a position index** — two
-   same-class inputs are ambiguous and typing lands in the wrong field.
-   (Found live; fixed by adding ids to the recipient inputs — see
-   docs/IMPROVEMENT-PLAN.md §6.)
+Three things are not rendered text and need their own locator:
 
-3. **Icon-only buttons are addressable only through `id:`** — their
-   accessible name comes from `aria-label`, which text selectors do not see.
-   `id:` resolves against `aria-label`, so `tapOn: { id: "Copy signing link
-   for Fixture Signer" }` works where `tapOn: "Copy signing link…"` finds
-   nothing. (Found while testing the QR handoff buttons.)
-4. **Text containing parentheses is a regex trap** — `Name (sent)` as a
-   selector string silently becomes a capture group and never full-matches.
-   Use a prefix regex (`"E2E Fixture — Mutual NDA.*"`) or `id:`.
+| what | locator |
+| --- | --- |
+| input placeholders (`Search documents…`) | `seePlaceholder` / `getByPlaceholder` |
+| icon-button `aria-label`s (`Void <title>`) | `getByRole("button", { name })` |
+| `data-testid` (`font-great-vibes`, `evidence-pack-download`) | `getByTestId` |
 
-Other lessons baked into the flows:
+Playwright normalises whitespace and auto-waits, so neither the tolerant
+`" ?Text ?"` regexes nor explicit wait steps are needed. Keep an explicit
+timeout only where a route cold-compiles in dev mode.
 
-- **Viewport**: run with `--screen-size 1440x1000` (the runner default). On
-  shorter viewports the recipient row sits at the screen edge and taps
-  misfire; `TAB` is not supported on web, so field-to-field navigation must
-  be taps.
-- **SPA transitions**: after login/navigation use `extendedWaitUntil` with
-  regex (`visible: "Welcome back.*"` — the header, not the transient toast).
-- **Dialog prefills**: "Use template" prefills the title — `eraseText: 100`
-  before `inputText`.
-- **No spaces in dialog inputText**: Maestro types per character and its
-  Selenium `sendKeys(" ")` intermittently throws "element not interactable"
-  inside Radix dialogs (reproduced on the void-reason input; first 3 chars
-  landed, the space failed). Use hyphenated strings in dialog inputs:
-  `"E2E-fixture-voided-by-maestro-suite"`, not `"E2E fixture voided …"`.
-- **Radix overlays and focus**: dialogs with a required field should own
-  `onOpenAutoFocus` (see `ConfirmDialog` in `src/components/portal/shared.tsx`)
-  and row-action buttons must `stopPropagation()` — both were real UX bugs
-  found by this suite, not test-only issues.
-- **Below-the-fold elements are invisible to Maestro**: the a11y tree only
-  contains the viewport, so a button past the fold is "not found", not
-  "not visible". `scrollUntilVisible` (direction: DOWN) before interacting —
-  the signer flows use it for the consent row and action bar.
-- **Cold-boot compile race**: in dev mode every route compiles on first hit,
-  and a flow that navigates right after a cold server boot can race the
-  compiler (seen live: the marketing CTA → `/welcome` exceeded a 10s wait on
-  a cold sandbox server). The runner now warms the public routes once after
-  boot, and first-navigation asserts use `extendedWaitUntil` with 30s
-  timeouts.
-- **Base URL**: flows reference `${MAESTRO_BASE_URL}`; the runner exports it
-  (default `http://127.0.0.1:3000`), so the same suite can target staging or
-  production smoke runs: `MAESTRO_BASE_URL=https://staging.example.com bun run test:e2e`.
-- **`DATABASE_URL` guard**: an inherited shell `DATABASE_URL` overrides the
-  app `.env` and breaks every DB route; the runner pins it to the repo db.
-  Override with `E2E_DATABASE_URL` if you need a different database.
+`withPage` fails a flow on any uncaught page error, so a spec cannot pass
+against a page that is throwing. Next.js dev hydration warnings are filtered
+as dev-server noise — see the note on `DEV_SERVER_NOISE` in the harness.
+
 
 ## CI
 
 `.github/workflows/e2e.yml` runs the suite on push/PR against `quality` and
-`main`: bun install → prisma generate → seed → `maestro test --headless`,
-uploading Maestro debug artifacts when flows fail. The CI image needs a
+`main`: bun install → prisma generate → seed → `bash e2e/run.sh`. The CI image needs a
 `chromium` wrapper that injects `--no-sandbox --disable-dev-shm-usage` (the
 workflow creates one), and downloads the **SeaweedFS** binary so
 `e2e/s3-seaweed.test.ts` exercises the S3 storage backend against a real
@@ -213,14 +188,24 @@ subpixel drift.
 - LCP is measured on every route and gated (<6s, dev-server budget) on `/`
   and `/templates` — the gate catches catastrophic asset regressions, it
   does not benchmark (dev-mode compile inflates the number).
-- The suite always runs right after the seed and before the Maestro flows —
+- The suite always runs right after the seed and before the browser suites —
   pages that render DB counts (e.g. `/status`) are deterministic at that
   point in the pipeline.
 
-## Writing new flows
+## Writing new specs
 
-- One journey per file; name files `area/subject.yaml`.
-- Self-contained: every flow does its own login (typed, with the e2e account)
-  — flows must stay order-independent so they can run in parallel or alone.
-- All writes go to the E2E tenant; never use demo accounts for writes.
-- Assert on stable UI text (headers, badges), never on toasts (they expire).
+Add to the file matching the surface (`public`, `auth`, `workspace`,
+`admin`), using the `flow(...)` helper already in each file so the skip flag
+and timeout are handled. Keep each spec self-contained: build the state it
+needs, or rely on a seeded fixture, and prefer a unique identifier per run
+over a fixed one where the endpoint deduplicates (see the enterprise-lead
+spec).
+
+Two properties are worth preserving:
+
+- **State.** The workspace suite spends seeded fixtures — it declines
+  DOC-E2E0003 and seals DOC-E2E0004 — so it needs a fresh `bun e2e/seed.ts`
+  per run. `e2e/run.sh` seeds before it.
+- **Order.** The signer-journey spec must precede the seal-verification spec,
+  which asserts the seal it creates. `bun test` runs specs in declaration
+  order within a file; keep dependent pairs in one file and in order.

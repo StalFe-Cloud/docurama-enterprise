@@ -1,4 +1,4 @@
-FROM oven/bun:1.2 AS base
+FROM oven/bun:1.2.22 AS base
 WORKDIR /app
 # Prisma must detect the installed OpenSSL ABI during client generation and
 # find the same libraries when the generated engine starts in the runner.
@@ -8,10 +8,18 @@ RUN apt-get update \
 
 # Install dependencies
 FROM base AS deps
+# Which database this image targets. Prisma cannot read datasource.provider
+# from an env var, so the provider is fixed here, at build time: one image
+# targets one database.
+#   sqlite      single-node default (docker-compose.yml)
+#   postgresql  scale-out / multi-replica (docker-compose --profile postgres)
+ARG DB_PROVIDER=sqlite
+ENV DOCURAMA_DB_PROVIDER=$DB_PROVIDER
 COPY package.json bun.lock ./
 COPY prisma ./prisma
+COPY scripts/schema-for.mjs ./scripts/schema-for.mjs
 RUN bun install --frozen-lockfile
-RUN bunx prisma generate
+RUN node scripts/schema-for.mjs "$DB_PROVIDER"   && bunx prisma generate --schema "prisma/schema.$DB_PROVIDER.prisma"
 
 # Build application
 FROM base AS builder
@@ -27,6 +35,8 @@ RUN bun build scripts/bootstrap-admin.ts --target=bun --packages=external --outf
 
 # Production runner — hardened, non-root, self-migrating
 FROM base AS runner
+ARG DB_PROVIDER=sqlite
+ENV DOCURAMA_DB_PROVIDER=$DB_PROVIDER
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
@@ -45,7 +55,9 @@ RUN apt-get update \
   && useradd -u 10001 -g docurama -m -s /usr/sbin/nologin docurama
 
 COPY --from=builder --chown=10001:10001 /app/.next/standalone ./
-COPY --from=builder --chown=10001:10001 /app/prisma ./prisma
+# From deps, not builder: deps holds the generated provider-specific schema
+# that the entrypoint pushes at boot.
+COPY --from=deps --chown=10001:10001 /app/prisma ./prisma
 COPY --from=builder --chown=10001:10001 /app/content ./content
 # Prisma CLI for the entrypoint's idempotent schema push (migrations on boot).
 COPY --from=deps --chown=10001:10001 /app/node_modules ./node_modules

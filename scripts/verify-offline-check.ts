@@ -5,7 +5,7 @@
  * Not part of the automated suite (it needs playwright + a browser); run it
  * manually when the verifier or the manifest format changes:
  *
- *   DATABASE_URL=... MAESTRO_BASE_URL=http://127.0.0.1:3000 \
+ *   DATABASE_URL=... E2E_BASE_URL=http://127.0.0.1:3000 \
  *     bun scripts/verify-offline-check.ts
  *
  * Flow: download a pack over the v1 API → unzip to a temp dir → open
@@ -20,7 +20,7 @@ import { promisify } from "util";
 import { chromium } from "playwright";
 
 const run = promisify(execFile);
-const BASE = process.env.MAESTRO_BASE_URL ?? "http://127.0.0.1:3000";
+const BASE = process.env.E2E_BASE_URL ?? "http://127.0.0.1:3000";
 const API_KEY = process.env.E2E_API_KEY ?? "dk_e2e_0000000000000000000000000000000000000000";
 const CODE = process.env.PACK_CODE ?? "DOC-E2E0002";
 

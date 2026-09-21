@@ -9,6 +9,8 @@ import {
   parseProvisioningState, buildZoneFile,
   type ProvisioningState,
 } from "@/lib/provisioning";
+import { createInvitation, requestOrigin, slugifyOrg } from "@/lib/onboarding";
+import { foldForSearch } from "@/lib/search";
 
 export const dynamic = "force-dynamic";
 
@@ -243,9 +245,14 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       case "leads": {
         // Enterprise pipeline (cycle 10): public /enterprise form intake.
         const leadWhere: Record<string, unknown> = {};
+        // Match the folded columns, not the raw ones: `search` is lowercased,
+        // and PostgreSQL LIKE is case-sensitive where SQLite's is not, so
+        // `company: { contains: search }` found rows on SQLite and nothing on
+        // PostgreSQL. (email is already stored lowercased on write.)
+        const leadSearch = foldForSearch(search);
         if (search) leadWhere.OR = [
-          { company: { contains: search } },
-          { contactName: { contains: search } },
+          { companyLower: { contains: leadSearch } },
+          { contactNameLower: { contains: leadSearch } },
           { email: { contains: search } },
         ];
         const status = q.get("status");
@@ -876,6 +883,127 @@ export async function POST(req: NextRequest, ctx: Ctx) {
           });
           return jsonOk({ ok: true, message: notes ? "Note saved" : "Note cleared" });
         }
+
+        // Convert a won lead into a real tenant. Sales-led plans (BUSINESS,
+        // ENTERPRISE) are not self-serve — see SELF_SERVE_PLANS in
+        // src/lib/plans.ts — so this is the only path that creates them, with
+        // the negotiated seat/envelope/price numbers recorded on the
+        // subscription rather than edited into the shared plan catalogue.
+        if (op === "lead.convert") {
+          const lead = await db.enterpriseLead.findUnique({ where: { id } });
+          if (!lead) return jsonError("Lead not found", 404);
+          if (lead.status !== "WON") {
+            return jsonError(`Only a WON lead can be converted (this one is ${lead.status})`);
+          }
+          if (lead.convertedTenantId) {
+            const existing = await db.tenant.findUnique({ where: { id: lead.convertedTenantId } });
+            return jsonOk({
+              ok: true,
+              alreadyConverted: true,
+              tenantId: lead.convertedTenantId,
+              message: `${lead.company} was already converted to ${existing?.name ?? "a workspace"}`,
+            });
+          }
+
+          const planCode = String(data.planCode ?? "ENTERPRISE").trim().toUpperCase();
+          if (!PLAN_MRR[planCode]) return jsonError("Invalid plan");
+
+          // Negotiated entitlements. An explicit value wins; otherwise fall back
+          // to what the lead asked for. null means "use the plan catalogue",
+          // which is how src/lib/billing.ts resolves these.
+          const posInt = (v: unknown, fallback: number): number | null => {
+            const n = Math.trunc(Number(v));
+            if (Number.isFinite(n) && n > 0) return n;
+            return fallback > 0 ? fallback : null;
+          };
+          const seatLimitOverride = posInt(data.seatLimitOverride, lead.seats);
+          const envelopeLimitOverride = posInt(data.envelopeLimitOverride, lead.monthlyEnvelopes);
+          const monthlyEurOverride = posInt(data.monthlyEurOverride, 0);
+
+          const tenant = await db
+            .$transaction(async (tx) => {
+              const created = await tx.tenant.create({
+                data: {
+                  name: lead.company,
+                  slug: slugifyOrg(lead.company),
+                  planCode,
+                  status: "ACTIVE",
+                  billingEmail: lead.email,
+                },
+              });
+              await tx.subscription.create({
+                data: {
+                  tenantId: created.id,
+                  planCode,
+                  status: "ACTIVE",
+                  mrrEur: monthlyEurOverride ?? PLAN_MRR[planCode],
+                  seats: seatLimitOverride ?? 1,
+                  renewalAt: new Date(Date.now() + 30 * 86400000),
+                  seatLimitOverride,
+                  envelopeLimitOverride,
+                  monthlyEurOverride,
+                },
+              });
+              // Compare-and-set, not read-then-write: two concurrent converts
+              // both read convertedTenantId as null, but only one updateMany
+              // matches. The loser throws and its tenant rolls back with it.
+              const claimed = await tx.enterpriseLead.updateMany({
+                where: { id, convertedTenantId: null },
+                data: { convertedTenantId: created.id, convertedAt: new Date() },
+              });
+              if (claimed.count === 0) throw new Error("LEAD_ALREADY_CONVERTED");
+              return created;
+            })
+            .catch((e: unknown) => {
+              if (e instanceof Error && e.message === "LEAD_ALREADY_CONVERTED") return null;
+              throw e;
+            });
+
+          if (!tenant) {
+            const fresh = await db.enterpriseLead.findUnique({ where: { id } });
+            return jsonOk({
+              ok: true,
+              alreadyConverted: true,
+              tenantId: fresh?.convertedTenantId ?? null,
+              message: `${lead.company} was already converted`,
+            });
+          }
+
+          // The contact has no account yet, so invite them as OWNER rather than
+          // minting a user with a password nobody chose.
+          const invite = await createInvitation({
+            tenantId: tenant.id,
+            email: lead.email,
+            role: "OWNER",
+            invitedBy: actor,
+            invitedById: admin.id,
+            origin: requestOrigin(req),
+          });
+
+          await recordAudit({
+            actor,
+            actorRole: "PLATFORM_ADMIN",
+            action: "enterprise.lead.converted",
+            resource: `lead:${id}`,
+            tenantName: tenant.name,
+            detail:
+              `${lead.company} to tenant ${tenant.slug} on ${planCode} ` +
+              `(seats ${seatLimitOverride ?? "catalogue"}, envelopes ${envelopeLimitOverride ?? "catalogue"}, ` +
+              `EUR ${monthlyEurOverride ?? PLAN_MRR[planCode]}/mo)` +
+              `${invite ? `; owner invite sent to ${lead.email}` : "; owner invite NOT sent (no seat available)"}`,
+          });
+
+          return jsonOk({
+            ok: true,
+            tenantId: tenant.id,
+            tenantSlug: tenant.slug,
+            invited: Boolean(invite),
+            message:
+              `${lead.company} converted to ${tenant.name} on ${planCode}` +
+              (invite ? ` - owner invite sent to ${lead.email}` : " - owner invite could not be sent"),
+          });
+        }
+
         return jsonError("Unsupported operation");
       }
 

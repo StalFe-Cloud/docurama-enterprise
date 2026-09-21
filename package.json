@@ -7,7 +7,8 @@
     "build": "next build && node scripts/package-standalone.mjs",
     "start": "NODE_ENV=production bun .next/standalone/server.js",
     "lint": "eslint .",
-    "db:push": "prisma db push --accept-data-loss",
+    "db:push": "prisma db push",
+    "db:push:disposable": "prisma db push --accept-data-loss",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:reset": "prisma migrate reset",
@@ -91,6 +92,7 @@
     "tesseract.js": "^7.0.0",
     "uuid": "^11.1.0",
     "vaul": "^1.1.2",
+    "xmllint-wasm": "^5.3.0",
     "z-ai-web-dev-sdk": "^0.0.18",
     "zod": "^4.0.2",
     "zustand": "^5.0.6"

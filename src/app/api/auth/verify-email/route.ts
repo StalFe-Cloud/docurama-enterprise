@@ -17,7 +17,7 @@ async function verify(token: string): Promise<{ userId: string; email: string } 
   if (!result) return null;
   const user = await db.user.findUnique({ where: { id: result.userId } });
   if (user) {
-    await recordAudit({
+    await recordAudit({ actorUserId: user.id, tenantId: user.activeTenantId,
       actor: `${user.firstName} ${user.lastName}`,
       actorRole: user.role,
       action: "user.email.verified",

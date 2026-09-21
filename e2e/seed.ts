@@ -32,6 +32,8 @@ import {
 } from "../src/lib/transparency";
 import { storeUpload } from "../src/lib/document-store";
 import { PLAN_CATALOG, PLAN_ORDER } from "../src/lib/plans";
+import { syncTemplateLibrary } from "../scripts/sync-template-library";
+import { backfillLeadSearch } from "../scripts/backfill-lead-search";
 
 const run = promisify(execFile);
 
@@ -134,6 +136,9 @@ const E2E_TENANT_SLUG = "e2e-testing";
 const E2E_USER_EMAIL = "e2e@docurama.eu";
 const E2E_USER_PASSWORD = "e2ePass1234!";
 const E2E_ADMIN_EMAIL = "e2e-admin@docurama.eu";
+// Submitted by the public enterprise-lead browser flow; wiped below so the
+// endpoint's 10-minute duplicate throttle cannot fail a re-run.
+const E2E_LEAD_PREFIX = "e2e-lead-";
 const E2E_ADMIN_PASSWORD = "e2eAdmin1234!";
 
 async function main() {
@@ -215,6 +220,101 @@ async function main() {
     lastName: "Admin",
   });
   console.log(`users: ${E2E_USER_EMAIL} (tenant scoped), ${E2E_ADMIN_EMAIL} (platform admin)`);
+
+  /* ── Accounts e2e/plans.test.ts signs in as ──────────────────────── */
+  // These are demo-shaped accounts that live in the committed demo database
+  // (db/custom.db). The SQLite runner copies that file, so the tests found
+  // them; any fresh database — every PostgreSQL deployment, and CI's postgres
+  // job — has no demo data and the same tests 401'd. Provisioned here so the
+  // fixtures have one source rather than a 1.5 MB binary the suite happens to
+  // start from.
+  //
+  // Strictly create-if-absent: a real demo database keeps its own rows, which
+  // is what "demo data is never touched" means elsewhere in this file.
+  const ensureUser = async (
+    email: string,
+    password: string,
+    role: string,
+    firstName: string,
+    lastName: string,
+  ) => {
+    const existing = await db.user.findUnique({ where: { email } });
+    if (existing) return { user: existing, created: false };
+    const user = await db.user.create({
+      data: { email, passwordHash: hashPassword(password), firstName, lastName, role, status: "ACTIVE" },
+    });
+    return { user, created: true };
+  };
+
+  const demoAdmin = await ensureUser("admin@docurama.eu", "admin1234", "PLATFORM_ADMIN", "Dana", "Admin");
+
+  // alex/marco/sofia must share one workspace: the team tests assign marco to
+  // a team alex creates, and assert sofia cannot create one at all.
+  const alex = await ensureUser("alex@stalfe.example", "demo1234", "WORKSPACE_ADMIN", "Alex", "Stalfe");
+  const marco = await ensureUser("marco@stalfe.example", "demo1234", "MEMBER", "Marco", "Stalfe");
+  const sofia = await ensureUser("sofia@stalfe.example", "demo1234", "MEMBER", "Sofia", "Stalfe");
+
+  if (alex.created || marco.created || sofia.created) {
+    // Reuse whichever workspace the pre-existing member of the trio is already
+    // in, so a partially-seeded database does not end up with two.
+    const anchorMember = await db.member.findFirst({
+      where: { userId: { in: [alex.user.id, marco.user.id, sofia.user.id] } },
+    });
+    const demoTenant =
+      (anchorMember && (await db.tenant.findUnique({ where: { id: anchorMember.tenantId } }))) ??
+      (await db.tenant.findFirst({ where: { slug: "stalfe-demo" } })) ??
+      (await db.tenant.create({
+        data: { name: "StalFe Demo", slug: "stalfe-demo", planCode: "BUSINESS", status: "ACTIVE" },
+      }));
+
+    // OWNER for alex (adminRoles => may create teams), MEMBER for the others
+    // (sofia's 403 is the assertion).
+    for (const [entry, memberRole] of [
+      [alex, "OWNER"],
+      [marco, "MEMBER"],
+      [sofia, "MEMBER"],
+    ] as const) {
+      const member = await db.member.findFirst({
+        where: { userId: entry.user.id, tenantId: demoTenant.id },
+      });
+      if (!member) {
+        await db.member.create({
+          data: { userId: entry.user.id, tenantId: demoTenant.id, role: memberRole, status: "ACTIVE" },
+        });
+      }
+      if (!entry.user.activeTenantId) {
+        await db.user.update({ where: { id: entry.user.id }, data: { activeTenantId: demoTenant.id } });
+      }
+    }
+    console.log(`demo accounts: provisioned into ${demoTenant.slug} (alex/marco/sofia)`);
+  }
+  if (demoAdmin.created) console.log("demo accounts: provisioned admin@docurama.eu");
+
+  /* ── Built-in template library ───────────────────────────────────── */
+  // The 8 statutory French templates are defined in src/lib/templates/fr and
+  // synced by scripts/sync-template-library.ts, which nothing called. They
+  // therefore existed only inside the committed demo database, so a fresh one
+  // served an empty /modeles-de-contrats and an empty workspace template list.
+  const builtIns = await syncTemplateLibrary();
+  console.log(`templates: ${builtIns} built-in French template(s) present`);
+
+  /* ── Lead search columns ─────────────────────────────────────────── */
+  // Rows created before companyLower/contactNameLower existed carry the ""
+  // default and are unsearchable until folded. Idempotent.
+  const leadsFixed = await backfillLeadSearch();
+  if (leadsFixed) console.log(`leads: backfilled search columns on ${leadsFixed} lead(s)`);
+
+  /* ── Platform settings singleton ─────────────────────────────────── */
+  // Nothing in the application creates this row; it only ever came from the
+  // demo database. Without it the admin console renders no SMTP/TSA cards.
+  // certExpiryAt is the one column with no schema default.
+  const settingsRow = await db.platformSetting.findUnique({ where: { id: "singleton" } });
+  if (!settingsRow) {
+    await db.platformSetting.create({
+      data: { id: "singleton", certExpiryAt: new Date(Date.now() + 365 * 86400_000) },
+    });
+    console.log("platform settings: provisioned the singleton row");
+  }
 
   /* ── Fixture documents (real PDFs on disk for the signer preview) ── */
   const ndaDoc = await seedDocument(
@@ -608,6 +708,16 @@ async function main() {
       await rm(dir, { recursive: true, force: true }).catch(() => undefined);
     }
   }
+
+  /* ── Enterprise lead fixture (public enterprise-lead browser flow) ── */
+  // The public form soft-throttles a repeat submission from the same address
+  // for 10 minutes (src/app/api/enterprise-lead/route.ts) and answers 429, so
+  // the browser flow submits a unique e2e-lead-<ts>@example.com each run.
+  // Sweep the prefix here so those rows do not accumulate in a long-lived
+  // database — the old Maestro runner never needed this because it started
+  // from a fresh copy of db/custom.db every time.
+  const leadsWiped = await db.enterpriseLead.deleteMany({ where: { email: { startsWith: E2E_LEAD_PREFIX } } });
+  if (leadsWiped.count) console.log(`enterprise lead: cleared ${leadsWiped.count} prior ${E2E_LEAD_PREFIX}* submission(s)`);
 
   /* ── Summary ─────────────────────────────────────────────────────── */
   const envelopes = await db.envelope.count({ where: { tenantId: tenant.id } });

@@ -1,0 +1,62 @@
+name: Apply guarded remediation
+on:
+  push:
+    branches: [quality-remediation-20260920]
+    paths: [scripts/apply-remediation.py, .github/workflows/apply-remediation.yml]
+permissions:
+  contents: read
+jobs:
+  apply:
+    if: github.repository == 'StalFe-Cloud/docurama' && github.ref == 'refs/heads/quality-remediation-20260920'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.2.22"
+      - name: Apply checked source transformations
+        if: ${{ hashFiles('scripts/apply-remediation.py') != '' }}
+        run: python3 scripts/apply-remediation.py
+      - run: bun install --frozen-lockfile
+      - name: Generate migration history and clients
+        if: ${{ hashFiles('scripts/initialize-migration-history.mjs') != '' }}
+        run: |
+          node scripts/initialize-migration-history.mjs
+          node scripts/schema-for.mjs sqlite
+          bunx prisma generate
+      - name: Type-check candidate
+        run: bunx tsc --noEmit
+      - name: Lint candidate
+        run: bun run lint
+      - name: Publish only the checked isolated candidate
+        if: ${{ hashFiles('scripts/apply-remediation.py') != '' }}
+        env:
+          TARGET_BRANCH: quality-remediation-20260920
+        run: |
+          test "$(git branch --show-current)" = "$TARGET_BRANCH"
+          test "$(git ls-remote origin refs/heads/$TARGET_BRANCH | cut -f1)" = "$GITHUB_SHA"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src prisma scripts docker-entrypoint.sh Dockerfile .gitignore .github/workflows/e2e.yml
+          git commit -m 'fix: integrate reviewed quality remediation and versioned migrations'
+          git push origin HEAD:refs/heads/$TARGET_BRANCH
+          git rev-parse HEAD > /tmp/remediation-candidate.txt
+      - name: Export checked candidate diagnostics
+        if: always()
+        run: |
+          git diff > /tmp/remediation-uncommitted.diff
+          git archive --format=tar HEAD -- src prisma scripts e2e .github Dockerfile docker-entrypoint.sh package.json bun.lock tsconfig.json > /tmp/remediation-candidate.tar
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: remediation-candidate-${{ github.run_id }}
+          path: |
+            /tmp/remediation-candidate.tar
+            /tmp/remediation-candidate.txt
+            /tmp/remediation-uncommitted.diff
+          retention-days: 1

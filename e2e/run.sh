@@ -1,32 +1,42 @@
 #!/usr/bin/env bash
-# Docurama E2E runner — one command to a green (or red) Maestro suite.
+# Docurama E2E runner — one command to a green (or red) suite.
 #
-#   bash e2e/run.sh                          # full suite against a local dev server
-#   bash e2e/run.sh <flow.yaml> [more.yaml…] # one or more specific flows
+#   bash e2e/run.sh    # everything, against a local dev server
+#
+# To run one browser suite directly (server must already be up):
+#   E2E_BASE_URL=http://127.0.0.1:3000 bun test e2e/browser/public.test.ts
 #
 # Environment:
-#   MAESTRO_BASE_URL   target origin (default http://127.0.0.1:3000)
-#   MAESTRO_SCREEN     headless viewport (default 1440x1000 — tall enough for
-#                      the send-envelope dialog; smaller viewports put the
-#                      recipient row at the screen edge and taps misfire)
-#   E2E_SKIP_SEED=1    skip the seed step (flows need it for fixtures)
+#   E2E_BASE_URL       target origin (default http://127.0.0.1:3000)
+#   E2E_SKIP_SEED=1    skip the seed step (the suites need it for fixtures)
 #   E2E_START_SERVER=0 don't boot/stop a dev server (CI or remote targets)
+#   E2E_SKIP_BROWSER=1 skip the Playwright browser suites (no Chromium)
 #   E2E_SKIP_VISUAL=1  skip the visual-regression file (no Chromium available)
-#   CHROME_BIN         explicit Chromium/Chrome path for e2e/visual.test.ts
+#   CHROME_BIN         explicit Chromium/Chrome path for the browser suites
 #   UPDATE_BASELINES=1 regenerate (don't compare) the visual baselines
 #
-# Exit code: 0 iff every flow passed.
+# Exit code: 0 iff every suite passed.
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-BASE_URL="${MAESTRO_BASE_URL:-http://127.0.0.1:3000}"
-SCREEN="${MAESTRO_SCREEN:-1440x1000}"
-FLOWS_DIR="$ROOT/e2e/flows"
+BASE_URL="${E2E_BASE_URL:-http://127.0.0.1:3000}"
+
+# CI exports this at the job level; a bare local `bash e2e/run.sh` needs it
+# too, or the loopback webhook fixtures are blocked by the SSRF guard
+# (observed as delivered=0 / statusCode=0 in webhooks.test.ts).
+export DOCURAMA_ALLOW_PRIVATE_WEBHOOKS="${DOCURAMA_ALLOW_PRIVATE_WEBHOOKS:-1}"
 
 # ── 0. Sanity + isolation: the suite runs on a COPY of the committed db. ─────
+# CI's e2e job pushes the schema onto db/custom.db before invoking this
+# script; do the same here so a fresh clone runs green without that step —
+# mail.test.ts copies db/custom.db directly and the seed needs current
+# columns (e.g. EnterpriseLead.companyLower, MailOutbox.claimToken).
+# Pinned to the fixture via the schema-relative path the tests also use, so
+# an ambient DATABASE_URL can't redirect the push.
+DATABASE_URL="file:../db/custom.db" bunx prisma db push --accept-data-loss --skip-generate > /dev/null
 # A globally exported DATABASE_URL silently overrides .env and every DB route
 # 500s (found the hard way). Beyond pinning, the suite writes a LOT (events,
 # seals, seed cycles) — writing to db/custom.db INSIDE the repo makes
@@ -69,6 +79,7 @@ if [[ "${E2E_START_SERVER:-1}" == "1" ]]; then
     REKOR_WITNESS="${E2E_REKOR_WITNESS:-off}" \
       NEXT_PUBLIC_DEMO_MODE="${E2E_DEMO_MODE:-true}" \
       DOCURAMA_WORKER="${E2E_DOCURAMA_WORKER:-off}" \
+      DOCURAMA_ALLOW_PRIVATE_WEBHOOKS="1" \
       bun run dev > /tmp/docurama-e2e-dev.log 2>&1 &
     SERVER_PID=$!
     for i in $(seq 1 60); do
@@ -126,15 +137,16 @@ fi
 bun test e2e/auth-security.test.ts || { echo "!! authentication security tests failed"; exit 1; }
 bun test e2e/password-security.test.ts || { echo "!! password security tests failed"; exit 1; }
 bun test e2e/quota-security.test.ts || { echo "!! quota and API entitlement tests failed"; exit 1; }
+bun test e2e/lead-conversion.test.ts || { echo "!! enterprise lead conversion tests failed"; exit 1; }
 bun test e2e/blog.test.ts e2e/storage-config.test.ts || { echo "!! content/storage tests failed"; exit 1; }
 if [[ "${E2E_SKIP_API:-0}" != "1" ]]; then
   echo "── e2e: API-layer + evidence-layer + transparency-layer + MCP + visual tests"
-  MAESTRO_BASE_URL="$BASE_URL" bun test e2e/api.test.ts e2e/evidence.test.ts e2e/transparency.test.ts e2e/rekor.test.ts e2e/plans.test.ts e2e/webhooks.test.ts e2e/visual.test.ts || { echo "!! API/evidence/transparency/plans/webhooks/visual tests failed"; exit 1; }
+  E2E_BASE_URL="$BASE_URL" bun test e2e/api.test.ts e2e/evidence.test.ts e2e/transparency.test.ts e2e/rekor.test.ts e2e/plans.test.ts e2e/webhooks.test.ts e2e/visual.test.ts || { echo "!! API/evidence/transparency/plans/webhooks/visual tests failed"; exit 1; }
 fi
 
 # ── 2c-bis. MCP server (own process: the per-key rate-limit test needs a
 #         deterministic bucket state, which parallel sibling files disturb) ──
-  MAESTRO_BASE_URL="$BASE_URL" bun test e2e/mcp.test.ts || { echo "!! MCP server tests failed"; exit 1; }
+  E2E_BASE_URL="$BASE_URL" bun test e2e/mcp.test.ts || { echo "!! MCP server tests failed"; exit 1; }
 
 # ── 2d. Mail delivery engine (own process: it owns DATABASE_URL + SMTP_URL) ───
 if [[ "${E2E_SKIP_MAIL:-0}" != "1" ]]; then
@@ -177,52 +189,16 @@ if [[ "${E2E_SKIP_S3:-0}" != "1" ]]; then
   fi
 fi
 
-# ── 3. Discover flows and run them ────────────────────────────────────────────
-export MAESTRO_BASE_URL="$BASE_URL"
-export MAESTRO_CLI_NO_ANALYTICS=1
-export PATH="$HOME/.maestro/bin:$PATH"
-
-# Compile each public signer route before launching a fresh browser. This
-# avoids a cold Turbopack navigation stalling Maestro's CDP initialization.
-curl -fsS -o /dev/null "$BASE_URL/sign/e2e-fixed-decline-token-0000000000000001"
-
-if ! command -v maestro >/dev/null 2>&1; then
-  if [[ "${E2E_SKIP_MAESTRO:-0}" == "1" ]]; then
-    echo "── e2e: maestro skipped (E2E_SKIP_MAESTRO=1)"
-    exit 0
-  fi
-  echo "!! maestro not found — install with: curl -Ls 'https://get.maestro.mobile.dev' | bash"
-  exit 1
+# ── 3. Browser suites (Playwright) ────────────────────────────────────────────
+# The critical user journeys, driven through Chromium via Playwright. These
+# replaced a Maestro flow runner (e2e/flows/*.yaml): Maestro drove its own
+# bundled browser over CDP and flaked on roughly one flow per CI run, a
+# different one each time, while these ran green. See e2e/browser/harness.ts.
+if [[ "${E2E_SKIP_BROWSER:-0}" != "1" ]]; then
+  echo "── e2e: browser suites (Playwright)"
+  E2E_BASE_URL="$BASE_URL" bun test e2e/browser/ || { echo "!! browser suites failed"; exit 1; }
 fi
-
-if [[ $# -gt 0 ]]; then
-  FLOWS=("$@")
-else
-  mapfile -t FLOWS < <(find "$FLOWS_DIR" -name '*.yaml' | sort)
-fi
-
-echo "── e2e: running ${#FLOWS[@]} flow(s) at ${SCREEN} against $MAESTRO_BASE_URL"
-FAILED=()
-i=0
-for flow in "${FLOWS[@]}"; do
-  i=$((i + 1))
-  name="$(basename "$flow" .yaml)"
-  echo ""
-  echo "══ [$i/${#FLOWS[@]}] $name ══"
-  if maestro test --headless --screen-size "$SCREEN" "$flow"; then
-    echo "   ✔ $name"
-  else
-    echo "   ✘ $name"
-    FAILED+=("$name")
-  fi
-done
 
 echo ""
 echo "────────────────────────────────────────────"
-if [[ ${#FAILED[@]} -eq 0 ]]; then
-  echo "E2E: all ${#FLOWS[@]} flows passed"
-else
-  echo "E2E: ${#FAILED[@]}/${#FLOWS[@]} flows FAILED:"
-  for f in "${FAILED[@]}"; do echo "   ✘ $f"; done
-  exit 1
-fi
+echo "E2E: all suites passed"

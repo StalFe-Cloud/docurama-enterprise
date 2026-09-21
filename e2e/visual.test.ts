@@ -17,10 +17,9 @@
  * and stays far below any real layout break (a missing hero section moves
  * 15-60% of pixels). Locally, unchanged pages re-diff at 0.00%.
  *
- * Chromium resolution order:
- *   1. CHROME_BIN env var (CI exports the runner's Chrome)
- *   2. any chromium build in ~/.cache/ms-playwright (its chrome binary)
- *   3. google-chrome / chromium on PATH
+ * Chromium resolution is shared with the browser suites — see findChrome in
+ * e2e/browser/harness.ts (CHROME_BIN, then a Playwright-managed build, then
+ * PATH, then the well-known Windows install locations).
  *
  * Baselines are part of the repo. After an INTENTIONAL redesign, regenerate
  * and commit them:
@@ -41,10 +40,28 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { execFileSync } from "child_process";
 import { homedir } from "os";
 import { join, dirname } from "path";
+import { findChrome } from "./browser/harness";
 
-const BASE = process.env.MAESTRO_BASE_URL ?? "http://127.0.0.1:3000";
+const BASE = process.env.E2E_BASE_URL ?? "http://127.0.0.1:3000";
 const BASELINES_DIR = join(dirname(import.meta.path), "baselines");
 const UPDATE = process.env.UPDATE_BASELINES === "1";
+
+/**
+ * The committed baselines are captured on Linux (CI is the reference
+ * environment). The 5% budget below covers Chromium-build variation on the
+ * SAME platform — measured 2.8-4.1%. Cross-platform is a different scale:
+ * Windows DirectWrite vs Linux FreeType rasterises text differently enough to
+ * drift 7-12% on untouched pages, so comparing there reports failures that say
+ * nothing about the page.
+ *
+ * Off-platform we still drive the browser, load every route, assert no page
+ * error and enforce the LCP budget — only the pixel comparison is skipped, and
+ * loudly. Set VISUAL_COMPARE=1 to force it (e.g. after regenerating baselines
+ * locally, which you should not commit from a non-Linux machine).
+ */
+const BASELINE_PLATFORM = "linux";
+const CAN_COMPARE =
+  process.platform === BASELINE_PLATFORM || process.env.VISUAL_COMPARE === "1" || UPDATE;
 
 const VIEWPORT = { width: 1280, height: 800 };
 const PIXEL_TOLERANCE = 32; // max per-channel shift that still counts as "same"
@@ -60,33 +77,6 @@ const ROUTES: { name: string; path: string; lcpBudget?: boolean }[] = [
   { name: "status", path: "/status" },
   { name: "login", path: "/login" },
 ];
-
-/** Find a Chrome/Chromium executable for Playwright to drive. */
-function findChrome(): string | undefined {
-  if (process.env.CHROME_BIN && existsSync(process.env.CHROME_BIN)) return process.env.CHROME_BIN;
-  const cacheDir = join(homedir(), ".cache", "ms-playwright");
-  if (existsSync(cacheDir)) {
-    const dirs = readdirSync(cacheDir)
-      .filter((n) => /^chromium-\d+$/.test(n))
-      .sort()
-      .reverse();
-    for (const d of dirs) {
-      for (const layout of ["chrome-linux64", "chrome-linux"]) {
-        const bin = join(cacheDir, d, layout, "chrome");
-        if (existsSync(bin)) return bin;
-      }
-    }
-  }
-  for (const bin of ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"]) {
-    try {
-      const p = execFileSync("which", [bin], { encoding: "utf8" }).trim();
-      if (p) return p;
-    } catch {
-      /* not on PATH */
-    }
-  }
-  return undefined;
-}
 
 /** Decode a PNG into raw RGBA pixels via napi-canvas (no new deps). */
 async function decodePng(bytes: Buffer) {
@@ -229,33 +219,40 @@ describe("visual regression smoke (marketing surfaces)", () => {
           expect(distinctColors(live)).toBeGreaterThan(24); // not a blank sheet
 
           const baselinePath = join(BASELINES_DIR, `${route.name}.png`);
-          if (UPDATE || !existsSync(baselinePath)) {
+          if (!CAN_COMPARE && existsSync(baselinePath)) {
+            // Off the baseline platform: skip the pixel diff, keep the LCP gate.
+            console.log(
+              `   ⚠ ${route.name}: baseline comparison skipped on ${process.platform} ` +
+                `(baselines are ${BASELINE_PLATFORM}-captured; VISUAL_COMPARE=1 to force)`,
+            );
+          } else if (UPDATE || !existsSync(baselinePath)) {
             mkdirSync(BASELINES_DIR, { recursive: true });
             writeFileSync(baselinePath, shot);
             console.log(
               `   📸 ${route.name}: baseline ${UPDATE ? "regenerated" : "created"} (${live.width}x${live.height}` +
                 `${lcp >= 0 ? `, LCP ${Math.round(lcp)}ms` : ""})`,
             );
-            return;
-          }
-
-          const baseline = await decodePng(readFileSync(baselinePath));
-          const { diff, ratio } = countDiff(baseline, live);
-          if (ratio > MAX_DIFF_RATIO) {
-            const failPath = join(BASELINES_DIR, `${route.name}.FAILED.png`);
-            writeFileSync(failPath, shot);
-            throw new Error(
-              `${route.name} drifted from its baseline: ${(ratio * 100).toFixed(2)}% of pixels differ ` +
-                `(budget ${(MAX_DIFF_RATIO * 100).toFixed(1)}%, ${diff} px). ` +
-                `If the change is intentional: UPDATE_BASELINES=1 bun test e2e/visual.test.ts, then commit ` +
-                `e2e/baselines/. Current shot saved to ${failPath}.`,
+          } else {
+            const baseline = await decodePng(readFileSync(baselinePath));
+            const { diff, ratio } = countDiff(baseline, live);
+            if (ratio > MAX_DIFF_RATIO) {
+              const failPath = join(BASELINES_DIR, `${route.name}.FAILED.png`);
+              writeFileSync(failPath, shot);
+              throw new Error(
+                `${route.name} drifted from its baseline: ${(ratio * 100).toFixed(2)}% of pixels differ ` +
+                  `(budget ${(MAX_DIFF_RATIO * 100).toFixed(1)}%, ${diff} px). ` +
+                  `If the change is intentional: UPDATE_BASELINES=1 bun test e2e/visual.test.ts, then commit ` +
+                  `e2e/baselines/. Current shot saved to ${failPath}.`,
+              );
+            }
+            console.log(
+              `   ✔ ${route.name}: diff ${(ratio * 100).toFixed(2)}%` +
+                `${lcp >= 0 ? `, LCP ${Math.round(lcp)}ms` : ", LCP n/a"}`,
             );
           }
-          console.log(
-            `   ✔ ${route.name}: diff ${(ratio * 100).toFixed(2)}%` +
-              `${lcp >= 0 ? `, LCP ${Math.round(lcp)}ms` : ", LCP n/a"}`,
-          );
 
+          // Reached on every path now. Previously the baseline-create/regenerate
+          // branch returned early and silently skipped this gate.
           if (route.lcpBudget) {
             expect(lcp).toBeGreaterThan(0);
             expect(lcp).toBeLessThan(LCP_BUDGET_MS);

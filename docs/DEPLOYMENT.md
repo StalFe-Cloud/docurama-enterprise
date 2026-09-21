@@ -15,7 +15,7 @@ Standard Next.js deployment. **Build caveat:** the repo's `bun run build` script
 
 1. Import the repo; framework preset Next.js; Node 20+ runtime.
 2. Set env vars (§5): at minimum `DATABASE_URL`, `SMTP_URL`, `ROOT_DOMAIN=docurama.eu`, the `S3_*` block, `PAYMENT_PROVIDER=stripe` + `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET`, `SSO_TXN_SECRET`, and Turnstile keys if used.
-3. **Database:** external Postgres is strongly recommended for multi-region — `DATABASE_URL=postgresql://user:pass@host:5432/docurama`. (SQLite would land on ephemeral container storage.) A CI job (`postgres-portability`) proves the schema applies cleanly to PostgreSQL 16 on every push.
+3. **Database:** external Postgres is strongly recommended for multi-region — `DATABASE_URL=postgresql://user:pass@host:5432/docurama`. (SQLite would land on ephemeral container storage.) Note that the URL alone is not enough: the Prisma provider is fixed when the image is built — see §2.1. A CI job (`postgres`) generates the PostgreSQL client, seeds, boots the app against PostgreSQL 16 and runs the HTTP and browser suites on every push.
 4. Custom domains (routing per src/middleware.ts): apex `docurama.eu` (marketing when unauthenticated) with `www` redirected to apex; `app.` (portal — point the project's primary domain here); `docs.`, `verify.`, `status.`, `security.`, `mta-sts.` (whole-host rewrites), plus `sign.`, `mail.`, `api.`, `admin.`. **`/api/*` must stay on the app host** — middleware passes `/api`, `/_next`, static and `.well-known` paths through untouched on every host, so keep DNS for API consumers on `app.` (or `api.`, which rewrites to the API index).
 5. Object storage: S3 block (§5) pointing at AWS S3 / R2 / etc. — never the Vercel filesystem.
 
@@ -34,6 +34,44 @@ docker compose --profile s3 --profile mail up -d   # + Mailpit SMTP sink (eval o
 - With the mail profile: `SMTP_URL=smtp://mailpit:1025?tls=off`, inbox UI at `http://127.0.0.1:8025`.
 - TLS: put Caddy or nginx in front and terminate TLS there (the container speaks plain HTTP on :3000). `ROOT_DOMAIN` must be set for vanity-subdomain routing.
 - Worker: single replica runs the in-process worker; do not scale this service beyond one without Postgres + `DOCURAMA_WORKER=off`.
+
+### 2.1 PostgreSQL
+
+Prisma cannot read `datasource.provider` from an environment variable, so the
+provider is fixed **at build time**. One image targets one database; pointing a
+SQLite-built image at a `postgresql://` URL does not work.
+
+```bash
+DB_PROVIDER=postgresql DATABASE_URL=postgresql://docurama:docurama@postgres:5432/docurama   docker compose --profile postgres up -d --build
+```
+
+`--build` is required on first use, and again if you switch back to SQLite.
+`scripts/schema-for.mjs` emits `prisma/schema.postgresql.prisma` from the single
+source schema, changing only the provider line — it fails loudly if anything
+else would have to differ, which is the portability guarantee. The entrypoint
+then pushes that schema at boot.
+
+Postgres is **necessary but not sufficient** for multi-replica. The background
+worker (mail and webhook retries) runs in-process, so exactly one replica may
+have it enabled; set `DOCURAMA_WORKER=off` on all the others. Object storage is
+the third requirement — see docs/STORAGE-OPTIONS.md.
+
+**Upgrading to the folded lead-search columns.** `EnterpriseLead` gained
+`companyLower`/`contactNameLower` so admin lead search works on PostgreSQL
+(PostgreSQL `LIKE` is case-sensitive; SQLite's is not, which hid the bug).
+`db push` adds them with their `""` default rather than computing them, so run
+once after upgrading, or existing leads stay unsearchable:
+
+```bash
+bun scripts/backfill-lead-search.ts
+```
+
+**Schema changes are applied with `prisma db push`, not migrations.**
+`prisma/migrations/` is empty and the entrypoint pushes the schema at boot,
+which is additive-only and refuses anything requiring data loss. Adopting a
+migration history is a deliberate change of deployment model — `migrate deploy`
+fails against a database built by `db push` until it is baselined with
+`migrate resolve` — and has not been made.
 
 ## 3. Kubernetes + Helm (enterprise)
 
@@ -63,7 +101,8 @@ Key values: `replicaCount: 1` (**SQLite mode must stay single-replica** — the 
 
 | Variable | Purpose |
 |---|---|
-| `DATABASE_URL` | Prisma datasource. SQLite absolute `file:` path, or `postgresql://…` |
+| `DATABASE_URL` | Prisma datasource. SQLite absolute `file:` path, or `postgresql://…` — **must match the provider the image was built with** (§2.1) |
+| `DOCURAMA_DB_PROVIDER` | Set from the `DB_PROVIDER` build arg; the entrypoint pushes `prisma/schema.$DOCURAMA_DB_PROVIDER.prisma`. Not something to override at runtime |
 | `STORAGE_DIR` | Local document tree (ignored once S3 is fully configured) |
 | `S3_ENDPOINT` | S3-compatible endpoint (unset = AWS default). All four core vars must be set together |
 | `S3_BUCKET` / `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | Bucket + credentials (partial config stays on local storage, loudly warned) |

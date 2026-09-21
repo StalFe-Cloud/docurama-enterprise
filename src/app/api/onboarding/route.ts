@@ -60,7 +60,7 @@ export async function POST(req: NextRequest) {
       where: { id: me.tenantId },
       data: { name, ...(industry !== undefined ? { industry } : {}), ...(companySize !== undefined ? { companySize } : {}) },
     });
-    await recordAudit({
+    await recordAudit({ actorUserId: me.id, tenantId: me.tenantId,
       actor: `${me.firstName} ${me.lastName}`, actorRole: me.role,
       action: "org.profile.updated", resource: `tenant:${me.tenantSlug}`, tenantName: name,
       detail: "Organization profile set during onboarding",
@@ -95,7 +95,7 @@ export async function POST(req: NextRequest) {
       origin: requestOrigin(req),
     });
     if (!invitation) return jsonError("No available seats remain in this workspace", 403);
-    await recordAudit({
+    await recordAudit({ actorUserId: me.id, tenantId: me.tenantId,
       actor: `${me.firstName} ${me.lastName}`, actorRole: me.role,
       action: "invite.sent", resource: `invite:${email}`, tenantName: me.tenantName,
       detail: `Invitation queued for ${email} (${role})`,
@@ -128,7 +128,7 @@ export async function POST(req: NextRequest) {
     await db.userSignature.create({
       data: { userId: me.id, kind, method, value, font, isDefault: existingCount === 0 },
     });
-    await recordAudit({
+    await recordAudit({ actorUserId: me.id, tenantId: me.tenantId,
       actor: `${me.firstName} ${me.lastName}`, actorRole: me.role,
       action: "signature.created", resource: `user:${me.email}`,
       detail: `${kind === "initial" ? "Initials" : "Signature"} saved during onboarding (${method})`,
@@ -154,7 +154,7 @@ export async function POST(req: NextRequest) {
     if (!state.emailVerified) return jsonError("Verify your email address before finishing setup");
     if (!state.steps.org) return jsonError("Name your organization before finishing setup");
     await setOnboardingFlags(me.id, { ...flags, completedAt: new Date().toISOString() });
-    await recordAudit({
+    await recordAudit({ actorUserId: me.id, tenantId: me.tenantId,
       actor: `${me.firstName} ${me.lastName}`, actorRole: me.role,
       action: "user.onboarding.completed", resource: `user:${me.email}`, tenantName: me.tenantName,
     });

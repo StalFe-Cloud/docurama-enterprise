@@ -4,6 +4,7 @@ import { recordAudit } from "@/lib/auth";
 import { jsonError, jsonOk } from "@/lib/serializers";
 import { queueMail } from "@/lib/onboarding";
 import { checkBotGuard } from "@/lib/bot-guard";
+import { foldForSearch } from "@/lib/search";
 
 /**
  * POST /api/enterprise-lead — public Enterprise pipeline intake (cycle 10).
@@ -63,6 +64,8 @@ export async function POST(req: NextRequest) {
   const lead = await db.enterpriseLead.create({
     data: {
       company, contactName, email, phone,
+      companyLower: foldForSearch(company),
+      contactNameLower: foldForSearch(contactName),
       seats: seatsNumeric,
       monthlyEnvelopes,
       requirements: seatsRaw && seatsNumeric === 0 ? `${requirements}\n(seats: ${seatsRaw})`.trim() : requirements,

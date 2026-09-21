@@ -149,11 +149,14 @@ model MailOutbox {
   // Delivery engine (SMTP transport). Attempts and backoff survive restarts:
   // the worker (or an inline pass after send) re-reads QUEUED rows whose
   // nextAttemptAt has come due. FAILED is terminal after 5 attempts.
-  attempts     Int       @default(0)
-  lastError    String?
+  attempts      Int       @default(0)
+  lastError     String?
   nextAttemptAt DateTime? // null = due immediately
+  claimToken    String?
+  claimUntil    DateTime?
 
   @@index([status, nextAttemptAt])
+  @@index([claimUntil])
   @@index([toEmail])
 }
 
@@ -726,12 +729,25 @@ model Subscription {
   // Envelope rollover: unused envelopes carried into the current period on
   // renewal (capped at one monthly allowance — see src/lib/billing.ts).
   carriedForwardEnvelopes Int @default(0)
+  paymentAnchorAt  DateTime?
+  usageAnchorAt    DateTime?
+  usagePeriodStart DateTime?
+  usagePeriodEnd   DateTime?
 
   // Payment provider rails: "manual" (bank transfer / out-of-band, renewed
   // by the platform's own engine or an admin approval) or "stripe"
   // (auto-charged each term by Stripe — renewal is webhook-driven).
   provider    String? @default("manual")
   providerRef String? // Stripe subscription id (sub_...) when provider = stripe
+
+  // Negotiated entitlements for sales-led deals. BUSINESS and ENTERPRISE are
+  // not self-serve (SELF_SERVE_PLANS in src/lib/plans.ts), so their seat and
+  // envelope numbers are agreed per contract rather than taken from the plan
+  // catalogue. Null means "use the catalogue value" — the same
+  // override-or-fall-back shape as ENVELOPE_LIMITS in src/lib/plans.ts.
+  seatLimitOverride     Int?
+  envelopeLimitOverride Int?
+  monthlyEurOverride    Int?
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 }
@@ -814,6 +830,12 @@ model EnterpriseLead {
   id          String    @id @default(cuid())
   company     String
   contactName String
+  // Folded copies for search. PostgreSQL LIKE is case-sensitive and SQLite's
+  // is not, so matching a lowercased query against the raw columns worked on
+  // SQLite and silently returned nothing on PostgreSQL. Same denormalised
+  // pattern as Template.nameLower / Envelope.titleLower; see foldForSearch.
+  companyLower     String @default("")
+  contactNameLower String @default("")
   email       String
   phone       String?
   seats       Int       @default(0) // expected seat count
@@ -823,6 +845,15 @@ model EnterpriseLead {
   notes       String    @default("") // admin-visible triage notes
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
+
+  // Set when a WON lead is converted into a tenant. Presence is what makes
+  // the conversion idempotent — a double-submit returns the existing tenant
+  // instead of minting a second one.
+  convertedTenantId String?
+  convertedAt       DateTime?
+
+  @@index([convertedTenantId])
+  @@index([companyLower])
 }
 
 // ─── Legal, Privacy & Compliance ──────────────────────────────────────────────
@@ -1069,21 +1100,38 @@ model WebhookDelivery {
   // HMAC). Nullable for additive migration: pre-engine rows have no snapshot
   // and are skipped by the retry pass. attempts < 5 with nextAttemptAt in
   // the past = due for retry.
-  payload      String?
-  attempts     Int       @default(1)
+  payload       String?
+  attempts      Int       @default(1)
   nextAttemptAt DateTime?
+  claimToken    String?
+  claimUntil    DateTime?
 
   endpoint WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
 
   @@index([success, attempts, nextAttemptAt])
+  @@index([claimUntil])
+}
+
+model EnvelopeQuotaUsage {
+  id        String   @id @default(cuid())
+  tenantId  String
+  periodKey String
+  used      Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, periodKey])
+  @@index([tenantId, periodKey])
 }
 
 // ─── Audit & Ops ──────────────────────────────────────────────────────────────
 
 model AuditEvent {
-  id         String   @id @default(cuid())
-  at         DateTime @default(now())
-  actor      String
+  id          String   @id @default(cuid())
+  at          DateTime @default(now())
+  actorUserId String?
+  subjectUserId String?
+  tenantId    String?
+  actor       String
   actorRole  String
   action     String
   resource   String
@@ -1091,17 +1139,28 @@ model AuditEvent {
   severity   String   @default("INFO") // INFO | WARNING | CRITICAL
   ip         String
   detail     String?
+
+  @@index([actorUserId, at])
+  @@index([subjectUserId, at])
+  @@index([tenantId, at])
 }
 
 model SecurityEvent {
-  id       String   @id @default(cuid())
-  at       DateTime @default(now())
-  type     String
+  id          String   @id @default(cuid())
+  at          DateTime @default(now())
+  actorUserId String?
+  subjectUserId String?
+  tenantId    String?
+  type        String
   severity String   @default("INFO") // INFO | LOW | MEDIUM | HIGH | CRITICAL
   actor    String
   ip       String
   blocked  Boolean  @default(true)
   detail   String?
+
+  @@index([actorUserId, at])
+  @@index([subjectUserId, at])
+  @@index([tenantId, at])
 }
 
 model DailyStat {

@@ -27,7 +27,7 @@ import {
 } from "../src/lib/rekor";
 import { getOrCreatePortalKey, portalKeyFingerprint } from "../src/lib/transparency";
 
-const BASE = process.env.MAESTRO_BASE_URL ?? "http://127.0.0.1:3000";
+const BASE = process.env.E2E_BASE_URL ?? "http://127.0.0.1:3000";
 const sha256hex = (b: Buffer | string) => createHash("sha256").update(b).digest("hex");
 
 const db = new PrismaClient({

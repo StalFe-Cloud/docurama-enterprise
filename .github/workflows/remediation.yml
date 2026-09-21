@@ -1,0 +1,45 @@
+name: Quality remediation
+
+on:
+  push:
+    branches: [quality-remediation-20260920]
+  pull_request:
+    branches: [quality]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: remediation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Capture tracked source for reproducible diagnostics
+        run: |
+          git archive --format=tar HEAD -- . ':!.env*' ':!db' ':!storage' ':!*.pem' ':!*.key' ':!*.p12' > /tmp/docurama-source.tar
+          git rev-parse HEAD > /tmp/docurama-source-revision.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: remediation-source-${{ github.sha }}
+          path: |
+            /tmp/docurama-source.tar
+            /tmp/docurama-source-revision.txt
+          retention-days: 1
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.2.22"
+      - run: bun install --frozen-lockfile
+      - run: bunx prisma generate
+      - run: bunx tsc --noEmit
+      - run: bun run lint
+      - name: Standalone remediation regressions
+        if: ${{ hashFiles('tests/remediation/run.cjs') != '' }}
+        run: node tests/remediation/run.cjs

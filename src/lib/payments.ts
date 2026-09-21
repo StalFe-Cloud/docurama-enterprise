@@ -1,8 +1,9 @@
 import Stripe from "stripe";
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { ENVELOPE_LIMITS, planDef, termFor, rolloverCap } from "@/lib/plans";
-import { periodStart } from "@/lib/billing";
+import { planDef, termFor } from "@/lib/plans";
+import { monthlyWindow, shiftUtcMonth, usageAnchor } from "@/lib/monthly-period";
+import { serializableTransaction } from "@/lib/transaction";
 
 /**
  * Payment provider rails (go-live cycle).
@@ -211,13 +212,13 @@ export async function activateSubscription(input: {
 }): Promise<ActivateResult> {
   const plan = planDef(input.planCode);
   const term = termFor(input.termMonths);
-  const renewalAt = new Date();
-  renewalAt.setMonth(renewalAt.getMonth() + term.months);
+  const now = new Date();
+  const renewalAt = shiftUtcMonth(now, term.months);
   const amountCents = termCents(input.planCode, input.termMonths);
   const paidUntil = input.provider === "stripe" ? input.providerPeriodEnd : renewalAt;
   if (!paidUntil || !Number.isFinite(paidUntil.getTime())) throw new Error("A valid provider service-period end is required");
 
-  return db.$transaction(async (tx) => {
+  return serializableTransaction(async (tx) => {
     const payment = input.paymentId
       ? await tx.payment.findUnique({ where: { id: input.paymentId } })
       : input.paymentReference ? await tx.payment.findFirst({ where: { provider: input.provider, reference: input.paymentReference } }) : null;
@@ -238,9 +239,14 @@ export async function activateSubscription(input: {
     if (claimed.count !== 1) throw new Error("Checkout payment changed during activation");
     const tenant = await tx.tenant.update({ where: { id: input.tenantId }, data: { planCode: input.planCode } });
 
+    const usage = monthlyWindow(existing ? { ...existing, usageAnchorAt: usageAnchor(existing, now) } : { renewalAt: paidUntil, termMonths: term.months, usageAnchorAt: now }, now);
+    const metering = existing
+      ? { usageAnchorAt: existing.usageAnchorAt ?? usage.anchor }
+      : { usageAnchorAt: usage.anchor, usagePeriodStart: usage.start, usagePeriodEnd: usage.end };
     const sub = await tx.subscription.upsert({
       where: { id: existing?.id ?? "" },
       update: {
+        ...metering, paymentAnchorAt: now,
         planCode: input.planCode,
         status: "ACTIVE",
         mrrEur: plan.monthlyEur,
@@ -253,6 +259,7 @@ export async function activateSubscription(input: {
         ...(input.providerRef !== undefined ? { providerRef: input.providerRef } : {}),
       },
       create: {
+        ...metering, paymentAnchorAt: now,
         tenantId: input.tenantId,
         planCode: input.planCode,
         status: "ACTIVE",
@@ -274,7 +281,7 @@ export async function activateSubscription(input: {
         actorRole: input.actorRole,
         action: "subscription.activated",
         resource: `tenant:${tenant.slug}`,
-        tenantName: tenant.name,
+        tenantId: tenant.id, tenantName: tenant.name,
         ip: "system",
         severity: "WARNING",
         detail:
@@ -293,7 +300,7 @@ export async function activateSubscription(input: {
 /** Renewal of a Stripe-managed subscription: one term paid, rollover computed. */
 export async function renewPaidTerm(subscriptionId: string, invoiceRef: string, paidPeriodEnd: Date, amountPaidCents: number, actor = "Docurama Billing"): Promise<void> {
   if (!Number.isFinite(paidPeriodEnd.getTime()) || !Number.isSafeInteger(amountPaidCents) || amountPaidCents < 0) throw new Error("Invalid paid invoice period or amount");
-  await db.$transaction(async (tx) => {
+  await serializableTransaction(async (tx) => {
     const sub = await tx.subscription.findUnique({ where: { id: subscriptionId }, include: { tenant: true } });
     if (!sub || sub.provider !== "stripe") throw new Error("Stripe subscription is not activated yet");
     if (await tx.payment.findFirst({ where: { provider: "stripe", reference: invoiceRef, status: "PAID" } })) return;
@@ -302,21 +309,15 @@ export async function renewPaidTerm(subscriptionId: string, invoiceRef: string, 
     // a canceled subscription. Keep its receipt in the ledger exactly once.
     const advances = paidPeriodEnd > sub.renewalAt && sub.status !== "CANCELED";
 
-    // Rollover for the period that just closed.
-    const periodFrom = periodStart(sub);
-    const usedInPeriod = await tx.envelope.count({
-      where: { tenantId: sub.tenantId, createdAt: { gte: periodFrom, lt: sub.renewalAt } },
-    });
+    // Payment receipts never award monthly rollover; the usage engine does it once.
     const plan = planDef(sub.planCode);
-    const allowance = (ENVELOPE_LIMITS[sub.planCode] ?? plan.envelopeLimit) + sub.carriedForwardEnvelopes;
-    const unused = Math.max(0, allowance - usedInPeriod);
-    const carriedForward = Math.min(unused, rolloverCap(plan));
+    const anchor = usageAnchor(sub);
 
     const renewalAt = advances ? paidPeriodEnd : sub.renewalAt;
 
     if (advances) await tx.subscription.update({
       where: { id: sub.id },
-      data: { renewalAt, carriedForwardEnvelopes: carriedForward, status: "ACTIVE", failedPayment: false, lastInvoiceAt: new Date() },
+      data: { renewalAt, usageAnchorAt: sub.usageAnchorAt ?? anchor, status: "ACTIVE", failedPayment: false, lastInvoiceAt: new Date() },
     });
     await tx.payment.create({
       data: {
@@ -338,11 +339,10 @@ export async function renewPaidTerm(subscriptionId: string, invoiceRef: string, 
         actorRole: "SYSTEM",
         action: advances ? "subscription.renewed" : "billing.invoice_recorded",
         resource: `subscription:${sub.id}`,
-        tenantName: sub.tenant.name,
+        tenantId: sub.tenantId, tenantName: sub.tenant.name,
         ip: "system",
         detail:
-          `Stripe renewal ${invoiceRef}: used ${usedInPeriod}/${allowance} envelopes in the closed period; ` +
-          `${carriedForward} carried forward (cap ${rolloverCap(plan)}).`,
+          `Stripe invoice ${invoiceRef} recorded. Paid-through ${renewalAt.toISOString()}; monthly rollover remains independent.`,
       },
     });
   });
@@ -350,7 +350,7 @@ export async function renewPaidTerm(subscriptionId: string, invoiceRef: string, 
 
 /** A Stripe charge failed: flip to PAST_DUE and tell the billing contact. */
 export async function markPastDue(providerSubscriptionRef: string, invoiceRef: string, failedPeriodEnd?: Date): Promise<void> {
-  await db.$transaction(async (tx) => {
+  await serializableTransaction(async (tx) => {
     const sub = await tx.subscription.findFirst({ where: { provider: "stripe", providerRef: providerSubscriptionRef }, include: { tenant: true } });
     if (!sub || sub.status === "PAST_DUE" || sub.status === "CANCELED") return;
     if (await tx.payment.findFirst({ where: { provider: "stripe", reference: invoiceRef, status: "PAID" } })) return;
@@ -362,7 +362,7 @@ export async function markPastDue(providerSubscriptionRef: string, invoiceRef: s
         actorRole: "SYSTEM",
         action: "subscription.payment_failed",
         resource: `subscription:${sub.id}`,
-        tenantName: sub.tenant.name,
+        tenantId: sub.tenantId, tenantName: sub.tenant.name,
         ip: "system",
         severity: "CRITICAL",
         detail: `Stripe charge failed (${invoiceRef}). Subscription marked PAST_DUE — retry or update the payment method via the billing portal.`,
@@ -399,7 +399,7 @@ export async function markCanceled(providerSubscriptionRef: string): Promise<voi
       actorRole: "SYSTEM",
       action: "subscription.canceled",
       resource: `tenant:${sub.tenant.slug}`,
-      tenantName: sub.tenant.name,
+      tenantId: sub.tenantId, tenantName: sub.tenant.name,
       ip: "system",
       severity: "WARNING",
       detail: "Subscription canceled from the Stripe customer portal. The workspace keeps its data; the plan stays active until the paid term ends.",

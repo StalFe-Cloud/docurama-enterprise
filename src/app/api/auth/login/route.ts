@@ -1,10 +1,11 @@
+import { requestClientIp } from "@/lib/request-metadata";
 import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
-import { SESSION_COOKIE, hashPassword, passwordNeedsUpgrade, verifyPassword, recordAudit, sessionCookieAttributes } from "@/lib/auth";
+import { SESSION_COOKIE, hashPasswordAsync, passwordNeedsUpgrade, verifyPasswordAsync, recordAudit, sessionCookieAttributes } from "@/lib/auth";
 import { jsonError, jsonOk } from "@/lib/serializers";
 import { verifyTotp, matchRecoveryCode } from "@/lib/totp";
 
-export async function POST(req: NextRequest) {
+async function handlePost(req: NextRequest) {
   let body: { email?: string; password?: string; otp?: string; challenge?: string };
   try {
     body = await req.json();
@@ -22,11 +23,11 @@ export async function POST(req: NextRequest) {
 
   const user = await db.user.findUnique({ where: { email } });
   // Uniform error - never reveal whether the account exists.
-  if (!user || !verifyPassword(password, user.passwordHash)) {
+  if (!user || !(await verifyPasswordAsync(password, user.passwordHash))) {
     await db.securityEvent.create({
       data: {
         type: "FAILED_LOGIN", severity: "LOW", actor: email || "unknown",
-        ip: "198.51.100.7", blocked: false, detail: "Invalid credentials at portal sign-in",
+        ip: requestClientIp(req), actorUserId: user?.id ?? null, blocked: false, detail: "Invalid credentials at portal sign-in",
       },
     });
     return jsonError("Invalid email or password", 401);
@@ -79,7 +80,7 @@ export async function POST(req: NextRequest) {
     await db.securityEvent.create({
       data: {
         type: "2FA_LOGIN", severity: "INFO", actor: user.email,
-        ip: "10.42.0.7", blocked: false,
+        ip: requestClientIp(req), actorUserId: user.id, blocked: false,
         detail: usedRecovery ? "Signed in with a recovery code" : "Signed in with TOTP",
       },
     });
@@ -90,12 +91,12 @@ export async function POST(req: NextRequest) {
   if (passwordNeedsUpgrade(user.passwordHash)) {
     const upgraded = await db.user.updateMany({
       where: { id: user.id, passwordHash: user.passwordHash },
-      data: { passwordHash: hashPassword(password) },
+      data: { passwordHash: await hashPasswordAsync(password) },
     });
     if (upgraded.count !== 1) return jsonError("Invalid email or password", 401);
   }
 
-  const ip = req.headers.get("x-forwarded-for")?.split(",")[0].trim() ?? "127.0.0.1";
+  const ip = requestClientIp(req);
   const userAgent = req.headers.get("user-agent")?.slice(0, 250) ?? null;
   const session = await db.session.create({
     data: {
@@ -107,7 +108,7 @@ export async function POST(req: NextRequest) {
   });
 
   await db.user.update({ where: { id: user.id }, data: { lastActiveAt: new Date() } });
-  await recordAudit({
+  await recordAudit({ actorUserId: user.id, subjectUserId: user.id, tenantId: user.activeTenantId,
     actor: `${user.firstName} ${user.lastName}`, actorRole: user.role,
     action: "user.login.portal", resource: `user:${user.email}`, ip,
   });
@@ -124,4 +125,13 @@ export async function POST(req: NextRequest) {
     `${SESSION_COOKIE}=${session.id}; ${sessionCookieAttributes(req)}`,
   );
   return res;
+}
+
+export async function POST(req: NextRequest) {
+  try { return await handlePost(req); }
+  catch (error) {
+    if (error instanceof Response) return error;
+    console.error("[auth] request failed", error);
+    return jsonError("Authentication request failed", 500);
+  }
 }

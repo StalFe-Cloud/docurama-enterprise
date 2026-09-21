@@ -334,3 +334,9 @@ Work Log:
 Stage Summary:
 - Commercial surface is now complete and self-serve: repriced catalogue with promotional terms and rollover, guided onboarding for every persona (user per-plan, admin checklist, enterprise sales-assisted), seat-aware invitations, and a real lead pipeline in the admin console.
 - Deferred (revenue-triggered): payment provider rails (the term switch + rollover engine is provider-ready), SSO/SAML wiring, bot-protection in front of the public lead form.
+
+## Cycle 11 — upstream quality-hardening port (2026-09-21)
+
+- Ported Docurama quality @ 34086af onto Enterprise main (base 4303be8, three-way file merge, line endings normalized). 75 files verbatim, 15 merged, enterprise-retained paths untouched (compose, db hash unchanged, README/SELFHOST, Maestro flows, deploy/skills dirs). Provenance: docs/UPSTREAM-SYNC.md.
+- Brings versioned migrations (entrypoint now runs migrate deploy with boot-blocking policy), webhook/mail outbox hardening with SSRF-pinned transport, atomic quota/rollover, transaction admission gating, worker shutdown fencing, and the upstream e2e runner/SeaweedFS Windows fixes.
+- Gates: tsc/eslint clean; entrypoint policy pass; isolated suites 91/91 (auth 11, password 9, quota 6, sso 25, bot-guard 10, billing 23, blog+storage 7). Upstream CI unavailable (Actions billing block) — validation is local; rerun CI once billing is restored.

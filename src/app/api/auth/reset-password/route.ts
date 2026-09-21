@@ -1,15 +1,16 @@
+import { requestClientIp } from "@/lib/request-metadata";
 import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import {
   SESSION_COOKIE,
-  hashPassword,
+  hashPasswordAsync,
   recordAudit,
   sessionCookieAttributes,
 } from "@/lib/auth";
 import { jsonError, jsonOk } from "@/lib/serializers";
 import { sha } from "@/lib/onboarding";
 
-export async function POST(req: NextRequest) {
+async function handlePost(req: NextRequest) {
   let body: { token?: string; password?: string };
   try {
     body = await req.json();
@@ -49,7 +50,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const newPasswordHash = hashPassword(password);
+  const newPasswordHash = await hashPasswordAsync(password);
   await db.user.update({
     where: { id: record.userId },
     data: {
@@ -69,7 +70,7 @@ export async function POST(req: NextRequest) {
   });
 
   // Issue fresh session so user is immediately logged in
-  const ip = req.headers.get("x-forwarded-for")?.split(",")[0].trim() ?? "127.0.0.1";
+  const ip = requestClientIp(req);
   const userAgent = req.headers.get("user-agent")?.slice(0, 250) ?? null;
   const session = await db.session.create({
     data: {
@@ -80,7 +81,7 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  await recordAudit({
+  await recordAudit({ actorUserId: record.userId, subjectUserId: record.userId, tenantId: record.user.activeTenantId,
     actor: `${record.user.firstName} ${record.user.lastName}`,
     actorRole: record.user.role,
     action: "user.password.reset",
@@ -107,4 +108,13 @@ export async function POST(req: NextRequest) {
   );
 
   return res;
+}
+
+export async function POST(req: NextRequest) {
+  try { return await handlePost(req); }
+  catch (error) {
+    if (error instanceof Response) return error;
+    console.error("[auth] request failed", error);
+    return jsonError("Authentication request failed", 500);
+  }
 }

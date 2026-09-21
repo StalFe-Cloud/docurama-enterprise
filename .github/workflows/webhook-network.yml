@@ -1,0 +1,28 @@
+name: Webhook network verification
+
+on:
+  pull_request:
+    branches: [quality, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: webhook-network-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tls-and-destination-policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.2.22"
+      - run: bun install --frozen-lockfile
+      - name: Verify real local TLS under Node and Bun, with strict trust checks
+        run: node --test --test-concurrency=1 e2e/webhook-network.test.mjs

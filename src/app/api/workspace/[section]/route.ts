@@ -7,7 +7,7 @@ import { getSettingsSection, postSettingsOp } from "@/lib/settings-handlers";
 import { foldForSearch } from "@/lib/search";
 import { dispatchEnvelopeEvent } from "@/lib/webhooks";
 import { processOutbox } from "@/lib/mail";
-import { currentAllowance } from "@/lib/billing";
+import { currentAllowance, reserveEnvelopeAllowance } from "@/lib/billing";
 
 export const dynamic = "force-dynamic";
 
@@ -276,12 +276,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
           const allowance = await currentAllowance(tenantId!);
           const tenant = await db.tenant.findUnique({ where: { id: tenantId! } });
           if (allowance.used >= allowance.total) {
-            return jsonError(
-              `Monthly envelope quota reached (${allowance.used}/${allowance.total}` +
-                `${allowance.carriedForward > 0 ? ` incl. ${allowance.carriedForward} carried over` : ""}` +
-                "). Unused envelopes roll over on renewal, or upgrade your plan to send more.",
-              402,
-            );
+            return jsonError(`Monthly envelope quota reached (${allowance.used}/${allowance.total}). Unused envelopes roll over on renewal, or upgrade your plan to send more.`, 402);
           }
 
           // WS3: accept documentId or templateId for real page count and SHA-256
@@ -316,6 +311,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
           // WS9e: atomic transaction - a mid-loop failure cannot leave an envelope
           // in SENT with partial recipients.
           const env = await db.$transaction(async (tx) => {
+            const reservation = await reserveEnvelopeAllowance(tenantId!, tx);
+            if (!reservation) throw new Error("ENVELOPE_QUOTA_REACHED");
             const envelope = await tx.envelope.create({
               data: {
                 publicCode: code, title, titleLower: foldForSearch(title),
@@ -463,6 +460,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     }
   } catch (err) {
     if (err instanceof Response) return err;
+    if (err instanceof Error && err.message === "ENVELOPE_QUOTA_REACHED") return jsonError("Monthly envelope quota reached", 402);
     console.error("[workspace POST]", err);
     return jsonError("Operation failed", 500);
   }

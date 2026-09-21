@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
   }
 
   await issueEmailVerification(user.id, user.email, requestOrigin(req));
-  await recordAudit({
+  await recordAudit({ actorUserId: user.id, tenantId: user.activeTenantId,
     actor: `${user.firstName} ${user.lastName}`,
     actorRole: user.role,
     action: "user.email.verification_resent",

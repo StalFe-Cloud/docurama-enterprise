@@ -1,0 +1,163 @@
+name: Release verification
+
+on:
+  pull_request:
+    branches: [quality, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-verification-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  database-invariants:
+    name: invariants-${{ matrix.provider }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        provider: [sqlite, postgresql]
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: docurama
+          POSTGRES_PASSWORD: fixture-only
+          POSTGRES_DB: docurama_verification
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U docurama -d docurama_verification"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DOCURAMA_VERIFICATION_DATABASE: "1"
+      NEXT_PUBLIC_DEMO_MODE: "false"
+      DOCURAMA_WORKER: "off"
+      REKOR_WITNESS: "off"
+      DOCURAMA_ALLOW_PRIVATE_WEBHOOKS: "1"
+      E2E_BASE_URL: http://127.0.0.1:3000
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.2.22"
+      - run: bun install --frozen-lockfile
+      - name: Install native backup and restore clients
+        run: sudo apt-get update && sudo apt-get install -y sqlite3 postgresql-client
+      - name: Select an empty disposable database
+        run: |
+          if [ '${{ matrix.provider }}' = sqlite ]; then
+            echo "DATABASE_URL=file:$RUNNER_TEMP/quality-verification.db" >> "$GITHUB_ENV"
+          else
+            echo 'DATABASE_URL=postgresql://docurama:fixture-only@127.0.0.1:5432/docurama_verification' >> "$GITHUB_ENV"
+          fi
+      - name: Generate the provider-specific client
+        run: |
+          node scripts/schema-for.mjs '${{ matrix.provider }}'
+          bunx prisma generate --schema 'prisma/${{ matrix.provider }}/schema.prisma'
+      - name: Upgrade populated baseline and verify native backup restoration
+        run: node scripts/verify-migration-upgrade.mjs '${{ matrix.provider }}'
+      - name: Verify committed migration history is up to date
+        run: bunx prisma migrate deploy --schema 'prisma/${{ matrix.provider }}/schema.prisma'
+      - run: bunx tsc --noEmit
+      - run: bun run lint
+      - name: Boot real HTTP application with demo mode disabled
+        run: |
+          bun run dev > "$RUNNER_TEMP/verification-server.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/verification-server.pid"
+          for attempt in $(seq 1 60); do
+            if curl -fsS "$E2E_BASE_URL/api/health" > /dev/null; then exit 0; fi
+            sleep 2
+          done
+          cat "$RUNNER_TEMP/verification-server.log"
+          exit 1
+      - name: Real route, transaction, isolation and delivery assertions
+        run: |
+          set -o pipefail
+          bun test --timeout 60000 e2e/quality-verification.test.ts e2e/transaction-gate.test.ts 2>&1 | tee "$RUNNER_TEMP/verification-tests.log"
+          bun test --timeout 60000 e2e/mail-invariants.test.ts 2>&1 | tee -a "$RUNNER_TEMP/verification-tests.log"
+      - name: Application diagnostics on failure
+        if: failure()
+        run: tail -n 200 "$RUNNER_TEMP/verification-server.log" || true
+      - name: Stop test process
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/verification-server.pid" ]; then
+            pid=$(cat "$RUNNER_TEMP/verification-server.pid")
+            pkill -TERM -P "$pid" || true
+            kill "$pid" || true
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: verification-${{ matrix.provider }}-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/verification-server.log
+            ${{ runner.temp }}/verification-tests.log
+          retention-days: 3
+
+  production-worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      DOCURAMA_VERIFICATION_DATABASE: "1"
+      DOCURAMA_RUNTIME_CONTAINER: docurama-verification-runtime
+      NEXT_PUBLIC_DEMO_MODE: "false"
+      REKOR_WITNESS: "off"
+      E2E_BASE_URL: http://127.0.0.1:3031
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.2.22"
+      - run: bun install --frozen-lockfile
+      - run: bunx prisma generate
+      - name: Build the actual production image
+        run: docker build -t docurama-verification:${{ github.sha }} .
+      - name: Boot isolated production runtime with the worker enabled
+        run: |
+          mkdir -p "$RUNNER_TEMP/quality-verification-runtime"
+          # These permissions apply only to this disposable CI volume shared
+          # between the non-root image and the host-side fixture process.
+          touch "$RUNNER_TEMP/quality-verification-runtime/runtime.db"
+          chmod 777 "$RUNNER_TEMP/quality-verification-runtime"
+          chmod 666 "$RUNNER_TEMP/quality-verification-runtime/runtime.db"
+          echo "DATABASE_URL=file:$RUNNER_TEMP/quality-verification-runtime/runtime.db" >> "$GITHUB_ENV"
+          docker run -d --name "$DOCURAMA_RUNTIME_CONTAINER" --network host \
+            -v "$RUNNER_TEMP/quality-verification-runtime:/app/db" \
+            -e DATABASE_URL=file:/app/db/runtime.db -e PORT=3031 -e HOSTNAME=127.0.0.1 \
+            -e NEXT_PUBLIC_DEMO_MODE=false -e DOCURAMA_WORKER=on -e REKOR_WITNESS=off \
+            -e SMTP_URL='smtp://127.0.0.1:3502?tls=off' \
+            -e DOCURAMA_WEBHOOK_INTERNAL_ORIGINS=http://127.0.0.1:3501 \
+            docurama-verification:${{ github.sha }}
+          for attempt in $(seq 1 60); do
+            if curl -fsS "$E2E_BASE_URL/api/health" > /dev/null; then exit 0; fi
+            sleep 2
+          done
+          docker logs "$DOCURAMA_RUNTIME_CONTAINER"
+          exit 1
+      - name: Login, signing, local transports and periodic worker-only delivery
+        run: |
+          set -o pipefail
+          bun test --timeout 180000 e2e/production-worker.test.ts 2>&1 | tee "$RUNNER_TEMP/production-worker-tests.log"
+      - name: Save logs and remove only the disposable test container
+        if: always()
+        run: |
+          docker logs "$DOCURAMA_RUNTIME_CONTAINER" > "$RUNNER_TEMP/production-worker-server.log" 2>&1 || true
+          if [ '${{ job.status }}' != success ]; then tail -n 200 "$RUNNER_TEMP/production-worker-server.log"; fi
+          docker rm -f "$DOCURAMA_RUNTIME_CONTAINER" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: production-worker-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/production-worker-tests.log
+            ${{ runner.temp }}/production-worker-server.log
+          retention-days: 3

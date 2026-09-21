@@ -17,7 +17,7 @@
 
 import { describe, expect, test } from "bun:test";
 
-const BASE = process.env.MAESTRO_BASE_URL ?? "http://127.0.0.1:3000";
+const BASE = process.env.E2E_BASE_URL ?? "http://127.0.0.1:3000";
 const E2E_API_KEY = "dk_e2e_0000000000000000000000000000000000000000";
 
 const get = async (path: string, headers: Record<string, string> = {}) => {

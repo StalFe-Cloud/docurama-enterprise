@@ -76,9 +76,9 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  await recordAudit({
-    actor: `${user.firstName} ${user.lastName}`,
-    actorRole: user.role,
+  await recordAudit({ subjectUserId: user.id, tenantId: user.activeTenantId,
+    actor: "Password reset requester",
+    actorRole: "ANONYMOUS",
     action: "user.password.reset_requested",
     resource: `user:${user.email}`,
     detail: "Password reset link issued and queued to outbox",

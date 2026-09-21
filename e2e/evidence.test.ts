@@ -29,7 +29,7 @@ import { canonicalJson } from "../src/lib/canonical-json";
 import { parseSpfRecord, spfPolicy, parseDmarcPolicy } from "../src/lib/dns-check";
 
 const run = promisify(execFile);
-const BASE = process.env.MAESTRO_BASE_URL ?? "http://127.0.0.1:3000";
+const BASE = process.env.E2E_BASE_URL ?? "http://127.0.0.1:3000";
 const E2E_API_KEY = "dk_e2e_0000000000000000000000000000000000000000";
 
 /* ── helpers ───────────────────────────────────────────────────────────────── */

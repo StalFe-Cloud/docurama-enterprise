@@ -74,7 +74,7 @@ export async function POST(_req: NextRequest, ctx: Ctx) {
     return null;
   });
   if (accepted) return accepted;
-  await recordAudit({
+  await recordAudit({ actorUserId: me.id, tenantId: inv.tenantId,
     actor: `${me.firstName} ${me.lastName}`, actorRole: me.role,
     action: "invite.accepted", resource: `invite:${inv.email}`, tenantName: inv.tenant.name,
     detail: `Joined ${inv.tenant.name} as ${inv.role}`,

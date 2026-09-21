@@ -373,6 +373,45 @@ describe("saml flow", () => {
       .replace('InResponseTo="original-request"', 'InResponseTo="other-request"')).toString("base64");
     await expect(lib.verifySamlResponse({ idpMetadataXml, origin: "https://docurama.test", samlResponse: forgedWrapper, requestId: "other-request" })).rejects.toThrow();
   });
+
+  // ── Schema validation (the samlify setSchemaValidator gate) ───────────────
+  // samlify requires a schema validator and ships none. Before this gate the
+  // validator returned true unconditionally / validated against an empty
+  // schema list, so ANY well-formed document reached the assertion extractor.
+  // These two cases are what that gate buys; they run ahead of signature
+  // verification, not instead of it.
+
+  const b64 = (xml: string) => Buffer.from(xml, "utf8").toString("base64");
+
+  test("a malformed XML payload is rejected with a parser diagnostic", async () => {
+    await expect(lib.verifySamlResponse({
+      idpMetadataXml,
+      origin: "http://127.0.0.1:3000",
+      samlResponse: b64('<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"><unclosed></samlp:Response>'),
+      requestId: "request-123",
+    })).rejects.toThrow(/SAML XML validation failed[\s\S]*parser error/);
+  });
+
+  test("a well-formed document that is not schema-valid SAML is rejected", async () => {
+    // Well-formed XML in the SAML protocol namespace, but missing the required
+    // ID/Version/IssueInstant attributes and <Status>, and carrying a child the
+    // protocol XSD does not define. Well-formedness alone lets this through;
+    // only real XSD validation rejects it.
+    const wellFormedButInvalid = [
+      '<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol">',
+      "  <samlp:NotARealElement>whatever</samlp:NotARealElement>",
+      "</samlp:Response>",
+    ].join("\n");
+    // Assert the xmllint diagnostic, not merely "it threw": this document is
+    // rejected by samlify for other reasons too, so a bare toThrow() here
+    // passes even with schema validation disabled and proves nothing.
+    await expect(lib.verifySamlResponse({
+      idpMetadataXml,
+      origin: "http://127.0.0.1:3000",
+      samlResponse: b64(wellFormedButInvalid),
+      requestId: "request-123",
+    })).rejects.toThrow(/SAML XML validation failed[\s\S]*Schemas validity error/);
+  });
 });
 
 describe("SSO tenant trust boundary", () => {

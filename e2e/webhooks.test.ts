@@ -23,7 +23,7 @@ import {
   webhookBackoffMs,
 } from "../src/lib/webhooks";
 
-const BASE = process.env.MAESTRO_BASE_URL ?? "http://127.0.0.1:3000";
+const BASE = process.env.E2E_BASE_URL ?? "http://127.0.0.1:3000";
 const E2E_USER_EMAIL = "e2e@docurama.eu";
 const E2E_USER_PASSWORD = "e2ePass1234!";
 const SECRET = "whsec_e2e_dispatcher_test";
@@ -187,6 +187,9 @@ describe("failure handling + retry pass", () => {
       expect(bodies.length).toBe(2);
       expect(bodies[0]).toBe(bodies[1]);
       expect(bodies[0]).toBe(originalBody);
+      const attempts = received.filter((x) => x.headers["x-docurama-event"] === "envelope.completed");
+      expect(attempts[0].headers["x-docurama-delivery"]).toBe(attempts[1].headers["x-docurama-delivery"]);
+      expect(JSON.parse(attempts[0].body).id).toBe(attempts[0].headers["x-docurama-delivery"]);
     } finally {
       respondWith = 200;
     }

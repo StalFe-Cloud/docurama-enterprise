@@ -25,7 +25,13 @@ const csp = [
 
 const nextConfig: NextConfig = {
   output: "standalone",
-  serverExternalPackages: ["@napi-rs/canvas", "sharp", "tesseract.js", "pdfjs-dist"],
+  // xmllint-wasm joins the native/wasm packages here because Turbopack's file
+  // tracer cannot follow it: its emscripten glue requires node builtins, and
+  // `next build` fails with
+  //   TurbopackInternalError: NftJsonAsset: cannot handle filepath fs
+  // Leaving it external keeps it a plain runtime require in the standalone
+  // output. It is loaded lazily from src/lib/sso.ts on the SAML path only.
+  serverExternalPackages: ["@napi-rs/canvas", "sharp", "tesseract.js", "pdfjs-dist", "xmllint-wasm"],
   // F3 (docs/IMPROVEMENT-PLAN.md): type errors fail the build again.
   // Kept clean via `bunx tsc --noEmit`, enforced in CI (.github/workflows/e2e.yml).
   reactStrictMode: false,

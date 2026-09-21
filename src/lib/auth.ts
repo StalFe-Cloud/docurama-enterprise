@@ -1,6 +1,7 @@
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { cookies, headers } from "next/headers";
 import { db } from "@/lib/db";
+export { hashPasswordAsync, verifyPasswordAsync } from "@/lib/password-async";
 
 export const SESSION_COOKIE = "docurama_session";
 export const SESSION_TOKEN_STORE = "docurama_token";
@@ -52,7 +53,7 @@ export function verifyPassword(password: string, storedHash: string): boolean {
  */
 export function sessionCookieAttributes(request: Request): string {
   const proto =
-    request.headers.get("x-forwarded-proto") ??
+    (process.env.DOCURAMA_TRUST_PROXY_HEADERS === "1" ? request.headers.get("x-forwarded-proto") : null) ??
     (request.url.startsWith("https:") ? "https" : "http");
   const isHttps = proto.split(",")[0].trim() === "https";
   return isHttps
@@ -180,14 +181,16 @@ export async function requireUser(): Promise<SessionUser> {
 
 export async function recordAudit(input: {
   actor: string; actorRole: string; action: string; resource: string;
+  actorUserId?: string | null; subjectUserId?: string | null; tenantId?: string | null;
   severity?: string; tenantName?: string | null; detail?: string; ip?: string;
 }) {
   await db.auditEvent.create({
     data: {
+      actorUserId: input.actorUserId ?? null, subjectUserId: input.subjectUserId ?? null, tenantId: input.tenantId ?? null,
       actor: input.actor, actorRole: input.actorRole, action: input.action,
       resource: input.resource, severity: input.severity ?? "INFO",
       tenantName: input.tenantName ?? null, detail: input.detail ?? null,
-      ip: input.ip ?? "10.42.0.7",
+      ip: input.ip ?? "unknown",
     },
   });
 }

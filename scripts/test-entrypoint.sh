@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+node scripts/schema-for.mjs sqlite
 SCRATCH="$(mktemp -d)"
 trap 'rm -rf -- "$SCRATCH"' EXIT
 cat > "$SCRATCH/bunx" <<'MOCK'
@@ -18,6 +20,7 @@ export SCHEMA_RESULT=1
 if sh "$ROOT/docker-entrypoint.sh" application; then echo 'Failed schema unexpectedly allowed startup' >&2; exit 1; fi
 test ! -e "$APP_STARTED"
 if grep -q -- '--accept-data-loss' "$STARTUP_ARGS"; then echo 'Destructive schema flag detected' >&2; exit 1; fi
+grep -q "migrate deploy" "$STARTUP_ARGS"
 export SCHEMA_RESULT=0
 sh "$ROOT/docker-entrypoint.sh" application
 test -e "$APP_STARTED"

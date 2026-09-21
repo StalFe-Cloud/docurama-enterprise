@@ -1,0 +1,1166 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Identity & Tenancy ───────────────────────────────────────────────────────
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String
+  firstName    String
+  lastName     String
+  role         String    @default("MEMBER") // PLATFORM_ADMIN | WORKSPACE_ADMIN | MEMBER
+  status       String    @default("ACTIVE") // ACTIVE | SUSPENDED | INVITED
+  totpEnabled  Boolean   @default(false)
+  lastActiveAt DateTime?
+  createdAt    DateTime  @default(now())
+  signatureName String?
+  signatureStyle String? @default("signature-font-caveat")
+
+  // Production settings additions
+  activeTenantId     String?    // multi-org: which membership the workspace is scoped to
+  totpSecret         String?    // base32 TOTP secret (RFC 6238)
+  totpPendingSecret  String?    // secret staged during enrolment, before verification
+  totpRecoveryCodes  String?    // JSON array of SHA-256 hashes, shown once
+  passwordChangedAt  DateTime?
+
+  // Onboarding (Task 7)
+  emailVerifiedAt DateTime?     // proof of mailbox control at signup
+  onboardingJson  String?       // { skippedInvite, skippedSecurity, completedAt }
+
+  memberships Member[]
+  createdDocs Envelope[] @relation("createdDocs")
+  uploadedDocuments Document[] @relation("uploadedDocuments")
+  sessions    Session[]
+  signatures  UserSignature[]
+  challenges  AuthChallenge[]
+  verifications EmailVerification[]
+}
+
+model EmailVerification {
+  id        String    @id @default(cuid())
+  userId    String
+  email     String
+  tokenHash String    @unique // SHA-256 of the raw token — the raw value only lives in the email link
+  purpose   String    @default("SIGNUP")
+  expiresAt DateTime
+  consumedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// Single-use SSO state, consumed atomically before issuing a session.
+model SsoTransaction {
+  id           String   @id
+  connectionId String
+  expiresAt    DateTime
+  consumedAt   DateTime?
+  createdAt    DateTime @default(now())
+
+  @@index([expiresAt])
+}
+
+model Session {
+  id         String    @id @default(cuid())
+  userId     String
+  ip         String?
+  userAgent  String?
+  createdAt  DateTime  @default(now())
+  lastSeenAt DateTime  @default(now())
+  expiresAt  DateTime
+  revokedAt  DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model AuthChallenge {
+  id        String   @id @default(cuid())
+  userId    String
+  purpose   String   @default("2FA_LOGIN")
+  attempts  Int      @default(0)
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model UserSignature {
+  id        String   @id @default(cuid())
+  userId    String
+  kind      String   @default("signature") // signature | initial
+  method    String   @default("draw")      // draw | type | upload
+  value     String   // dataURL (draw/upload) or text (type)
+  font      String?
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Invitation {
+  id          String    @id @default(cuid())
+  tenantId    String
+  email       String
+  name        String?
+  role        String    @default("MEMBER") // OWNER | ADMIN | MEMBER
+  token       String    @unique // inv_<48 hex> — carried by the /invite/<token> link
+  status      String    @default("PENDING") // PENDING | ACCEPTED | REVOKED
+  invitedBy   String    // display name of the inviter
+  invitedById String?
+  expiresAt   DateTime
+  createdAt   DateTime  @default(now())
+  acceptedAt  DateTime?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, status])
+}
+
+// Transactional mail ledger — every outbound system email (verification,
+// invites, reminders) is recorded here. When SMTP_URL is configured the
+// delivery engine (src/lib/mail.ts) drains QUEUED rows over SMTP with
+// retry/backoff; without it messages stay queued and inspectable in the
+// admin console (demo / air-gapped mode) instead of silently dropping.
+model MailOutbox {
+  id        String    @id @default(cuid())
+  toEmail   String
+  fromEmail String    @default("Docurama Sign <notifications@docurama.eu>")
+  subject   String
+  template  String    // SIGNUP_VERIFICATION | TEAM_INVITE | REMINDER | TEST
+  status    String    @default("QUEUED") // QUEUED | SENT | FAILED
+  bodyText  String
+  linkUrl   String?
+  createdAt DateTime  @default(now())
+  sentAt    DateTime?
+
+  // Delivery engine (SMTP transport). Attempts and backoff survive restarts:
+  // the worker (or an inline pass after send) re-reads QUEUED rows whose
+  // nextAttemptAt has come due. FAILED is terminal after 5 attempts.
+  attempts     Int       @default(0)
+  lastError    String?
+  nextAttemptAt DateTime? // null = due immediately
+
+  @@index([status, nextAttemptAt])
+  @@index([toEmail])
+}
+
+model Member {
+  id        String   @id @default(cuid())
+  userId    String
+  tenantId  String
+  role      String   @default("MEMBER") // OWNER | ADMIN | MEMBER
+  status    String   @default("ACTIVE")
+  createdAt DateTime @default(now())
+
+  // Small team groups (cycle 10): optional grouping of members inside a
+  // company workspace (e.g. "Sales", "HR", "Legal"). Purely organisational —
+  // every member keeps full workspace visibility; teams drive filtering
+  // and structure for large tenants.
+  teamId String?
+  team   Team?   @relation(fields: [teamId], references: [id], onDelete: SetNull)
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, tenantId])
+}
+
+// Small team groups inside a company workspace. Created by workspace admins,
+// assigned per member; used to organise large tenants (Enterprise onboarding:
+// "some users want a small team group with the company").
+model Team {
+  id        String   @id @default(cuid())
+  tenantId  String
+  name      String
+  createdAt DateTime @default(now())
+
+  tenant  Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  members Member[]
+
+  @@unique([tenantId, name])
+}
+
+model Tenant {
+  id              String    @id @default(cuid())
+  name            String
+  slug            String    @unique
+  planCode        String    @default("STARTER") // STARTER | BUSINESS | ENTERPRISE
+  status          String    @default("TRIAL") // ACTIVE | TRIAL | SUSPENDED
+  suspendedReason String?
+  billingEmail    String?
+  storageUsedMb   Int       @default(0)
+  createdAt       DateTime  @default(now())
+  trialEndsAt     DateTime?
+
+  enforceTwoFactor Boolean @default(false) // require TOTP for every member
+
+  // Onboarding profile (Task 7) — optional context captured in the welcome wizard
+  industry    String?
+  companySize String?
+
+  invitations Invitation[]
+  members      Member[]
+  teams        Team[]
+  envelopes    Envelope[]
+  templates    Template[]
+  documents    Document[]
+  domains      Domain[]
+  subscriptions Subscription[]
+  payments Payment[]
+  paymentCustomers PaymentCustomer[]
+  ssoConnections SsoConnection[]
+  apiKeys      ApiKey[]
+  webhookEndpoints WebhookEndpoint[]
+  legalHolds   LegalHold[]
+  certificates  SigningCertificate[]
+  tsaConfig     TsaConfig?
+  esignPrefs    EsignPreferences?
+  notificationSettings NotificationSettings?
+  smsGateway    SmsGateway?
+  mcpConfig     McpConfig?
+  evidenceKey   EvidenceKey?
+  transparencyEntries TransparencyEntry[]
+}
+
+// ─── Documents & Signing ──────────────────────────────────────────────────────
+
+model Envelope {
+  id                String    @id @default(cuid())
+  publicCode        String    @unique // DOC-XXXXXX verification code
+  title             String
+  // Accent-folded lowercase mirror of `title`, maintained on every write.
+  // SQLite has no `mode: "insensitive"`, and once the French catalogue lands a
+  // plain LOWER() still would not match "resiliation" against "résiliation".
+  titleLower        String    @default("")
+  tenantId          String
+  createdById       String
+  documentId        String?   // the signed artefact; null while an envelope is a DRAFT
+  templateId        String?   // template the envelope was sent from (signer preview + evidence chain)
+  status            String    @default("DRAFT") // DRAFT | SENT | PARTIALLY_SIGNED | COMPLETED | VOIDED | DECLINED | EXPIRED
+  message           String?
+  pages             Int       @default(1)
+  conformanceLevel  String?   // B-B | B-T | B-LT | B-LTA
+  sha256            String?
+  sealedAt          DateTime?
+  completedAt       DateTime?
+  voidedAt          DateTime?
+  voidReason        String?
+  createdAt         DateTime  @default(now())
+  lastRemindedAt    DateTime?
+  autoRemind        Boolean   @default(false) // per-envelope reminder job (user-enabled)
+  reminderCount     Int       @default(0)
+  // ── Evidence federation (roadmap #1 + self-hosted attestation) ──
+  verifiedSenderDomain String? // sender email domain was DNS-TXT-verified at seal time
+  attestedAt        DateTime? // when the minimal fingerprint was pushed to the public portal
+  attestStatus      String?   // PUSHED | FAILED | SKIPPED
+
+  tenant     Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy  User      @relation("createdDocs", fields: [createdById], references: [id])
+  document   Document? @relation("envelopeDocument", fields: [documentId], references: [id])
+  template  Template? @relation("envelopeTemplate", fields: [templateId], references: [id])
+  recipients Recipient[]
+  events     EnvelopeEvent[]
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, titleLower])
+}
+
+model Recipient {
+  id          String    @id @default(cuid())
+  envelopeId  String
+  name        String
+  email       String
+  role        String    @default("SIGNER") // SIGNER | CC | APPROVER
+  status      String    @default("PENDING") // PENDING | DELIVERED | SIGNED | DECLINED
+  order       Int       @default(1)
+  authMethod  String    @default("EMAIL") // EMAIL | SMS | PASSKEY
+  signedAt    DateTime?
+  accessToken String    @unique // signing access token (never exposed to other recipients in UI)
+
+  envelope Envelope @relation(fields: [envelopeId], references: [id], onDelete: Cascade)
+
+  @@index([envelopeId])
+}
+
+model EnvelopeEvent {
+  id         String   @id @default(cuid())
+  envelopeId String
+  at         DateTime @default(now())
+  actor      String
+  action     String // CREATED | SENT | VIEWED | DELIVERED | DOCUMENT_VIEWED | REMINDED | SIGNED | DECLINED | VOIDED | SEALED | DELEGATED | CORRECTION_REQUESTED
+  detail     String?
+  ipHash     String?
+
+  envelope Envelope @relation(fields: [envelopeId], references: [id], onDelete: Cascade)
+
+  @@index([envelopeId, at])
+}
+
+model Template {
+  id          String    @id @default(cuid())
+  // Null for built-in library templates, which are global rather than
+  // duplicated once per tenant. Tenant-authored templates still set it.
+  tenantId    String?
+  name        String
+  nameLower   String    @default("") // accent-folded search mirror, see Envelope.titleLower
+  description String?
+  category    String    @default("General")
+  folder      String    @default("All templates")
+  pages       Int       @default(1)
+  usageCount  Int       @default(0)
+  publicSlug  String    @unique
+  createdAt   DateTime  @default(now())
+  lastUsedAt  DateTime?
+
+  // ── Library templates (the French legal catalogue) ──
+  locale       String  @default("en") // en | fr
+  jurisdiction String? // FR | EU | DE | ...
+  bodyMarkdown String? // the clause text itself; rendered to PDF on use
+  fields       String? // JSON: placeholder schema [{ key, label, type, required }]
+  libraryKey   String? @unique // stable id from src/lib/templates/**, drives idempotent sync
+  isBuiltIn    Boolean @default(false)
+  envelopes    Envelope[] @relation("envelopeTemplate")
+  version      String  @default("1.0.0")
+  sourceNotes  String? // JSON: statutory references and last legal review date
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([locale, isBuiltIn])
+  @@index([tenantId, nameLower])
+}
+
+/// An uploaded PDF, on disk under STORAGE_DIR, with what the ingest pipeline
+/// learned about it. Storage rules live in src/lib/document-store.ts; the
+/// extraction that fills hasTextLayer/ocr* lives in src/lib/docintel/.
+model Document {
+  id           String   @id // doc_<32 hex>, minted by newDocId()
+  tenantId     String
+  uploadedById String
+  filename     String   // as supplied by the client, for display only
+  storageKey   String   // path relative to STORAGE_DIR, never client-controlled
+  byteSize     Int
+  mimeType     String   @default("application/pdf")
+  pageCount    Int      @default(0)
+  sha256       String   // digest of the stored bytes, the basis of every seal
+
+  // Extraction state. hasTextLayer is false for a fully scanned document;
+  // mixed documents (born-digital body, scanned signature page) are recorded
+  // per page on DocumentPage, so this is the "any page had text" summary.
+  hasTextLayer  Boolean @default(false)
+  ocrStatus     String  @default("NONE") // NONE | PENDING | DONE | FAILED
+  ocrConfidence Float? // mean per-word confidence across OCR'd pages, 0-100
+  ocrError      String?
+  extractedText String? // concatenated text layer + OCR output, for analysis
+  detectedFields String? // JSON: field-detector output, suggestions not claims
+
+  createdAt DateTime  @default(now())
+  analyzedAt DateTime?
+
+  tenant     Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  uploadedBy User           @relation("uploadedDocuments", fields: [uploadedById], references: [id])
+  pages      DocumentPage[]
+  envelopes  Envelope[]     @relation("envelopeDocument")
+
+  @@index([tenantId, createdAt])
+  @@index([sha256])
+}
+
+/// Per-page geometry and extraction result. Page numbers are 1-based, matching
+/// the field detector's output and the page render route.
+model DocumentPage {
+  id            String  @id @default(cuid())
+  documentId    String
+  pageNumber    Int
+  width         Float
+  height        Float
+  hasText       Boolean @default(false) // false means this page went to OCR
+  ocrConfidence Float?
+  charCount     Int     @default(0)
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, pageNumber])
+}
+
+model Domain {
+  id          String    @id @default(cuid())
+  tenantId    String
+  domain      String
+  method      String    @default("TXT") // TXT | CNAME | HTTP
+  status      String    @default("PENDING") // PENDING | VERIFIED | FAILED | JOIN_REQUESTED
+  token       String
+  purpose     String    @default("JOIN") // JOIN (workspace join) | SENDING (authenticated email domain)
+  verifiedAt  DateTime?
+  requestedAt DateTime  @default(now())
+  lastCheckedAt DateTime?
+  lastCheckNote  String?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+// ─── Evidence federation ──────────────────────────────────────────────────────
+// The per-tenant evidence key signs evidence-pack manifests and public-portal
+// attestations. It is a real RSA-2048 key pair with a self-signed X.509
+// certificate; when the tenant has a DNS-TXT-verified sending domain, that
+// domain is embedded as a subjectAltName so the certificate carries the
+// domain-control proof (checked at issuance) with it.
+model EvidenceKey {
+  id             String   @id @default(cuid())
+  tenantId       String   @unique
+  keyId          String   @unique // stable public identifier, ek_<hex>
+  algorithm      String   @default("RSA-2048")
+  certificatePem String
+  publicKeyPem   String
+  privateKeyPem  String // instance-held only; lives in the operator's own database file
+  thumbprint     String // SHA-256 of the certificate DER, lowercase hex
+  sanDomain      String? // DNS-verified sending domain embedded as SAN at issuance
+  createdAt      DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+// Portal side (the public verification portal's registry). An "instance" is any
+// Docurama deployment - cloud or self-hosted - that pushed attestations.
+// Registration is trust-on-first-use: the first key that claims an identity is
+// pinned; a different key presenting the same thumbprint is rejected.
+model PortalInstance {
+  id              String   @id @default(cuid())
+  keyThumbprint   String   @unique
+  label           String
+  verifiedDomain  String?
+  certificatePem  String
+  publicKeyPem    String
+  firstSeenAt     DateTime @default(now())
+  lastSeenAt      DateTime @default(now())
+  attestationCount Int     @default(0)
+
+  attestations PortalAttestation[]
+}
+
+// Portal side: the minimal fingerprint pushed for public verification.
+// Deliberately free of personal data - no signer names, no emails, no tenant
+// names, no document bytes. The document itself never leaves the instance.
+model PortalAttestation {
+  id                 String   @id @default(cuid())
+  code               String   @unique
+  sha256             String
+  sealedAt           DateTime
+  completedAt        DateTime?
+  conformance        String?
+  pages              Int      @default(1)
+  signerCount        Int      @default(0)
+  verifiedDomain     String?
+  instanceThumbprint String
+  receivedAt         DateTime @default(now())
+  rawPayload         String // exact canonical JSON as received, for audit
+  tSeq               Int? // instance transparency-chain position the instance claimed (null = legacy push)
+  tEntryHash         String? // instance chain entry hash; first-seen value is the witnessed commitment
+
+  instance PortalInstance @relation(fields: [instanceThumbprint], references: [keyThumbprint], onDelete: Cascade)
+
+  @@index([instanceThumbprint])
+}
+
+// ─── Transparency registry (instance side) ───────────────────────────────────
+// A per-tenant append-only hash chain — a miniature Certificate Transparency
+// log. Every sealed envelope appends one entry committing to its seal
+// fingerprint. Entries link backward (prevHead); rewriting any entry changes
+// every subsequent head, which contradicts the heads the public portal
+// witnessed. Evidence packs embed the entry + the segment to the current head
+// + a signed checkpoint, giving third parties an offline inclusion proof.
+
+model TransparencyEntry {
+  id          String   @id @default(cuid())
+  tenantId    String
+  seq         Int // per-tenant sequence, 1-based
+  envelopeId  String? // null never happens today, but keeps the log append-only on re-seal
+  publicCode  String
+  payloadHash String // SHA-256 of the canonical seal commitment
+  prevHead    String // head of entry seq-1 ("0"×64 at genesis)
+  head        String // SHA-256 of canonical {seq, payloadHash, prevHead, at}
+  at          DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, seq])
+  @@unique([tenantId, envelopeId, payloadHash])
+  @@index([tenantId, seq])
+}
+
+// ─── Transparency registry (portal side) ─────────────────────────────────────
+// The public verification portal runs its own append-only log: every accepted
+// attestation appends one entry, witnessing the instance's claimed chain
+// position. The checkpoint endpoint signs the current head; third-party
+// monitors can poll it and detect a shrinking or rewritten log (the same
+// gossip model as Certificate Transparency, scaled down).
+
+model PortalLogEntry {
+  id                 String   @id @default(cuid())
+  seq                Int @unique // global sequence, 1-based
+  code               String
+  instanceThumbprint String
+  sha256             String
+  instanceEntryHash  String? // the instance-side chain hash that was witnessed
+  prevHead           String
+  head               String // SHA-256 of canonical {seq, code, instanceThumbprint, sha256, instanceEntryHash, prevHead, at}
+  at                 DateTime @default(now())
+
+  @@index([code])
+  @@index([seq])
+}
+
+// The portal's own signing key for transparency checkpoints. Generated once
+// per deployment; monitors pin it on first sight (TOFU) and can then hold the
+// portal operator to every checkpoint they ever served.
+model PortalKey {
+  id            String   @id @default("portal")
+  algorithm     String   @default("RSA-2048")
+  publicKeyPem  String
+  privateKeyPem String
+  createdAt     DateTime @default(now())
+}
+
+// Third-party witnessing of the portal key in Sigstore Rekor (public,
+// OpenSSF-operated, free, no account): at submit time the portal key signs a
+// statement committing to its own fingerprint, and the resulting hashedrekord
+// entry is stored with its inclusion proof. A substituted or rogue portal key
+// becomes publicly provable — the neutral log contradicts the portal's claim.
+// One row per witnessed key version; absence = not yet witnessed (offline,
+// firewalled or disabled deployments keep working, TOFU-only).
+model RekorWitness {
+  id             String   @id @default("portal-key") // subject + key version
+  subject        String   @default("portal-key")
+  keyFingerprint String // SHA-256 of the portal key's SPKI DER
+  rekorUrl       String // base URL of the log the entry lives in
+  entryUUID      String // Rekor entry id (= hash of the entry body)
+  logIndex       Int
+  treeSize       Int? // at inclusion-proof fetch time
+  integratedTime DateTime
+  statement      String // canonical JSON — exactly the bytes signed and hashed
+  statementHash  String // SHA-256 of the statement, what the hashedrekord commits to
+  signature      String // base64 RSA-SHA-256 over the statement bytes
+  inclusionProof String? // JSON: Rekor's {checkpoint, hashes, logIndex, rootHash, treeSize}
+  createdAt      DateTime @default(now())
+}
+
+// ─── Production settings: eSign, notifications, SMS, MCP ──────────────────────
+
+model SigningCertificate {
+  id               String   @id @default(cuid())
+  tenantId         String
+  userId           String
+  commonName       String
+  organization     String?
+  email            String?
+  serialNumber     String
+  thumbprint       String   // SHA-256 fingerprint
+  issuer           String
+  keyAlgorithm     String   @default("RSA-2048")
+  signatureAlgorithm String @default("SHA-256")
+  notBefore        DateTime
+  notAfter         DateTime
+  status           String   @default("PENDING") // PENDING | ISSUED | ACTIVE | REVOKED | EXPIRED
+  purpose          String   @default("signing") // signing | sealing
+  validityDays     Int      @default(365)
+  pkcs12Base64     String?  // encrypted PKCS#12 blob (passphrase never stored)
+  certificatePem   String?
+  revokedAt        DateTime?
+  createdAt        DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+}
+
+model TsaConfig {
+  id              String    @id @default(cuid())
+  tenantId        String    @unique
+  url             String    @default("https://timestamp.digicert.com")
+  hashAlgorithm   String    @default("SHA-256")
+  authType        String    @default("none") // none | basic
+  username        String?
+  enabled         Boolean   @default(false)
+  lastTestAt      DateTime?
+  lastTestStatus  String?   // OK | UNREACHABLE | TLS_ERROR | TIMEOUT
+  lastTestLatencyMs Int?
+  updatedAt        DateTime  @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+model EsignPreferences {
+  id                     String   @id @default(cuid())
+  tenantId               String   @unique
+  allowMultipleSignatures Boolean @default(true)
+  flattenFormFields      Boolean @default(true)
+  filenameFormat         String   @default("{title} - {signer} ({date})")
+  sealOnCompletion       Boolean @default(true)
+  requireReauth          Boolean @default(false) // 21 CFR Part 11: re-authenticate before signing
+  signatureLevel         String   @default("advanced") // simple | advanced | qualified (eIDAS)
+  part11Mode             Boolean @default(false)
+  consentText            String?
+  consentVersion         String   @default("v1.0")
+  updatedAt              DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+model NotificationSettings {
+  id                String   @id @default(cuid())
+  tenantId          String   @unique
+  // Email delivery (per-org SMTP override; falls back to platform SMTP)
+  smtpHost          String?
+  smtpPort          Int      @default(587)
+  smtpUser          String?
+  smtpPassword      String?
+  smtpFrom          String   @default("Docurama Sign <notifications@docurama.eu>")
+  smtpSecure        Boolean  @default(true)
+  smtpLastTestAt    DateTime?
+  smtpLastTestStatus String?
+  // Signer completion alerts
+  alertOnSent       Boolean  @default(true)
+  alertOnViewed     Boolean  @default(true)
+  alertOnSigned     Boolean  @default(true)
+  alertOnCompleted  Boolean  @default(true)
+  alertOnDeclined   Boolean  @default(false)
+  dailyDigest       Boolean  @default(false)
+  digestTime        String   @default("09:00")
+  // Sign request reminders
+  reminderMode      String   @default("manual") // manual | user_job | platform_job
+  reminderIntervalDays Int   @default(3)
+  reminderMaxCount  Int      @default(5)
+  quietHoursStart   String   @default("21:00")
+  quietHoursEnd     String   @default("08:00")
+  skipWeekends      Boolean  @default(true)
+  escalateToSms     Boolean  @default(false)
+  escalateAfterDays Int      @default(7)
+  reminderJobLastRunAt DateTime?
+  updatedAt         DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+model SmsGateway {
+  id              String   @id @default(cuid())
+  tenantId        String   @unique
+  provider        String   @default("twilio")
+  apiKey          String?  // Account SID / key — masked in responses
+  apiSecret       String?  // Auth token / secret — never echoed
+  senderId        String   @default("DOCURAMA")
+  lowCostMode     Boolean  @default(false)
+  // Optional WhatsApp channel (separate provider)
+  whatsappEnabled   Boolean @default(false)
+  whatsappProvider  String?
+  whatsappApiKey    String?
+  status          String   @default("not_configured") // not_configured | configured | tested | error
+  lastTestAt      DateTime?
+  lastTestStatus  String?
+  lastTestTo      String?
+  updatedAt       DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+model McpConfig {
+  id              String   @id @default(cuid())
+  tenantId        String   @unique
+  enabled         Boolean  @default(false)
+  transport       String   @default("streamable-http") // streamable-http | sse
+  allowedTools    String   @default("envelope_list,document_verify,template_list")
+  rateLimitPerMin Int      @default(60)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+// ─── Billing ──────────────────────────────────────────────────────────────────
+
+model Plan {
+  id          String  @id @default(cuid())
+  code        String  @unique // SOLO | STARTER | BUSINESS | ENTERPRISE
+  name        String
+  monthlyEur  Int
+  seatLimit   Int
+  envelopeLimit Int
+  storageGb   Int
+  apiAccess   Boolean @default(false)
+  slaUptime   String  @default("99.5%")
+  support     String
+  features    String // pipe-separated
+  // Outcome bullets ("with this plan you'll …") — replaces the old
+  // "most popular" highlight with per-plan value framing.
+  outcomes    String? // pipe-separated
+  active      Boolean @default(true)
+}
+
+model Subscription {
+  id             String    @id @default(cuid())
+  tenantId       String
+  planCode       String
+  status         String    @default("ACTIVE") // ACTIVE | TRIALING | PAST_DUE | CANCELED
+  mrrEur         Int       @default(0)
+  seats          Int       @default(1)
+  renewalAt      DateTime
+  paymentMethod  String    @default("SEPA ••4291")
+  lastInvoiceAt  DateTime?
+  failedPayment  Boolean   @default(false)
+
+  // Billing term (cycle 10 promotional switch): 1 (no engagement), 3, 6 or
+  // 12 months, with an incremental committed discount (0/5/10/15%).
+  termMonths           Int @default(1)
+  discountPct          Int @default(0)
+  // Envelope rollover: unused envelopes carried into the current period on
+  // renewal (capped at one monthly allowance — see src/lib/billing.ts).
+  carriedForwardEnvelopes Int @default(0)
+
+  // Payment provider rails: "manual" (bank transfer / out-of-band, renewed
+  // by the platform's own engine or an admin approval) or "stripe"
+  // (auto-charged each term by Stripe — renewal is webhook-driven).
+  provider    String? @default("manual")
+  providerRef String? // Stripe subscription id (sub_...) when provider = stripe
+
+  // Negotiated entitlements for sales-led deals. BUSINESS and ENTERPRISE are
+  // not self-serve (SELF_SERVE_PLANS in src/lib/plans.ts), so their seat and
+  // envelope numbers are agreed per contract rather than taken from the plan
+  // catalogue. Null means "use the catalogue value" — the same
+  // override-or-fall-back shape as ENVELOPE_LIMITS in src/lib/plans.ts.
+  seatLimitOverride     Int?
+  envelopeLimitOverride Int?
+  monthlyEurOverride    Int?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+// One row per tenant × payment provider customer mapping (Stripe cus_...).
+model PaymentCustomer {
+  id         String   @id @default(cuid())
+  tenantId   String
+  provider   String // stripe
+  externalId String // provider customer id (cus_...)
+  createdAt  DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, provider])
+}
+
+// Every money-relevant event: checkout attempts, paid terms (Stripe or
+// admin-approved manual), failed charges, refunds. The tenant-facing
+// Settings → Billing history and the admin billing console both read this.
+model Payment {
+  id           String    @id @default(cuid())
+  tenantId     String
+  provider     String // stripe | manual
+  kind         String // checkout | renewal | adjustment
+  planCode     String
+  termMonths   Int       @default(1)
+  amountCents  Int
+  currency     String    @default("EUR")
+  status       String    @default("PENDING") // PENDING | PAID | FAILED | CANCELED | REFUNDED
+  reference    String?   // Stripe session/invoice/subscription id or manual bank reference
+  description  String
+  checkoutUrl  String?   // Stripe Checkout URL for PENDING checkouts
+  approverNote String?   // who approved a manual payment and why
+  createdAt    DateTime  @default(now())
+  paidAt       DateTime?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+  @@index([status, createdAt])
+  @@index([reference])
+}
+
+// ── SSO (go-live cycle) ──────────────────────────────────────────────────────
+// Per-tenant (or platform-wide when tenantId is null) single sign-on.
+// OIDC: issuer + clientId/secret, discovery-driven code flow with PKCE.
+// SAML: IdP metadata XML; this instance is the SP (metadata at
+// /api/auth/sso/metadata/saml). Users whose email domain matches a
+// connection authenticate through it and are JIT-provisioned into the
+// connection's tenant.
+model SsoConnection {
+  id          String   @id @default(cuid())
+  tenantId    String? // Legacy null rows are untrusted; authentication requires a tenant.
+  protocol    String // OIDC | SAML
+  label       String // e.g. "Microsoft Entra ID"
+  emailDomain String // users@this-domain authenticate via this connection
+  // OIDC fields
+  issuerUrl   String?
+  clientId    String?
+  clientSecret String?
+  // SAML fields
+  idpMetadataXml String?
+  // Status
+  status      String   @default("ACTIVE") // ACTIVE | DISABLED
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([protocol, emailDomain])
+  @@index([emailDomain, status])
+}
+
+// Enterprise pipeline (cycle 10): prospects from the /enterprise onboarding
+// page. Platform admins triage leads in the admin console (Leads section);
+// each lead is a potential custom Enterprise rollout (SSO, BYO certs,
+// self-hosting, high-volume quotas).
+model EnterpriseLead {
+  id          String    @id @default(cuid())
+  company     String
+  contactName String
+  // Folded copies for search. PostgreSQL LIKE is case-sensitive and SQLite's
+  // is not, so matching a lowercased query against the raw columns worked on
+  // SQLite and silently returned nothing on PostgreSQL. Same denormalised
+  // pattern as Template.nameLower / Envelope.titleLower; see foldForSearch.
+  companyLower     String @default("")
+  contactNameLower String @default("")
+  email       String
+  phone       String?
+  seats       Int       @default(0) // expected seat count
+  monthlyEnvelopes Int  @default(0) // expected volume
+  requirements String   @default("") // free text: SSO, Part 11, self-hosting…
+  status      String    @default("NEW") // NEW | CONTACTED | QUALIFIED | WON | LOST
+  notes       String    @default("") // admin-visible triage notes
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Set when a WON lead is converted into a tenant. Presence is what makes
+  // the conversion idempotent — a double-submit returns the existing tenant
+  // instead of minting a second one.
+  convertedTenantId String?
+  convertedAt       DateTime?
+
+  @@index([convertedTenantId])
+  @@index([companyLower])
+}
+
+// ─── Legal, Privacy & Compliance ──────────────────────────────────────────────
+
+model DsarRequest {
+  id          String    @id @default(cuid())
+  tenantId    String?
+  type        String // ACCESS | ERASURE | RECTIFICATION | PORTABILITY
+  subjectEmail String
+  status      String    @default("OPEN") // OPEN | RUNNING | COMPLETED | CANCELED
+  notes       String?
+  requestedAt DateTime  @default(now())
+  dueAt       DateTime
+  completedAt DateTime?
+}
+
+model DmcaNotice {
+  id            String    @id @default(cuid())
+  complainant   String
+  targetUrl     String
+  works         String
+  status        String    @default("OPEN") // OPEN | RESOLVED
+  severity      String    @default("NORMAL") // NORMAL | HIGH
+  receivedAt    DateTime  @default(now())
+  slaDueAt      DateTime
+  resolvedAt    DateTime?
+  resolutionNote String?
+}
+
+model Control {
+  id             String   @id @default(cuid())
+  ref            String   @unique // e.g. SOC2-CC6.1
+  title          String
+  framework      String   @default("SOC 2")
+  category       String
+  status         String   @default("IMPLEMENTED") // IMPLEMENTED | PARTIAL | PLANNED
+  owner          String
+  evidenceCount  Int      @default(0)
+  lastReviewedAt DateTime?
+}
+
+model RetentionPolicy {
+  id           String    @id @default(cuid())
+  name         String
+  scope        String
+  retentionDays Int
+  disposition  String    @default("DELETE") // DELETE | ANONYMIZE | ARCHIVE
+  status       String    @default("ACTIVE") // ACTIVE | DRAFT
+  lastSweepAt  DateTime?
+}
+
+model LegalHold {
+  id        String    @id @default(cuid())
+  tenantId  String
+  reason    String
+  scope     String
+  status    String    @default("ACTIVE") // ACTIVE | RELEASED
+  issuedBy  String
+  issuedAt  DateTime  @default(now())
+  releasedAt DateTime?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+model Consent {
+  id          String    @id @default(cuid())
+  subjectEmail String
+  purpose     String
+  source      String    @default("signup")
+  grantedAt   DateTime  @default(now())
+  status      String    @default("GRANTED") // GRANTED | WITHDRAWN
+  withdrawnAt DateTime?
+}
+
+model Incident {
+  id          String    @id @default(cuid())
+  title       String
+  severity    String    @default("SEV3") // SEV1 | SEV2 | SEV3
+  status      String    @default("OPEN") // OPEN | CONTAINED | RESOLVED
+  description String
+  assignee    String
+  detectedAt  DateTime  @default(now())
+  resolvedAt  DateTime?
+}
+
+model AccessReview {
+  id          String    @id @default(cuid())
+  quarter     String
+  reviewer    String
+  scope       String
+  status      String    @default("PENDING") // PENDING | COMPLETED
+  findings    Int       @default(0)
+  completedAt DateTime?
+}
+
+model Risk {
+  id         String  @id @default(cuid())
+  title      String
+  category   String
+  likelihood String  @default("MEDIUM") // LOW | MEDIUM | HIGH
+  impact     String  @default("MEDIUM") // LOW | MEDIUM | HIGH
+  score      Int     @default(9)
+  mitigation String?
+  status     String  @default("OPEN") // OPEN | MITIGATED | ACCEPTED
+  owner      String
+}
+
+model Change {
+  id          String    @id @default(cuid())
+  title       String
+  type        String    @default("STANDARD") // STANDARD | EMERGENCY
+  description String
+  requestedBy String
+  status      String    @default("PENDING") // PENDING | APPROVED | REJECTED | IMPLEMENTED
+  decidedBy   String?
+  decisionAt  DateTime?
+}
+
+model Vendor {
+  id          String    @id @default(cuid())
+  name        String
+  service     String
+  riskLevel   String    @default("LOW") // LOW | MEDIUM | HIGH
+  dpdSigned   Boolean   @default(false)
+  lastAuditAt DateTime?
+  status      String    @default("APPROVED") // APPROVED | REVIEW | REJECTED
+}
+
+model RestoreDrill {
+  id          String    @id @default(cuid())
+  scope       String
+  rtoTarget   String
+  rtoActual   String?
+  result      String    @default("PASS") // PASS | PARTIAL | FAIL
+  executedAt  DateTime  @default(now())
+  notes       String?
+}
+
+model Subprocessor {
+  id                String  @id @default(cuid())
+  name              String
+  purpose           String
+  location          String
+  dpaSigned         Boolean @default(true)
+  transferMechanism String  @default("SCC")
+}
+
+/// A written compliance document: the customer-facing pack (DPA, privacy
+/// policy, sub-processor list) and the internal ISMS set. Seeded from the
+/// markdown catalogue in src/lib/compliance-library/ and editable in the
+/// platform console. Only rows flagged isPublic are published to /docs/legal.
+model ComplianceDocument {
+  id            String    @id @default(cuid())
+  key           String    @unique // stable catalogue id, drives idempotent sync
+  title         String
+  category      String    @default("Policy") // Policy | Agreement | Register | Plan | Notice
+  owner         String    @default("Security")
+  status        String    @default("DRAFT") // DRAFT | IN_REVIEW | APPROVED | RETIRED
+  version       String    @default("1.0.0")
+  locale        String    @default("en")
+  summary       String?
+  bodyMarkdown  String
+  isPublic      Boolean   @default(false)
+  effectiveFrom DateTime?
+  nextReviewAt  DateTime?
+  approvedBy    String?
+  approvedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  /// Pipe-separated Control.ref values this document is evidence for,
+  /// e.g. "SOC2-CC6.1|ISO-27001-A.5.15|GDPR-32". Matches the existing
+  /// pipe-separated-list convention used elsewhere in this schema.
+  controlRefs   String    @default("")
+
+  versions ComplianceDocumentVersion[]
+
+  @@index([status, category])
+}
+
+/// Immutable history. A new row is written on every content change, and each
+/// one is mirrored into AuditEvent so the trail cannot be edited in place.
+model ComplianceDocumentVersion {
+  id           String   @id @default(cuid())
+  documentId   String
+  version      String
+  bodyMarkdown String
+  changedBy    String
+  changeNote   String?
+  createdAt    DateTime @default(now())
+
+  document ComplianceDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId, createdAt])
+}
+
+// ─── Integrations ─────────────────────────────────────────────────────────────
+
+model ApiKey {
+  id          String    @id @default(cuid())
+  tenantId    String?
+  name        String
+  prefix      String // e.g. dk_live_ab12
+  secretHash  String?   // SHA-256 of the full key — enables real X-API-Key authentication
+  scope       String    @default("READONLY") // READONLY | ENVELOPES | TEMPLATES | FULL
+  status      String    @default("ACTIVE") // ACTIVE | REVOKED
+  createdBy   String
+  lastUsedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+model WebhookEndpoint {
+  id            String    @id @default(cuid())
+  tenantId      String
+  url           String
+  events        String // pipe-separated event list, "*" subscribes to all
+  status        String    @default("ACTIVE") // ACTIVE | PAUSED | FAILING
+  secretMasked  String
+  successRate   Int       @default(100)
+  lastDeliveryAt DateTime?
+  createdAt     DateTime  @default(now())
+
+  // Raw signing secret (whsec_…), kept retrievable because HMAC verification
+  // on the receiver side needs the exact bytes. Never returned by any API -
+  // only the masked preview and the one-time reveal at creation.
+  secret        String?
+
+  tenant      Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  deliveries  WebhookDelivery[]
+}
+
+model WebhookDelivery {
+  id         String   @id @default(cuid())
+  endpointId String
+  event      String
+  statusCode Int
+  durationMs Int
+  success    Boolean
+  at         DateTime @default(now())
+
+  // Retry engine: the exact payload that was POSTed is snapshotted so the
+  // worker can re-deliver byte-identical bodies (receivers verify a stable
+  // HMAC). Nullable for additive migration: pre-engine rows have no snapshot
+  // and are skipped by the retry pass. attempts < 5 with nextAttemptAt in
+  // the past = due for retry.
+  payload      String?
+  attempts     Int       @default(1)
+  nextAttemptAt DateTime?
+
+  endpoint WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+
+  @@index([success, attempts, nextAttemptAt])
+}
+
+// ─── Audit & Ops ──────────────────────────────────────────────────────────────
+
+model AuditEvent {
+  id         String   @id @default(cuid())
+  at         DateTime @default(now())
+  actor      String
+  actorRole  String
+  action     String
+  resource   String
+  tenantName String?
+  severity   String   @default("INFO") // INFO | WARNING | CRITICAL
+  ip         String
+  detail     String?
+}
+
+model SecurityEvent {
+  id       String   @id @default(cuid())
+  at       DateTime @default(now())
+  type     String
+  severity String   @default("INFO") // INFO | LOW | MEDIUM | HIGH | CRITICAL
+  actor    String
+  ip       String
+  blocked  Boolean  @default(true)
+  detail   String?
+}
+
+model DailyStat {
+  id               String   @id @default(cuid())
+  date             String   @unique // YYYY-MM-DD
+  envelopesCreated Int      @default(0)
+  envelopesSealed  Int      @default(0)
+  signersActive    Int      @default(0)
+  activeTenants    Int      @default(0)
+  mrrEur           Int      @default(0)
+}
+
+model PlatformSetting {
+  id                  String   @id @default("singleton")
+  smtpHost            String   @default("smtp.eu.mailprovider.io")
+  smtpPort            Int      @default(587)
+  smtpUser            String   @default("notifications@docurama.eu")
+  smtpFrom            String   @default("Docurama Sign <notifications@docurama.eu>")
+  smtpTls             Boolean  @default(true)
+  tsaUrl              String   @default("https://timestamp.digicert.com")
+  tsaReachable        Boolean  @default(true)
+  certFingerprint     String   @default("3A:F2:88:1B:6C:9E:44:D0:A7:2E:5F:B1:C3:98:0D:64:71:AA:29:5C")
+  certExpiryAt        DateTime
+  signingConformance  String   @default("B-LT")
+  trialLengthDays     Int      @default(14)
+  maintenanceMode     Boolean  @default(false)
+  featureFlags        String   @default("{\"smsDelivery\":true,\"bulkSend\":true,\"webhooks\":true,\"passkeys\":true,\"aiFieldDetect\":false,\"euResidencyOnly\":false}")
+  provisioningState   String   @default("{}") // persisted provisioning state for docurama.eu emails/subdomains/DNS
+  sweeperLastRunAt    DateTime @default(now())
+  queueDepth          Int      @default(3)
+  apiReplicas         Int      @default(2)
+  diskUsedPct         Int      @default(41)
+  lastDeployAt        DateTime @default(now())
+  version             String   @default("4.2.1")
+  auditChainSealedAt  DateTime @default(now())
+  auditChainBlockHeight Int   @default(1842)
+  updatedAt           DateTime @default(now())
+}

@@ -57,3 +57,29 @@ bun --no-env-file test e2e/blog.test.ts e2e/storage-config.test.ts
 ```
 
 Enterprise [CI run 35450255485](https://github.com/StalFe-Cloud/docurama-enterprise/actions/runs/35450255485) passed at final application source `e870d7d6d46fc3ef57ab9a94bdff73a9b7a767fb`: 214 automated tests with 1063 assertions, all 29 Maestro browser flows, production-image build and fresh-container health/blog/bootstrap checks, and PostgreSQL schema portability. The merge tree was verified identical to this tested source; subsequent provenance corrections change documentation only. Real external IdP/Cloudflare browser validation, SMTP/payment activation, customer installation, independent PDF validation and restore drill remain gates until separately recorded. No live deployment or data migration is part of this port.
+
+---
+
+# Upstream quality-hardening port — 2026-09-21
+
+Prepared 2026-09-21. Synchronizes Enterprise `main` with Docurama `quality` at `34086af`, the release line validated end-to-end locally on Windows (SQLite e2e including browser and SeaweedFS suites, PostgreSQL tier via Docker, production image build/boot/bootstrap) after upstream CI became unavailable (GitHub Actions billing block — no step ever ran on upstream runs after 2026-09-20 18:16 UTC).
+
+## Source and method
+
+| Reference | Commit |
+|---|---|
+| Comparison base (2026-09-19 port source) | `4303be8` |
+| Upstream source (Docurama `quality`) | `34086af` |
+| Enterprise starting `main` | `dd141e8` |
+
+The repositories still have unrelated Git histories, so the port is a three-way file merge (base `4303be8`, ours = Enterprise, theirs = `34086af`) over the shared paths, with line endings normalized (Enterprise working trees are CRLF; upstream blobs are LF — unnormalized merges conflict on every line). 75 shared-path files changed only upstream and were taken verbatim; 15 files modified on both sides merged cleanly (`package.json` resolved identical to upstream — the Enterprise delta was line endings only); Enterprise-retained paths were not touched: `docker-compose.yml`, `db/custom.db` (SHA-256 unchanged: `1651189053fae5316b7e5199952034e5c35a9c83ab442cdf75fcc0b1d80c2a96`), `README.md`, `ENTERPRISE-SELFHOST.md`, `deploy/`, `Caddyfile`, `tessdata/`, `upload/`, `download/`, `skills/`, `worklog.md`. Upstream's Maestro→Playwright migration deleted `e2e/flows/*.yaml`; Enterprise retains the Maestro flows and its flows-based CI, so those deletions were not ported.
+
+## What the port brings
+
+- Versioned Prisma migrations (`0_release_baseline` + `20260920_quality_hardening`, SQLite and PostgreSQL trees, `release-20260920.prisma` baseline) replacing boot-time `db push` in the entrypoint, with the startup policy the entrypoint now enforces (schema failure blocks boot; explicit skip available).
+- Delivery and billing hardening: transactional webhook outbox with fenced leases and stable delivery identities, SSRF-pinned webhook transport (`safe-webhook-http.ts`), atomic quota reservation and independent UTC monthly rollover (`monthly-period.ts`), mail outbox leasing with attempt budgets (`claimToken`), bounded DB-transaction admission (`transaction-gate.ts`), worker-loop shutdown fencing, versioned async password hashing, request-metadata audit identity.
+- Test/CI parity from the upstream release line: release-verification and webhook-network workflows, remediation workflows, the verification evidence doc, `e2e/run.sh` self-sufficiency fixes (private-webhook fixture flag, fixture-db schema sync) and the Windows-capable SeaweedFS suite.
+
+## Validation
+
+`bun install --frozen-lockfile`, `prisma generate`, `tsc --noEmit` and `eslint .` all pass; `scripts/test-entrypoint.sh` passes all three policy cases. Isolated suites, each in its own process against scratch schemas, **91/91 passing**: authentication (11), passwords (9), quota (6), SSO (25), bot protection (10), payment events (23), blog + storage configuration (7). The retained database hash is unchanged. As with the upstream line, GitHub Actions could not validate this port (billing block); the recorded validation is local. No installation was redeployed as part of this sync.

@@ -100,10 +100,11 @@ export function UserDocuments() {
       .then((res) => {
         const match = (res.rows ?? []).find((t) => t.id === templateId || t.publicSlug === templateId);
         if (match) {
+          setUploadedDoc(null);
           setSelectedTemplate({ id: match.id, name: match.name, pages: match.pages, category: match.category });
           setForm((prev) => ({
             ...prev,
-            title: match.name,
+            title: prev.title.trim() ? prev.title : match.name,
             message: `Please review and sign ${match.name}.`,
           }));
           setSendOpen(true);
@@ -155,10 +156,9 @@ export function UserDocuments() {
       fd.append("file", file);
       const res = await apiUpload<{ id: string; filename: string; pageCount: number; byteSize: number }>("/api/workspace/documents", fd);
       setUploadedDoc(res);
-      if (!form.title.trim()) {
-        const cleanName = file.name.replace(/\.pdf$/i, "").replace(/[-_]+/g, " ");
-        setForm((prev) => ({ ...prev, title: cleanName }));
-      }
+      setSelectedTemplate(null);
+      const cleanName = file.name.replace(/\.pdf$/i, "").replace(/[-_]+/g, " ");
+      setForm((prev) => ({ ...prev, title: prev.title.trim() ? prev.title : cleanName }));
       toast.success(`Uploaded ${res.filename} (${res.pageCount} page${res.pageCount > 1 ? "s" : ""})`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to upload document");
@@ -513,6 +513,7 @@ export function UserDocuments() {
             {/* Document upload step */}
             <div className="space-y-1.5">
               <Label>Document file (PDF)</Label>
+              {!uploadedDoc && !selectedTemplate && <p className="text-xs text-muted-foreground">Upload a PDF or choose a template before sending.</p>}
               {uploadedDoc ? (
                 <div className="flex items-center justify-between rounded-lg border bg-card p-3">
                   <div className="flex items-center gap-3 min-w-0">
@@ -630,7 +631,7 @@ export function UserDocuments() {
             <Button variant="outline" onClick={() => setSendOpen(false)}>Cancel</Button>
             <Button
               onClick={() => send.mutate()}
-              disabled={!form.title.trim() || validRecipients.length === 0 || send.isPending || uploading}
+              disabled={!form.title.trim() || validRecipients.length === 0 || (!uploadedDoc && !selectedTemplate) || send.isPending || uploading}
             >
               {send.isPending ? "Sending…" : validRecipients.length > 0 ? `Send for signature (${validRecipients.length})` : "Send for signature"}
             </Button>

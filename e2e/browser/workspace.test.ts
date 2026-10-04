@@ -176,9 +176,46 @@ describe("workspace and signer surfaces", () => {
 
       await seeText(page, "Send a document for signature");
       await page.locator("#doc-title").fill("E2E Void Fixture");
+      // Switch a selected template to a real uploaded PDF. The typed title
+      // remains intact; the actual UI send must choose only the new source.
+      const pdf = await PDFDocument.create();
+      pdf.addPage([595.28, 841.89]).drawText("E2E uploaded source replaces selected template", { x: 40, y: 760 });
+      const originalBytes = Buffer.from(await pdf.save());
+      const originalSha256 = createHash("sha256").update(originalBytes).digest("hex");
+      const uploaded = page.waitForResponse(response => response.request().method() === "POST" &&
+        response.url().endsWith("/api/workspace/documents"), { timeout: 30_000 });
+      await page.getByRole("dialog").locator('input[type="file"]').setInputFiles({
+        name: "source-switch-e2e.pdf", mimeType: "application/pdf", buffer: originalBytes,
+      });
+      const uploadResponse = await uploaded;
+      expect(uploadResponse.status()).toBe(201);
+      const document = await uploadResponse.json();
+      expect(document.sha256).toBe(originalSha256);
+      expect(document.pageCount).toBe(1);
+      await seeText(page, "Uploaded source-switch-e2e.pdf (1 page)");
+      expect(await page.locator("#doc-title").inputValue()).toBe("E2E Void Fixture");
       await page.locator("#recipient-1-name").fill("Karla Blanc");
       await page.locator("#recipient-1-email").fill("karla.blanc@example.com");
+      const sent = page.waitForResponse(response => response.request().method() === "POST" &&
+        response.url().endsWith("/api/workspace/envelopes") && response.request().postDataJSON()?.op === "send",
+        { timeout: 30_000 });
       await clickByName(page, /Send for signature/);
+      const sendResponse = await sent;
+      expect(sendResponse.status()).toBe(200);
+      const source = sendResponse.request().postDataJSON().data;
+      expect(source.documentId).toBe(document.id);
+      expect(Object.hasOwn(source, "templateId")).toBe(false);
+      const persisted = await page.evaluate(async () => {
+        const response = await fetch("/api/workspace/envelopes?search=E2E%20Void%20Fixture");
+        if (!response.ok) throw new Error("Sent source verification failed");
+        const body = await response.json();
+        const envelope = body.rows.find((row: {title: string}) => row.title === "E2E Void Fixture");
+        if (!envelope) throw new Error("Uploaded-source envelope was not listed");
+        return { documentId: envelope.documentId, templateId: envelope.templateId,
+          contractSnapshot: envelope.contractSnapshot, sha256: envelope.sha256, pages: envelope.pages };
+      });
+      expect(persisted).toEqual({ documentId: document.id, templateId: null,
+        contractSnapshot: null, sha256: originalSha256, pages: 1 });
       await seeText(page, /Envelope prepared for 1 recipients; the first signing invitation and copy notices are queued/);
 
       await clickText(page, "E2E Void Fixture");

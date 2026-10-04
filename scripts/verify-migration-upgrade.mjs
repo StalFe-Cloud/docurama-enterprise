@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, copyFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, copyFileSync } from 'node:fs';
 import { resolve, join, sep } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { readMigrationHistory, assertAppliedMigrationHistory } from './migration-history.mjs';
 import { PrismaClient } from '@prisma/client';
 
 // Intentionally not a production migration command. It operates only on a new,
@@ -29,6 +29,7 @@ if (provider === 'sqlite') {
 const scratch = mkdtempSync(join(root, 'quality-migration-'));
 const schema = resolve('prisma', provider, 'schema.prisma');
 const baselineName = '0_release_baseline';
+const reviewedHistory = readMigrationHistory(resolve('prisma', provider, 'migrations'), baselineName);
 const baselineRoot = join(scratch, 'baseline');
 mkdirSync(join(baselineRoot, 'migrations', baselineName), { recursive: true });
 copyFileSync(schema, join(baselineRoot, 'schema.prisma'));
@@ -110,12 +111,20 @@ for (const url of [sourceUrl, restoreUrl]) {
   assert.equal(audit.actorUserId, null, 'Do not infer identity from an editable display name');
   assert.equal(audit.subjectUserId, null);
   assert.equal(audit.tenantId, null);
-  assert.equal((await upgraded.mailOutbox.findUniqueOrThrow({ where: { id: 'migrationmail' } })).claimToken, null);
+  const envelope = await upgraded.envelope.findUniqueOrThrow({ where: { id: 'migrationenvelope' } });
+  assert.equal(envelope.contractSnapshot, null, 'Do not invent historical contract terms');
+  assert.equal(envelope.evidenceSha256, null, 'Do not invent a historical adoption seal');
+  const recipient = await upgraded.recipient.findUniqueOrThrow({ where: { id: 'migrationrecipient' } });
+  assert.equal(recipient.signatureData, null, 'Do not invent historical signer adoption');
+  assert.equal(recipient.locale, null);
+  const mail = await upgraded.mailOutbox.findUniqueOrThrow({ where: { id: 'migrationmail' } });
+  assert.equal(mail.claimToken, null);
+  assert.equal(mail.bodyHtml, null);
+  assert.equal(mail.envelopeId, null, 'Do not infer legacy mail envelope bindings');
+  assert.equal(mail.recipientId, null);
   assert.equal((await upgraded.webhookDelivery.findUniqueOrThrow({ where: { id: 'migrationdelivery' } })).claimUntil, null);
   const migrations = await upgraded.$queryRaw`SELECT migration_name, checksum FROM "_prisma_migrations" WHERE finished_at IS NOT NULL ORDER BY migration_name`;
-  assert.equal(migrations.length, 2);
-  const expected = createHash('sha256').update(readFileSync(resolve('prisma', provider, 'migrations', baselineName, 'migration.sql'))).digest('hex');
-  assert.equal(migrations.find((entry) => entry.migration_name === baselineName)?.checksum, expected);
+  assertAppliedMigrationHistory(migrations, reviewedHistory);
   await upgraded.$disconnect();
   prisma(['migrate', 'deploy', '--schema', schema], url);
   prisma(['migrate', 'diff', '--from-url', url, '--to-schema-datamodel', schema, '--exit-code'], url);

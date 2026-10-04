@@ -7,6 +7,7 @@ import { spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { configuration, postgresConfiguration, reserveEndpoint, withScratch, initializeScratch, stopOwnedProcess as stop, isolatedEnvironment, bashExecutable, assertLocalPlatform } from './isolation.mjs';
 import { socketsOwnedBy } from './seaweed-isolation.mjs';
+import { ownedServerArguments, assertOwnedServerAlive, waitForOwnedCommand } from './server-lifecycle.mjs';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 let active;
@@ -17,14 +18,12 @@ function start(command, args, env, stdio = 'inherit') {
   return spawn(command, args, { cwd: root, env, stdio, detached: process.platform !== 'win32' });
 }
 
-async function command(command, args, env) {
+async function command(command, args, env, server) {
+  assertOwnedServerAlive(server);
   const child = start(command, args, env);
   active = child;
   try {
-    await new Promise((resolve, reject) => {
-      child.once('error', reject);
-      child.once('exit', (code, signal) => code === 0 ? resolve() : reject(new Error(`${command} failed (${signal ?? code})`)));
-    });
+    await waitForOwnedCommand(child, server);
   } finally {
     await stop(child);
     active = undefined;
@@ -61,7 +60,7 @@ export async function runIsolated({ ownedPostgres = false } = {}) {
         await lease.release(); lease = undefined;
         const port = new URL(env.E2E_BASE_URL).port;
         stream = createWriteStream(join(scratch.directory, 'server.log'));
-        server = start(process.execPath, ['e2e/start-server.mjs'], { ...env, PORT: port }, ['ignore', 'pipe', 'pipe']);
+        server = start(process.execPath, ownedServerArguments(), { ...env, PORT: port }, ['ignore', 'pipe', 'pipe']);
         let startupError;
         server.on('error', (error) => { startupError = error; });
         for (const pipe of [server.stdout, server.stderr]) pipe.on('data', (data) => {
@@ -78,7 +77,7 @@ export async function runIsolated({ ownedPostgres = false } = {}) {
           await delay(200);
         }
       }
-      await command(bashExecutable(env), [join(root, config.remote ? 'e2e/remote-suites.sh' : 'e2e/suites.sh')], env);
+      await command(bashExecutable(env), [join(root, config.remote ? 'e2e/remote-suites.sh' : 'e2e/suites.sh')], env, server);
     } catch (error) {
       if (log) console.error(log);
       throw error;

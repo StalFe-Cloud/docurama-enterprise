@@ -18,6 +18,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { ACCOUNTS } from "./browser/harness";
 import {
   PLAN_CATALOG, PLAN_ORDER, BILLING_TERMS, ENVELOPE_LIMITS,
   effectiveMonthlyEur, termTotalEur, termSavingsEur, rolloverCap, planGuide,
@@ -276,7 +277,7 @@ describe("enterprise lead pipeline (/api/enterprise-lead + admin triage)", () =>
     const anon = await get("/api/admin/leads");
     expect([401, 403]).toContain(anon.status);
 
-    const token = await login("admin@docurama.eu", "admin1234");
+    const token = await login(ACCOUNTS.admin.email, ACCOUNTS.admin.password);
     const list = await get("/api/admin/leads?q=E2E Medical", { Authorization: `Bearer ${token}` });
     expect(list.status).toBe(200);
     const leads = list.body.leads as { id: string; company: string; status: string }[];

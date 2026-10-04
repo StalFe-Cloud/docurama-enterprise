@@ -60,6 +60,8 @@ jobs:
         run: |
           node scripts/schema-for.mjs '${{ matrix.provider }}'
           bunx prisma generate --schema 'prisma/${{ matrix.provider }}/schema.prisma'
+      - name: Verify reviewed migration-history invariants
+        run: node scripts/migration-history.test.mjs
       - name: Upgrade populated baseline and verify native backup restoration
         run: node scripts/verify-migration-upgrade.mjs '${{ matrix.provider }}'
       - name: Verify committed migration history is up to date

@@ -13,7 +13,7 @@
  * byte and assert the verifier refuses.
  */
 
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import { mkdtemp, readFile, rm } from "fs/promises";
@@ -143,9 +143,19 @@ function buildAttestedPush(
 /* ── evidence pack carries a verifiable transparency block ─────────────────── */
 
 describe("evidence pack transparency block", () => {
+  beforeAll(async () => {
+    // Compile/load the owned evidence route before correctness cases. Drain
+    // this initialization response; every test still verifies a fresh pack.
+    const response = await fetch(`${BASE}/api/v1/envelopes/DOC-E2E0002/evidence-pack`, {
+      headers: { "X-API-Key": E2E_API_KEY }, signal: AbortSignal.timeout(30_000),
+    });
+    expect(response.status).toBe(200);
+    await response.arrayBuffer();
+  }, 45_000);
+
   test("pack manifest embeds a chain entry that verifies offline (commitment → chain → signed checkpoint)", async () => {
     const res = await fetch(`${BASE}/api/v1/envelopes/DOC-E2E0002/evidence-pack`, {
-      headers: { "X-API-Key": E2E_API_KEY },
+      headers: { "X-API-Key": E2E_API_KEY }, signal: AbortSignal.timeout(15_000),
     });
     expect(res.status).toBe(200);
     const files = parseZip(Buffer.from(await res.arrayBuffer()));
@@ -185,11 +195,11 @@ describe("evidence pack transparency block", () => {
     expect(verifyHtml).toContain("Registre de transparence");
     expect(verifyHtml).toContain("docurama-transparency-v1");
     expect(verifyHtml).not.toContain("fetch(");
-  });
+  }, 30_000);
 
   test("a tampered commitment is detected by the shared verifier", async () => {
     const res = await fetch(`${BASE}/api/v1/envelopes/DOC-E2E0002/evidence-pack`, {
-      headers: { "X-API-Key": E2E_API_KEY },
+      headers: { "X-API-Key": E2E_API_KEY }, signal: AbortSignal.timeout(15_000),
     });
     const files = parseZip(Buffer.from(await res.arrayBuffer()));
     const manifest = JSON.parse(files.get("manifest.json")!.toString("utf8"));
@@ -207,11 +217,11 @@ describe("evidence pack transparency block", () => {
     const v = verifyPackTransparency(block, badCommitment, manifest.payload.signing.publicKeyPem);
     expect(v.ok).toBe(false);
     expect(v.reason).toContain("commit");
-  });
+  }, 30_000);
 
   test("a rewritten segment link breaks the chain verification", async () => {
     const res = await fetch(`${BASE}/api/v1/envelopes/DOC-E2E0002/evidence-pack`, {
-      headers: { "X-API-Key": E2E_API_KEY },
+      headers: { "X-API-Key": E2E_API_KEY }, signal: AbortSignal.timeout(15_000),
     });
     const files = parseZip(Buffer.from(await res.arrayBuffer()));
     const manifest = JSON.parse(files.get("manifest.json")!.toString("utf8"));
@@ -233,7 +243,7 @@ describe("evidence pack transparency block", () => {
     };
     const v = verifyPackTransparency(block, commitment, manifest.payload.signing.publicKeyPem);
     expect(v.ok).toBe(false);
-  });
+  }, 30_000);
 });
 
 /* ── receiver: transparency claims, witnessing, rewrite detection ──────────── */

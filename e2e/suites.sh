@@ -54,7 +54,10 @@ bun --no-env-file test e2e/lead-conversion.test.ts || { echo "!! enterprise lead
 bun --no-env-file test e2e/blog.test.ts e2e/storage-config.test.ts || { echo "!! content/storage tests failed"; exit 1; }
 if [[ "${E2E_SKIP_API:-0}" != "1" ]]; then
   echo "── e2e: API-layer + evidence-layer + transparency-layer + MCP + visual tests"
-  E2E_BASE_URL="$BASE_URL" bun --no-env-file test e2e/api.test.ts e2e/evidence.test.ts e2e/transparency.test.ts e2e/rekor.test.ts e2e/plans.test.ts e2e/webhooks.test.ts e2e/visual.test.ts || { echo "!! API/evidence/transparency/plans/webhooks/visual tests failed"; exit 1; }
+  E2E_BASE_URL="$BASE_URL" bun --no-env-file test e2e/api.test.ts e2e/evidence.test.ts e2e/transparency.test.ts e2e/rekor.test.ts e2e/plans.test.ts e2e/webhooks.test.ts || { echo "!! API/evidence/transparency/plans/webhooks tests failed"; exit 1; }
+  # Performance measurements follow completed HTTP load in their own process.
+  echo "e2e: visual regression and fresh-client LCP gate (separate phase)"
+  E2E_BASE_URL="$BASE_URL" bun --no-env-file test e2e/visual.test.ts || { echo "!! visual regression/LCP tests failed"; exit 1; }
 fi
 
 # ── 2c-bis. MCP server (own process: the per-key rate-limit test needs a

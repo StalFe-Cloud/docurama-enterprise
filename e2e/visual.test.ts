@@ -30,9 +30,9 @@
  * suite fails only when a page drifts away from its committed look.
  *
  * LCP: measured on the two marketing conversion surfaces (/ and /templates)
- * with a generous 6s gate — this is a dev server, so the number is
- * compile-inflated; the gate exists to catch catastrophic regressions (a
- * 30 MB hero asset), not to benchmark.
+ * with a 6s gate after explicit dev-route compilation in a discarded browser
+ * context. Each measured navigation uses a fresh client, so browser caching
+ * cannot hide heavy assets. This is not a production performance benchmark.
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
@@ -164,6 +164,18 @@ describe("visual regression smoke (marketing surfaces)", () => {
       async () => {
         if (process.env.E2E_SKIP_VISUAL === "1") return; // explicit opt-out
         if (!browser) throw new Error("No Chromium browser — see beforeAll");
+
+        // Compile this owned dev route and its browser chunks immediately
+        // before measuring. Discard the warm client so the actual navigation
+        // still pays network/decoding/rendering costs with empty browser caches.
+        const warmContext = await browser.newContext({ viewport: VIEWPORT });
+        try {
+          const warmPage = await warmContext.newPage();
+          const response = await warmPage.goto(`${BASE}${route.path}`, { waitUntil: "load", timeout: 60_000 });
+          expect(response?.ok()).toBe(true);
+        } finally {
+          await warmContext.close();
+        }
 
         const context = await browser.newContext({
           viewport: VIEWPORT,

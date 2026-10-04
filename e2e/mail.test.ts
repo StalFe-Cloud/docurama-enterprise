@@ -157,13 +157,15 @@ afterAll(async () => {
   rmSync(SCRATCH_DIR, { recursive: true, force: true });
 });
 
-const queueMail = (subject: string) =>
+// Generic transport coverage uses a real non-signing notification. Signing
+// invitations require envelope correlation and are covered separately below.
+const queueMail = (subject: string, template = "TEAM_INVITE") =>
   db.mailOutbox.create({
     data: {
       toEmail: "signer@example.com",
-      template: "SIGN_INVITE",
+      template,
       subject,
-      bodyText: `Hello,\n\nPlease sign: ${subject}\n`,
+      bodyText: `Hello,\n\nPlease join: ${subject}\n`,
       status: "QUEUED",
     },
   });
@@ -209,6 +211,25 @@ describe("outbox-only mode (no SMTP_URL)", () => {
 });
 
 describe("SMTP delivery", () => {
+  test("unbound signing notifications are cancelled without SMTP delivery", async () => {
+    process.env.SMTP_URL = `smtp://tester:secret@127.0.0.1:${relay.port}?tls=off`;
+    const before = relay.captured.length;
+    const rows = await Promise.all(["SIGN_INVITE", "REMINDER", "SIGN_COMPLETED"].map((template) => queueMail(`Unbound ${template}`, template)));
+    const result = await processOutbox(10);
+    expect(result.cancelled).toBe(3);
+    expect(result.sent).toBe(0);
+    expect(relay.captured.length).toBe(before);
+    for (const queued of rows) {
+      const row = await db.mailOutbox.findUniqueOrThrow({ where: { id: queued.id } });
+      expect(row.status).toBe("CANCELLED");
+      expect(row.lastError).toBe("Signing notification is missing envelope correlation; review before requeue");
+      expect(row.sentAt).toBeNull();
+      expect(row.claimToken).toBeNull();
+      expect(row.claimUntil).toBeNull();
+      expect(row.nextAttemptAt).toBeNull();
+    }
+  });
+
   test("queued mail is delivered and marked SENT", async () => {
     process.env.SMTP_URL = `smtp://tester:secret@127.0.0.1:${relay.port}?tls=off`;
     const m = await queueMail("Invite: NDA review");
@@ -224,7 +245,7 @@ describe("SMTP delivery", () => {
     const got = relay.captured.find((c) => c.subject.includes("NDA"));
     expect(got).toBeDefined();
     expect(got?.to).toContain("signer@example.com");
-    expect(got?.body).toContain("Please sign");
+    expect(got?.body).toContain("Please join");
   });
 
   test("temporary failure → backoff, not-due rows are deferred, then recovery sends", async () => {

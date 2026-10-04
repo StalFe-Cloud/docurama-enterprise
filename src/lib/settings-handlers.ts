@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { createHash, randomBytes } from "crypto";
 import QRCode from "qrcode";
 import { db } from "@/lib/db";
+import { ensureEsignPreferences } from "@/lib/esign-preferences";
 import type { SessionUser } from "@/lib/auth";
 import { hashPasswordAsync, verifyPasswordAsync, recordAudit } from "@/lib/auth";
 import { requestClientIp } from "@/lib/request-metadata";
@@ -43,11 +44,7 @@ function requireSettingsPermission(me: SessionUser, op: string): Response | null
 // ── Lazy per-tenant config rows (created with defaults on first read) ────────
 
 async function ensureEsignPrefs(tenantId: string) {
-  return db.esignPreferences.upsert({
-    where: { tenantId },
-    update: {},
-    create: { tenantId },
-  });
+  return ensureEsignPreferences(tenantId, db.esignPreferences);
 }
 async function ensureNotificationSettings(tenantId: string) {
   return db.notificationSettings.upsert({

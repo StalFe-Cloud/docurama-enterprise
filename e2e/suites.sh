@@ -39,6 +39,7 @@ bun --no-env-file test e2e/signing-email-smtp.test.ts
 bun --no-env-file test e2e/mail-signing-gate.test.ts
 bun --no-env-file test e2e/mail-completion-attachments.test.ts
 bun --no-env-file test scripts/signing-workflow-regression.test.ts
+bun --no-env-file test e2e/esign-preferences.test.ts
 bun --no-env-file test scripts/mfa-regression.test.ts
 bun --no-env-file test e2e/admin-response-security.test.ts
 bun --no-env-file test e2e/admin-route-security.test.ts

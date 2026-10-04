@@ -80,7 +80,8 @@ jobs:
           node e2e/isolation-processes.test.mjs
           node e2e/isolation-lifecycle.test.mjs
           node e2e/seaweed-isolation.test.mjs
-          for spec in e2e/request-origin.test.ts scripts/mfa-regression.test.ts e2e/admin-response-security.test.ts e2e/admin-route-security.test.ts e2e/signer-policy.test.ts e2e/evidence-assurance.test.ts e2e/contract-snapshot.test.ts e2e/final-document.test.ts e2e/signing-email.test.ts e2e/signing-email-smtp.test.ts e2e/mail-signing-gate.test.ts e2e/mail-completion-attachments.test.ts scripts/signing-workflow-regression.test.ts; do
+          bun --no-env-file test --timeout 90000 e2e/esign-preferences-concurrency.test.mjs
+          for spec in e2e/esign-preferences.test.ts e2e/request-origin.test.ts scripts/mfa-regression.test.ts e2e/admin-response-security.test.ts e2e/admin-route-security.test.ts e2e/signer-policy.test.ts e2e/evidence-assurance.test.ts e2e/contract-snapshot.test.ts e2e/final-document.test.ts e2e/signing-email.test.ts e2e/signing-email-smtp.test.ts e2e/mail-signing-gate.test.ts e2e/mail-completion-attachments.test.ts scripts/signing-workflow-regression.test.ts; do
             bun --no-env-file test "$spec"
           done
           bun --no-env-file scripts/mfa-sqlite-regression.ts

@@ -12,7 +12,7 @@
  * Run: bun test e2e/browser/auth.test.ts   (needs a server at E2E_BASE_URL)
  */
 
-import { afterAll, beforeAll, describe, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import type { Browser } from "playwright";
 import {
   ACCOUNTS, clickByName, clickText, closeBrowser, goto, launchBrowser,
@@ -78,16 +78,31 @@ describe("authentication", () => {
     }));
 
   /* ── login-demo.yaml ───────────────────────────────────────────────────── */
-  flow("demo one-click buttons enter the platform admin console", async (b) =>
+  flow("demo one-click login requires valid credentials before entering the admin console", async (b) =>
     withPage(b, async (page) => {
       await goto(page, "/login");
       await seeText(page, /Demo accounts/, 30_000);
       await seeText(page, /Platform Admin/);
 
-      // One click, no typing.
+      // The disposable seed declares synthetic admin credentials instead of
+      // the advertised demo credentials. A one-click demo uses normal authentication
+      // endpoint and must not grant access when those credentials are absent.
+      const demoLogin = page.waitForResponse(response => response.request().method() === "POST" &&
+        response.url().endsWith("/api/auth/login"), { timeout: 30_000 });
       await clickByName(page, /Platform Admin/);
+      expect((await demoLogin).status()).toBe(401);
+      await seeText(page, "Invalid email or password");
+      await seeText(page, "Sign in to your portal");
+      expect(await page.getByText("Platform overview", { exact: true }).count()).toBe(0);
 
-      // PLATFORM_ADMIN lands in the admin shell (overview section).
+      // The real seeded admin still reaches the protected console through
+      // the same UI and authentication endpoint; no token or MFA bypass.
+      await page.locator("#email").fill(ACCOUNTS.admin.email);
+      await page.locator("#password").fill(ACCOUNTS.admin.password);
+      const fixtureLogin = page.waitForResponse(response => response.request().method() === "POST" &&
+        response.url().endsWith("/api/auth/login"), { timeout: 30_000 });
+      await clickByName(page, /Sign in securely/);
+      expect((await fixtureLogin).status()).toBe(200);
       await seeText(page, "Platform overview", 30_000);
       await seeText(page, "Active tenants");
     }));

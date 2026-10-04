@@ -1,3 +1,8 @@
+{{- range .Values.extraEnv }}
+{{- if has .name (list "DOCURAMA_DEPLOYMENT_MODE" "DOCURAMA_PUBLIC_REGISTRATION") }}
+{{- fail "Enterprise installation policy cannot be overridden through extraEnv" }}
+{{- end }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -41,6 +46,10 @@ spec:
             - name: STORAGE_DIR
               value: /app/storage
             - name: NEXT_PUBLIC_DEMO_MODE
+              value: "false"
+            - name: DOCURAMA_DEPLOYMENT_MODE
+              value: "selfhost"
+            - name: DOCURAMA_PUBLIC_REGISTRATION
               value: "false"
             - name: ROOT_DOMAIN
               value: {{ include "docurama.rootDomain" . | quote }}

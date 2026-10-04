@@ -167,7 +167,7 @@ describe("public surfaces", () => {
       await seeText(page, "Verify a document");
       await page.getByLabel(/Verification code/).fill("DOC-E2E0002");
       await clickByName(page, /^Verify$/);
-      await seeText(page, /Verified - cryptographic evidence found/, 20_000);
+      await seeText(page, /Completion record found/, 20_000);
       await seeText(page, "E2E Fixture — Supply Agreement (sealed)");
     }));
 

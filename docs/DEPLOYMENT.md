@@ -1,6 +1,6 @@
 # Deployment Guide — Docurama
 
-Docurama is a Next.js 16 + Prisma application (Bun toolchain). One image, one chart, one compose file cover every supported shape.
+Docurama is a Next.js 16 + Prisma application (Bun toolchain). Build a separate image for each database provider. Deployment examples require a reviewed release, protected runtime configuration and installation-specific acceptance evidence.
 
 | Platform | Target | Section |
 |---|---|---|
@@ -28,7 +28,7 @@ docker compose --profile s3 up -d          # + SeaweedFS S3 object storage (buck
 docker compose --profile s3 --profile mail up -d   # + Mailpit SMTP sink (eval only)
 ```
 
-- Image: non-root (uid 10001), `HEALTHCHECK` on `/api/health`, entrypoint runs an idempotent `prisma db push` on boot.
+- Image: non-root (uid 10001), `HEALTHCHECK` on `/api/health`, entrypoint runs reviewed provider-specific `prisma migrate deploy` on boot and refuses to start if it fails.
 - Host mounts: `./db` and `./storage` (override with `DB_DIR`/`STORAGE_DIR`); `PORT_BIND` defaults to `0.0.0.0:3002`.
 - With the s3 profile: set `S3_ENDPOINT=http://seaweed:8333`, `S3_BUCKET=docurama`, `S3_ACCESS_KEY_ID=docurama`, `S3_SECRET_ACCESS_KEY=…` in the app environment (compose file comments show the block).
 - With the mail profile: `SMTP_URL=smtp://mailpit:1025?tls=off`, inbox UI at `http://127.0.0.1:8025`.
@@ -48,8 +48,8 @@ DB_PROVIDER=postgresql DATABASE_URL=postgresql://docurama:docurama@postgres:5432
 `--build` is required on first use, and again if you switch back to SQLite.
 `scripts/schema-for.mjs` emits `prisma/schema.postgresql.prisma` from the single
 source schema, changing only the provider line — it fails loudly if anything
-else would have to differ, which is the portability guarantee. The entrypoint
-then pushes that schema at boot.
+else would have to differ, which guards schema portability. The entrypoint applies the reviewed SQL history
+under `prisma/postgresql/migrations/`; portability checks do not migrate existing data.
 
 Postgres is **necessary but not sufficient** for multi-replica. The background
 worker (mail and webhook retries) runs in-process, so exactly one replica may
@@ -59,19 +59,83 @@ the third requirement — see docs/STORAGE-OPTIONS.md.
 **Upgrading to the folded lead-search columns.** `EnterpriseLead` gained
 `companyLower`/`contactNameLower` so admin lead search works on PostgreSQL
 (PostgreSQL `LIKE` is case-sensitive; SQLite's is not, which hid the bug).
-`db push` adds them with their `""` default rather than computing them, so run
+Schema migration defaults do not compute folded values for existing rows, so rehearse and run
 once after upgrading, or existing leads stay unsearchable:
 
 ```bash
 bun scripts/backfill-lead-search.ts
 ```
 
-**Schema changes are applied with `prisma db push`, not migrations.**
-`prisma/migrations/` is empty and the entrypoint pushes the schema at boot,
-which is additive-only and refuses anything requiring data loss. Adopting a
-migration history is a deliberate change of deployment model — `migrate deploy`
-fails against a database built by `db push` until it is baselined with
-`migrate resolve` — and has not been made.
+### 2.2 Reviewed migrations and existing databases
+
+Generate the selected provider schema before using its reviewed migration history:
+
+```bash
+node scripts/schema-for.mjs sqlite
+bunx prisma migrate deploy --schema prisma/sqlite/schema.prisma
+# PostgreSQL build/tooling instead:
+# node scripts/schema-for.mjs postgresql
+# bunx prisma migrate deploy --schema prisma/postgresql/schema.prisma
+```
+
+These are schema-changing commands for an approved target, never a discovery step.
+The histories are `prisma/sqlite/migrations/` and `prisma/postgresql/migrations/`.
+Review their SQL and rehearse deployment on an isolated restore before upgrading.
+Startup does not run `db push`, reset, accept-data-loss or automatic baselining.
+Migration failure stops startup; investigate the failure before another attempt.
+
+For a nonempty database previously created with `db push`, stop the rollout.
+The committed `0_release_baseline` SQL and `prisma/baselines/release-20260920.prisma`
+are reference artifacts, not proof that an arbitrary existing database matches.
+An operator must compare the actual schema, constraints and data with the selected
+history in an isolated restored copy, account for already-applied later changes,
+review any reconciliation SQL, and record exactly which migrations are satisfied.
+Only a deliberate reviewed offline baseline process may mark matching migrations
+as applied. No universal `migrate resolve` command is supplied: marking the wrong
+history can conceal missing tables or columns. Do not baseline automatically at boot.
+
+Use `DOCURAMA_SKIP_MIGRATIONS=1` only when a separately controlled migration step
+has succeeded against the same target and image version. `DOCURAMA_SKIP_DB_PUSH`
+is a legacy compatibility alias. Neither bypass proves schema compatibility.
+
+### 2.3 Immutable template terms and historical envelopes
+
+The nullable `Envelope.contractSnapshot` migration stores template terms and
+validated signature-location metadata frozen at send time. Review
+`20261004_contract_snapshot` in the selected provider history and regenerate the
+matching Prisma client before testing this release. Null is intentional for
+historical rows; migration must not invent historical terms from today's template.
+
+Legacy active/completed template envelopes, and envelopes without an uploaded
+document or valid snapshot, refuse signing/render/export when their snapshot is
+missing or invalid. APIs return 409; the signer page shows an unavailable state.
+Review retained source/history with the operator before reissuing pending contracts,
+and preserve historical records. Do not automatically backfill terms from a mutable
+current template. Legacy uploaded-document-only envelopes may use their original
+PDF subject to the existing ownership, state and signer-policy checks.
+
+The completed-document renderer now assembles a PDF from frozen terms or the
+preserved uploaded original, captured field values and typed-signature adoption,
+with completion audit pages and a separate printable completion record. It verifies
+the stored evidence digest before output.
+This is separate from embedded PAdES signing or a trusted timestamp; those
+conformance gates remain blocked until independently implemented and verified.
+Rendering supports Western text, standard italic typed signatures, single-line
+fields, calendar dates without timezone and unrotated/uncropped positioned fields.
+Unsupported glyphs, invalid final geometry or missing required legacy adoption
+proof fail closed rather than generating a misleading completed document. Review
+all new signature/evidence migration columns in the selected provider history and
+regenerate the matching client. Actual recipient sequencing, completion-mail,
+final-artifact and independent conformance acceptance remain in the go-live
+checklist; source implementation alone does not clear those gates.
+
+Review queued signing notifications created before the outbox correlation migration.
+`SIGN_INVITE`, `REMINDER` and `SIGN_COMPLETED` rows without an envelope correlation
+are retained as `CANCELLED` with a precise review reason; they are not automatically
+sent. The operator must review envelope/recipient state and deliberately reissue
+eligible notifications through the supported workflow. Do not infer missing
+bindings or bulk requeue historical rows. Unrelated team/test mail keeps its existing
+behavior. SMTP acceptance remains separate from confirmed recipient delivery.
 
 ## 3. Kubernetes + Helm (enterprise)
 
@@ -85,7 +149,7 @@ helm install docurama deploy/helm/docurama \
   --set smtp.existingSecret=docurama-smtp
 ```
 
-Key values: `replicaCount: 1` (**SQLite mode must stay single-replica** — the DB lives on the RWO PVC; the app itself is stateless); `persistence` (20Gi PVC, `dbSubPath: db`, `storageSubPath: storage`); external Postgres via `extraEnv` → `DATABASE_URL` + `persistence.enabled: false` + S3 storage for multi-replica; `s3.*` block (endpoint/bucket/region/`forcePathStyle: true` for SeaweedFS/MinIO/R2, creds via `s3.existingSecret`); ingress className `nginx` with cert-manager annotation; probes hit `/api/health` (liveness 25 s/30 s, readiness 10 s/10 s); resources requests 250 m/512 Mi, memory limit 1 Gi; `skipDbPush: true` when you run migrations as a dedicated Job.
+Key values: `replicaCount: 1` (**SQLite mode must stay single-replica** — the DB lives on the RWO PVC; the app itself is stateless); `persistence` (20Gi PVC, `dbSubPath: db`, `storageSubPath: storage`); external Postgres via `extraEnv` → `DATABASE_URL` + `persistence.enabled: false` + S3 storage for multi-replica; `s3.*` block (endpoint/bucket/region/`forcePathStyle: true` for SeaweedFS/MinIO/R2, creds via `s3.existingSecret`); ingress className `nginx` with cert-manager annotation; probes hit `/api/health` (liveness 25 s/30 s, readiness 10 s/10 s); resources requests 250 m/512 Mi, memory limit 1 Gi; `skipDbPush: true` is the chart's legacy skip value; use it only after a dedicated reviewed migration Job succeeds. Use the same provider image, database and migration history for Job and app.
 
 ## 4. Requirements matrix
 
@@ -95,14 +159,14 @@ Key values: `replicaCount: 1` (**SQLite mode must stay single-replica** — the 
 | Object storage | Local POSIX dir (`STORAGE_DIR`) | Any S3-compatible: SeaweedFS (Apache-2.0), MinIO/Garage (AGPLv3), Ceph RGW, AWS S3, Cloudflare R2, B2 — see docs/STORAGE-OPTIONS.md |
 | Mail | None (outbox-only mode) | `SMTP_URL` (smtp:// STARTTLS or smtps:// implicit TLS) |
 | TLS | Terminated at proxy/ingress | Caddy, nginx, or ingress + cert-manager |
-| Runtime | Bun 1.2 (Dockerfile `oven/bun:1.2`) | Node 20+ for local tooling; `NEXT_TURBOPACK_EXPERIMENTAL_USE_SYSTEM_TLS_CERTS=1` if next/font TLS fails |
+| Runtime | Bun 1.4.2 (Dockerfile `oven/bun:1.4.2`; CI pin matches the safe runner) | Node 20+ for local tooling; `NEXT_TURBOPACK_EXPERIMENTAL_USE_SYSTEM_TLS_CERTS=1` if next/font TLS fails |
 
 ## 5. Environment variable reference
 
 | Variable | Purpose |
 |---|---|
 | `DATABASE_URL` | Prisma datasource. SQLite absolute `file:` path, or `postgresql://…` — **must match the provider the image was built with** (§2.1) |
-| `DOCURAMA_DB_PROVIDER` | Set from the `DB_PROVIDER` build arg; the entrypoint pushes `prisma/schema.$DOCURAMA_DB_PROVIDER.prisma`. Not something to override at runtime |
+| `DOCURAMA_DB_PROVIDER` | Set from the `DB_PROVIDER` build arg; the entrypoint migrates with `prisma/$DOCURAMA_DB_PROVIDER/schema.prisma`. Not something to override at runtime |
 | `STORAGE_DIR` | Local document tree (ignored once S3 is fully configured) |
 | `S3_ENDPOINT` | S3-compatible endpoint (unset = AWS default). All four core vars must be set together |
 | `S3_BUCKET` / `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | Bucket + credentials (partial config stays on local storage, loudly warned) |
@@ -137,3 +201,23 @@ Key values: `replicaCount: 1` (**SQLite mode must stay single-replica** — the 
 4. Verify the sealed envelope on the public portal (`https://verify.<root>`, envelope code).
 5. Stripe mode: webhook endpoint `https://app.<root>/api/billing/webhook` registered in the Stripe dashboard for `checkout.session.completed`, `invoice.paid`, `invoice.payment_failed`, `customer.subscription.deleted`; `STRIPE_WEBHOOK_SECRET` set; one test card payment completes.
 6. `/status` renders and reports green.
+
+## 8. Backup, recovery and rollback gate
+
+Before schema changes, capture the pinned prior image/revision, provider, migration
+status, protected configuration/key inventory, consistent database snapshot and
+matching document/blob recovery point. Keep runtime data outside the checkout.
+For SQLite use its backup API or stop all writers; copying a live WAL database
+file alone is insufficient. `scripts/backup.sh` is SQLite-specific: require a real
+`sqlite3` backup path, verify encryption output and archive integrity, and inspect
+its exit status. Its document archive is relative to `STORAGE_DIR`; extract into
+an empty isolated directory without stripping path components. PostgreSQL needs
+its own reviewed database backup/restore procedure; S3 objects need their own
+versioned snapshot and consistency checks.
+
+Prove recovery in isolation with the matching application version before promotion.
+Record RPO/RTO, document hashes, tenant counts and migration state. An image rollback
+does not undo SQL or data changes. Reuse an evolved database with the prior image
+only after compatibility has been rehearsed. Otherwise stop writes and execute the
+reviewed restore or forward repair, accounting for writes since the recovery point.
+Recheck health, authentication, tenant isolation, documents and evidence after recovery.

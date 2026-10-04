@@ -4,6 +4,11 @@ Master gate. Every box ticks before launch day; sign-off per section. Companion 
 
 ## 1. Product & content
 
+- [ ] Functional signing journey using synthetic data: authoritative document/template snapshot -> sender confirmation -> correct SIGNER/CC invitations -> earlier/later-recipient waiting behavior -> partial/all-signers completion -> completed-copy notification -> final document and separately authenticated completion/evidence record. Verify the final document visibly contains the intended adopted signer marks and locked terms; a status change, snapshot artifact or original-PDF download alone is insufficient. Historical template envelopes without a valid snapshot require reviewed reissue and must not be silently reconstructed.
+- [ ] Recipient/email semantics and sequence: send only the eligible first signer plus CC notice; remind eligible pending signer only; first-sign waiting receipt and next invitation once; final notices for signers/CC/sender; repeat/early attempts leave no duplicate effects. `Recipient.DELIVERED` is link-opened and `MailOutbox.SENT` is SMTP acknowledgment, neither proves inbox delivery. Verify multipart HTML/plain messaging, escaping, mailbox-bound access and trace associations with synthetic addresses.
+
+- [ ] Signing acceptance: independent completed-PDF signature, TSA response and certificate-chain validation. The reviewed evidence/digest path does not prove embedded PDF signing; PAdES/RFC 3161/Part 11 claims remain blocked until implementation and applicable validation.
+
 - [ ] Pricing ladder verified end-to-end: **Solo €12 / Starter €29 / Business €79 / Enterprise sales-led** (€349 catalogue anchor); term switch −5/−10/−20% math correct (e.g. Starter 12 mo = €278.40); no "most popular" badges. Negotiated Enterprise overrides are delivered: a WON lead converts to a tenant whose subscription carries `seatLimitOverride` / `envelopeLimitOverride` / `monthlyEurOverride`, and `src/lib/billing.ts` enforces those over the catalogue (admin op `lead.convert`; `e2e/lead-conversion.test.ts`). The pricing ladder itself still needs end-to-end verification.
 - [ ] Legal pages reviewed by counsel: `/privacy` (processing mapped to the real data model), `/terms` (billing terms incl. 35-day months + rollover cap), DPA route to legal@.
 - [ ] Cookie notice present (informational, no tracking).
@@ -13,11 +18,18 @@ Master gate. Every box ticks before launch day; sign-off per section. Companion 
 
 ## 2. Engineering gates
 
-- [x] `bunx tsc --noEmit` clean (0 errors — the build enforces types; gate also runs in CI, `.github/workflows/e2e.yml`).
-- [x] `eslint` clean.
-- [x] Production build green — CI `production-image` builds the image and boots it against an empty scratch database, asserting `/api/health` and a rendered `/blog`. (A local `bun run build` needs network for `next/font/google`; the containerised build is the authoritative gate.)
-- [x] Full E2E battery green via `bash e2e/run.sh`: the Playwright browser suites (`e2e/browser/`, 30 tests covering the 29 journeys that were Maestro flows) + `api`, `evidence`, `transparency`, `rekor`, `mcp`, `plans`, `webhooks`, `visual`, `mail`, `billing`, `sso`, `bot-guard`, `lead-conversion` suites (S3/SeaweedFS suite runs in CI or where a `weed` binary exists).
-- [x] PostgreSQL runtime gate green — CI `postgres` generates the PostgreSQL client, seeds, boots the app against PostgreSQL 16 and runs the HTTP + browser suites against it.
+- [ ] Session MFA acceptance: test enrolled users, enforced organizations, revocation and policy changes. SSO sessions currently carry no supported local MFA proof and cannot satisfy enforced MFA policy; validate the supported password-plus-local-factor path and keep enforced-policy SSO blocked until an explicit trusted proof flow is implemented. An IdP login alone does not establish this proof.
+
+Historical verification receipts remain in `QUALITY-VERIFICATION-20260920.md`,
+`IMPROVEMENT-PLAN.md` and `worklog.md`. Re-run these gates for the pinned candidate
+and record revision, command, provider, outcome and skips. A described CI job is
+not evidence that it executed successfully on this revision.
+
+- [ ] `bunx tsc --noEmit` clean (0 errors — the build enforces types; gate also runs in CI, `.github/workflows/e2e.yml`).
+- [ ] `eslint` clean.
+- [ ] Production build green — CI `production-image` builds the image and boots it against an empty scratch database, asserting `/api/health` and a rendered `/blog`. (A local `bun run build` needs network for `next/font/google`; the containerised build is the authoritative gate.)
+- [ ] Full E2E battery green via `bash e2e/run.sh`: the Playwright browser suites (`e2e/browser/`, 30 tests covering the 29 journeys that were Maestro flows) + `api`, `evidence`, `transparency`, `rekor`, `mcp`, `plans`, `webhooks`, `visual`, `mail`, `billing`, `sso`, `bot-guard`, `lead-conversion` suites (configured required SeaweedFS currently blocks before warm/seed/probe pending Linux ownership/cleanup repair and integration evidence; an explicit optional skip cannot satisfy the required S3 gate).
+- [ ] PostgreSQL runtime gate green — CI `postgres` generates the PostgreSQL client, seeds, boots the app against PostgreSQL 16 and runs the HTTP + browser suites against it.
 
 > Section 2 is the only section engineering can sign off alone. Sections 3–7
 > need credentials, DNS, counsel review and staffed inboxes.
@@ -60,7 +72,7 @@ Smoke test, in order, on production:
 1. Signup → verification email received → onboarding completes.
 2. First envelope: upload/send → signer link opens (public signer portal) → sign → **seal**.
 3. Verify: public portal (`verify.<root>`) shows **VERIFIED** + SHA-256 digest + signers.
-4. Evidence pack export opens offline and validates.
+4. Evidence pack export opens offline and validates its digest/attestation chain. Independently validate the completed PDF, TSA response and certificate chain before any PAdES/RFC 3161 assertion; metadata labels alone are insufficient.
 5. `/status` green; `/api/health` 200.
 
 Support inboxes staffed: **support@, sales@, billing@, privacy@, security@, abuse@, postmaster@** (plus notifications@ sender monitored for bounces).

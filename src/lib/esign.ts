@@ -1,3 +1,4 @@
+import { canonicalJson } from "@/lib/canonical-json";
 /**
  * eSign domain helpers: document download filename formats, TSA presets and
  * 21 CFR Part 11 / eIDAS reference copy shared by the settings UI and API.
@@ -78,10 +79,8 @@ export const TSA_PRESETS: { key: string; name: string; url: string; note: string
 // ── 21 CFR Part 11 reference copy ────────────────────────────────────────────
 
 export const DEFAULT_CONSENT_TEXT =
-  "By electronically signing this document I agree that my electronic signature is the legally binding equivalent " +
-  "of my handwritten signature. I understand that this signature is uniquely linked to me, is under my sole " +
-  "control, and that all signature and audit records are retained by Docurama SAS in compliance with 21 CFR Part 11 " +
-  "and eIDAS.";
+  "By electronically signing this document, I confirm that I have reviewed it and consent to sign electronically. " +
+  "My typed name and signing activity will be recorded with the document's completion evidence.";
 
 export const SIGNATURE_MANIFESTATION_FIELDS = [
   { field: "Printed name", example: "Alexandra Fischer", regulation: "21 CFR §11.50(a)(1)" },
@@ -107,35 +106,40 @@ export type SealInput = {
   pages: number;
   createdAt: Date;
   documentSha256?: string | null;
-  recipients: { email: string; role: string; status: string; order: number; signedAt: Date | null }[];
+  contractSnapshot?: string | null;
+  fields?: string | null;
+  recipients: { email: string; role: string; status: string; order: number; signedAt: Date | null; signatureData?: string | null }[];
   events: { action: string; actor: string; at: Date }[];
 };
 
 /**
- * Deterministic digest over the complete envelope record at sealing time.
- *
- * When the envelope carries a real uploaded document, that file's SHA-256
- * (computed at upload, stored on Envelope.sha256) is already the integrity
- * anchor and is kept. Template-based envelopes have no file, so the seal is
- * computed over a canonical serialization of everything that matters
- * legally: the document identity, every recipient and their signing state,
- * and the full event ledger. Any later mutation of any of those fields
- * changes the digest, which is exactly the property the public verify
- * portal relies on.
+ * Keep an uploaded document's original checksum unchanged. This is a file
+ * integrity anchor, not a signature over the signer ledger or placed hints.
+ * Without an upload, bind frozen contract terms, locations, recipient state
+ * and durable adoption values. The export manifest separately authenticates
+ * its artifacts; this helper does not implement PAdES or trusted timestamps.
  */
 export function computeEnvelopeDigest(env: SealInput): string {
-  if (env.documentSha256) return env.documentSha256;
-  const lines: string[] = [
-    `doc:${env.publicCode}`,
-    `title:${env.title}`,
-    `pages:${env.pages}`,
-    `created:${env.createdAt.toISOString()}`,
-  ];
-  for (const r of [...env.recipients].sort((a, b) => a.order - b.order)) {
-    lines.push(`rcpt:${r.order}:${r.email}:${r.role}:${r.status}:${r.signedAt?.toISOString() ?? "-"}`);
-  }
-  for (const e of [...env.events].sort((a, b) => a.at.getTime() - b.at.getTime())) {
-    lines.push(`evt:${e.at.toISOString()}:${e.action}:${e.actor}`);
-  }
-  return createHash("sha256").update(lines.join("\n")).digest("hex");
+  return env.documentSha256 || computeEnvelopeEvidenceDigest(env);
+}
+
+/** Separate proof binding preserves the uploaded file checksum contract. */
+export function computeEnvelopeEvidenceDigest(env: SealInput): string {
+  const parsed = (raw: string | null | undefined): unknown => {
+    if (!raw) return null;
+    try { return JSON.parse(raw); } catch { throw new Error("Invalid evidence JSON"); }
+  };
+  // The append-only event ledger is authenticated separately by the export
+  // manifest. Excluding it keeps this immutable contract/adoption seal stable
+  // when later seal, delivery and export events are recorded.
+  const payload = {
+    version: 1, code: env.publicCode, title: env.title, pages: env.pages,
+    createdAt: env.createdAt.toISOString(), originalSha256: env.documentSha256 ?? null,
+    contract: parsed(env.contractSnapshot), fields: parsed(env.fields),
+    recipients: env.recipients.filter(r => r.role === "SIGNER").sort((a,b) => a.order-b.order).map(r => ({
+      order: r.order, email: r.email, role: r.role, status: r.status,
+      signedAt: r.signedAt?.toISOString() ?? null, adoption: parsed(r.signatureData),
+    })),
+  };
+  return createHash("sha256").update(canonicalJson(payload)).digest("hex");
 }

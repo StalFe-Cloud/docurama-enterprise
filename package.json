@@ -13,6 +13,10 @@
     "db:migrate": "prisma migrate dev",
     "db:reset": "prisma migrate reset",
     "test:e2e": "bash e2e/run.sh",
+    "test:e2e:isolation": "node e2e/isolation.test.mjs",
+    "test:e2e:isolation:migrations": "node e2e/isolation-migrations.test.mjs",
+    "test:e2e:isolation:processes": "node e2e/isolation-processes.test.mjs",
+    "test:e2e:isolation:s3": "node e2e/seaweed-isolation.test.mjs",
     "test:e2e:seed": "bun e2e/seed.ts"
   },
   "dependencies": {
@@ -71,6 +75,7 @@
     "next-intl": "^4.3.4",
     "next-themes": "^0.4.6",
     "nodemailer": "^10.0.10",
+    "pdf-lib": "1.17.1",
     "pdfjs-dist": "^6.3.289",
     "prisma": "^6.11.1",
     "qrcode": "^1.5.4",

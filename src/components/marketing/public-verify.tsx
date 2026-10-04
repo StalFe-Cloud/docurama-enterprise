@@ -130,9 +130,9 @@ function VerifyInner() {
         </Card>
 
         <p className="mt-6 text-xs leading-relaxed text-muted-foreground">
-          Verification checks the cryptographic evidence recorded when the document was sealed:
-          the SHA-256 digest, seal timestamp and signer roster. The document file itself is never
-          exposed. Docurama SAS - 1 Rue Marguerin, 75014 Paris, France.
+          This lookup displays the recorded checksum, server completion time and signer roster.
+          Use the evidence pack to validate its signed manifest and exported artifacts.
+          The document file itself is never exposed. Docurama SAS - 1 Rue Marguerin, 75014 Paris, France.
         </p>
       </main>
     </div>
@@ -179,7 +179,7 @@ function ResultPanel({ result }: { result: VerifyResult }) {
           <div><dt className="text-xs text-muted-foreground">Instance</dt><dd className="font-medium">{att.instance.label}</dd></div>
           <div><dt className="text-xs text-muted-foreground">Instance key first seen</dt><dd className="font-medium">{new Date(att.instance.firstSeenAt).toLocaleDateString("en-GB")}</dd></div>
           <div><dt className="text-xs text-muted-foreground">Sealed at</dt><dd className="font-medium">{new Date(att.sealedAt).toLocaleString("en-GB")}</dd></div>
-          <div><dt className="text-xs text-muted-foreground">Conformance</dt><dd className="font-medium">{att.conformance ?? "-"}</dd></div>
+          <div><dt className="text-xs text-muted-foreground">Conformance</dt><dd className="font-medium">{att.conformance ?? "Not asserted"}</dd></div>
           <div><dt className="text-xs text-muted-foreground">Signers on record</dt><dd className="font-medium">{att.signerCount}</dd></div>
           <div><dt className="text-xs text-muted-foreground">Attestations from this instance</dt><dd className="font-medium">{att.instance.attestationCount}</dd></div>
           {att.transparency?.chainSeq != null && (
@@ -220,7 +220,7 @@ function ResultPanel({ result }: { result: VerifyResult }) {
   return (
     <div className="mt-5 space-y-4 rounded-lg border border-primary/40 bg-primary-soft/40 p-4">
       <p className="flex items-center gap-2 text-sm font-semibold text-primary-deep">
-        <BadgeCheck className="h-4 w-4" aria-hidden /> Verified - cryptographic evidence found
+        <BadgeCheck className="h-4 w-4" aria-hidden /> Completion record found
       </p>
       {env.verifiedSenderDomain && (
         <p className="flex items-center gap-2 text-xs font-medium text-primary-deep">
@@ -231,7 +231,7 @@ function ResultPanel({ result }: { result: VerifyResult }) {
         <div><dt className="text-xs text-muted-foreground">Document</dt><dd className="font-medium">{env.title}</dd></div>
         <div><dt className="text-xs text-muted-foreground">Organization</dt><dd className="font-medium">{env.tenantName}</dd></div>
         <div><dt className="text-xs text-muted-foreground">Sealed at</dt><dd className="font-medium">{new Date(env.sealedAt).toLocaleString("en-GB")}</dd></div>
-        <div><dt className="text-xs text-muted-foreground">Conformance</dt><dd className="font-medium">{env.conformance ?? "-"}</dd></div>
+        <div><dt className="text-xs text-muted-foreground">Conformance</dt><dd className="font-medium">{env.conformance ?? "Not asserted"}</dd></div>
         <div className="sm:col-span-2">
           <dt className="text-xs text-muted-foreground">SHA-256 digest</dt>
           <dd className="break-all font-mono text-xs">{env.sha256}</dd>

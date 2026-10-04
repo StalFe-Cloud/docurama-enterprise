@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { browserMutationAllowed } from "./lib/request-origin";
 
 /**
  * Host-aware routing for the deployment's sub-domains.
@@ -45,6 +46,9 @@ function subdomain(host: string): string {
 }
 
 export function middleware(req: NextRequest) {
+  if (!browserMutationAllowed(req)) {
+    return NextResponse.json({ error: "Cross-origin browser mutations are not allowed" }, { status: 403 });
+  }
   const { pathname, search } = req.nextUrl;
 
   // Vanity / legacy auth redirects so /sign-in and /sign-up never 404

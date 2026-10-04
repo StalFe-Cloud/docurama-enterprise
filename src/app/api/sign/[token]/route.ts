@@ -1,11 +1,18 @@
+import { buildSigningEmail } from "@/lib/signing-email";
+import { processOutbox } from "@/lib/mail";
+import { requestApplicationOrigin } from "@/lib/request-origin";
+import { parseEnvelopeFields, EnvelopeFieldsError } from "@/lib/envelope-fields";
+import { captureSignatureData, SignatureDataError } from "@/lib/signature-data";
+import { readContractSnapshot, ContractSnapshotError } from "@/lib/contract-snapshot";
 import { NextRequest } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { jsonError, jsonOk } from "@/lib/serializers";
-import { computeEnvelopeDigest } from "@/lib/esign";
+import { computeEnvelopeDigest, computeEnvelopeEvidenceDigest } from "@/lib/esign";
 import { pushAttestationForEnvelope } from "@/lib/attestation";
 import { appendSealCommitment } from "@/lib/transparency";
 import { queueEnvelopeEvent, retryFailedDeliveries } from "@/lib/webhooks";
 import { serializableTransaction } from "@/lib/transaction";
+import { signerReadRestriction, signerAuthenticationRestriction } from "@/lib/signing-policy";
 
 /** Signing tokens authenticate recipients; every state decision is re-read in
  * the same serializable transaction as its ledger entry and durable outbox.
@@ -19,20 +26,23 @@ async function loadRecipient(tx: Prisma.TransactionClient, token: string) {
     where: { accessToken: token },
     include: { envelope: { include: {
       recipients: true,
-      createdBy: { select: { email: true } },
-      tenant: { select: { status: true } },
+      createdBy: { select: { email: true, firstName: true, lastName: true } },
+      tenant: { select: { status: true, esignPrefs: { select: { requireReauth: true, part11Mode: true } } } },
     } } },
   });
   if (!recipient) throw jsonError("This signing link is not valid. Check the link in your invitation email.", 404);
-  if (recipient.envelope.tenant.status === "SUSPENDED") throw jsonError("This document is not available for signing.", 409);
+  const restriction = signerReadRestriction(recipient.envelope.tenant);
+  if (restriction) throw jsonError(restriction, 409);
   if (["VOIDED", "DECLINED", "EXPIRED"].includes(recipient.envelope.status)) {
     throw jsonError(`This document is no longer available for signing (status: ${recipient.envelope.status.toLowerCase()}).`, 409);
   }
   if (recipient.role !== "SIGNER") throw jsonError("You receive a copy of this document. Only signers can sign it.", 409);
+  readContractSnapshot(recipient.envelope);
   return recipient;
 }
 
 function wakeWebhooks() {
+  void processOutbox(20).catch((error) => console.warn("[sign] mail wake-up failed", error));
   // The durable rows, not this best-effort wake-up, guarantee eventual work.
   void retryFailedDeliveries(20).catch((error) => console.warn("[sign] webhook wake-up failed", error));
 }
@@ -99,14 +109,18 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     const updated = await serializableTransaction(async (tx) => {
       const recipient = await loadRecipient(tx, token);
       const envelope = recipient.envelope;
+      const restriction = signerAuthenticationRestriction(envelope.tenant);
+      if (restriction) throw jsonError(restriction, 409);
+      const fields = parseEnvelopeFields(envelope.contractSnapshot ? JSON.stringify(readContractSnapshot(envelope)!.signatureLocations) : envelope.fields, { pageCount: envelope.pages, recipients: envelope.recipients });
       if (recipient.status === "SIGNED") throw jsonError("You have already signed this document.", 409);
+      const adoption = captureSignatureData({ ...body, name, font }, fields, recipient.email, actionAt);
       if (!["SENT", "PARTIALLY_SIGNED"].includes(envelope.status)) throw jsonError("This document can no longer be signed.", 409);
       const signers = envelope.recipients.filter((item) => item.role === "SIGNER").sort((a, b) => a.order - b.order);
       const ahead = signers.find((item) => item.status === "PENDING" || item.status === "DELIVERED");
       if (ahead && ahead.id !== recipient.id) {
         throw jsonError(`${ahead.name} signs before you. You will be able to sign once they have completed.`, 409);
       }
-      await tx.recipient.update({ where: { id: recipient.id }, data: { status: "SIGNED", signedAt: actionAt } });
+      await tx.recipient.update({ where: { id: recipient.id }, data: { status: "SIGNED", signedAt: actionAt, signatureData: JSON.stringify(adoption) } });
       await tx.envelopeEvent.create({ data: {
         envelopeId: envelope.id, actor: recipient.name, action: "SIGNED", at: actionAt,
         detail: `Signed by ${name} <${recipient.email}> via signing link (${font} signature)`,
@@ -117,18 +131,21 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       let saved;
       if (sealed) {
         const events = await tx.envelopeEvent.findMany({ where: { envelopeId: envelope.id } });
-        const digest = computeEnvelopeDigest({
+        const sealInput = {
           id: envelope.id, publicCode: envelope.publicCode, title: envelope.title, pages: envelope.pages,
-          createdAt: envelope.createdAt, documentSha256: envelope.sha256, recipients: all, events,
-        });
+          createdAt: envelope.createdAt, documentSha256: envelope.documentId ? envelope.sha256 : null, contractSnapshot: envelope.contractSnapshot, fields: envelope.fields, recipients: all, events,
+        };
+        const digest = computeEnvelopeDigest(sealInput);
+        const evidenceDigest = computeEnvelopeEvidenceDigest(sealInput);
         const senderDomain = envelope.createdBy.email.split("@")[1]?.toLowerCase();
         const verifiedDomain = senderDomain ? await tx.domain.findFirst({
           where: { tenantId: envelope.tenantId, domain: senderDomain, purpose: "SENDING", status: "VERIFIED" },
           select: { domain: true },
         }) : null;
         saved = await tx.envelope.update({ where: { id: envelope.id }, data: {
-          status: "COMPLETED", completedAt: actionAt, sealedAt: actionAt, sha256: digest,
-          conformanceLevel: envelope.conformanceLevel ?? "B-T", verifiedSenderDomain: verifiedDomain?.domain ?? null,
+          status: "COMPLETED", completedAt: actionAt, sealedAt: actionAt, sha256: digest, evidenceSha256: evidenceDigest,
+          // This flow records an email-link signature; it performs no PAdES signing or TSA exchange.
+          conformanceLevel: null, verifiedSenderDomain: verifiedDomain?.domain ?? null,
         } });
         await tx.envelopeEvent.create({ data: {
           envelopeId: envelope.id, actor: "Docurama", action: "SEALED", at: actionAt,
@@ -136,6 +153,32 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         } });
       } else {
         saved = await tx.envelope.update({ where: { id: envelope.id }, data: { status: "PARTIALLY_SIGNED" } });
+      }
+      const origin = requestApplicationOrigin(req);
+      const senderName = [envelope.createdBy.firstName, envelope.createdBy.lastName].filter(Boolean).join(" ") || envelope.createdBy.email;
+      const notification = (item: typeof recipient, kind: "invite" | "signed" | "completed") => ({
+        ...buildSigningEmail({ kind, locale: item.locale, title: envelope.title, senderName,
+          recipientName: item.name, message: kind === "invite" ? envelope.message : null,
+          linkUrl: `${origin}/sign/${item.accessToken}` }),
+        envelopeId: envelope.id, recipientId: item.id, toEmail: item.email, createdAt: actionAt,
+      });
+      if (sealed) {
+        // These durable rows share the signing transaction. A replay of a
+        // signed token returns before this block and cannot enqueue twice.
+        const completed = envelope.recipients.filter(item => item.role === "SIGNER" || item.role === "CC");
+        await tx.mailOutbox.createMany({ data: completed.map(item => notification(item as typeof recipient, "completed")) });
+        if (!completed.some(item => item.email.toLowerCase() === envelope.createdBy.email.toLowerCase())) {
+          await tx.mailOutbox.create({ data: {
+            ...buildSigningEmail({ kind: "completed", title: envelope.title, senderName,
+              recipientName: senderName, linkUrl: `${origin}/user` }),
+            envelopeId: envelope.id, toEmail: envelope.createdBy.email, createdAt: actionAt,
+          } });
+        }
+      } else {
+        const next = all.filter(item => ["PENDING", "DELIVERED"].includes(item.status)).sort((a, b) => a.order - b.order)[0];
+        const queued = [notification(recipient, "signed")];
+        if (next) queued.push(notification(next as typeof recipient, "invite"));
+        await tx.mailOutbox.createMany({ data: queued });
       }
       await queueEnvelopeEvent(tx, envelope.tenantId, "envelope.signed", {
         code: envelope.publicCode, title: envelope.title, status: saved.status,
@@ -156,7 +199,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       try {
         await appendSealCommitment({ tenantId: envelope.tenantId, envelopeId: envelope.id, commitment: {
           code: envelope.publicCode, sha256: envelope.sha256 ?? "", sealedAt: (envelope.sealedAt ?? actionAt).toISOString(),
-          conformance: envelope.conformanceLevel ?? "B-T", pages: envelope.pages, signerCount: updated.signerCount,
+          conformance: envelope.conformanceLevel, pages: envelope.pages, signerCount: updated.signerCount,
         } });
       } catch (error) {
         console.warn("[sign] transparency append failed:", error);
@@ -168,6 +211,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       sealed: updated.sealed, code: updated.envelope.publicCode, signedAt: actionAt.toISOString() });
   } catch (error) {
     if (error instanceof Response) return error;
+    if (error instanceof SignatureDataError) return jsonError(error.message, 400);
+    if (error instanceof EnvelopeFieldsError) return jsonError(error.message, 409);
+    if (error instanceof ContractSnapshotError) return jsonError(error.message, 409);
     console.error("[sign POST]", error);
     return jsonError("Signing failed. Please try again.", 500);
   }

@@ -1,5 +1,10 @@
 # Improvement Plan — Cycle 2026-09: Maestro E2E & Release-Quality Baseline
 
+> Historical implementation plan and receipts. Maestro entries below describe past work;
+> current browser coverage uses Playwright under `e2e/browser/`. Use `e2e/README.md`
+> and fresh revision-specific evidence for current acceptance. Historical results
+> remain unchanged and do not certify a later release.
+
 > Branch: `e2e/maestro-suite` (forked from `quality` @ `298ce1d`)
 > Owner: Engineering · Status: **In execution**
 

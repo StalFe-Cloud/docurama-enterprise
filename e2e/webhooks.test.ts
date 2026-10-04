@@ -208,6 +208,7 @@ describe("full path: envelope send over HTTP fires the webhook", () => {
   test("workspace send → signed envelope.sent at the receiver", async () => {
     clearReceived();
     const TITLE = "Webhook full-path probe";
+    const template = await db.template.create({ data: { tenantId, name: "Synthetic webhook agreement", publicSlug: `webhook-template-${crypto.randomUUID()}`, bodyMarkdown: "Synthetic webhook regression terms.", pages: 1 } });
 
     const login = await fetch(`${BASE}/api/auth/login`, {
       method: "POST",
@@ -225,6 +226,7 @@ describe("full path: envelope send over HTTP fires the webhook", () => {
           op: "send",
           data: {
             title: TITLE,
+            templateId: template.id,
             recipients: [{ name: "Webhook Probe", email: "webhook-probe@docurama.eu", role: "SIGNER" }],
           },
         }),
@@ -253,6 +255,7 @@ describe("full path: envelope send over HTTP fires the webhook", () => {
         await db.envelope.delete({ where: { id: probe.id } });
       }
       await db.mailOutbox.deleteMany({ where: { toEmail: "webhook-probe@docurama.eu" } });
+      await db.template.delete({ where: { id: template.id } });
     }
   });
 });

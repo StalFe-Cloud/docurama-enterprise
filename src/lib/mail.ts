@@ -1,6 +1,8 @@
 import { createTransport } from "nodemailer";
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db";
+import { buildFinalDocument } from "@/lib/final-document";
+import { signerReadRestriction } from "@/lib/signing-policy";
 
 export const MAX_MAIL_ATTEMPTS = 5;
 const MAIL_LEASE_MS = 90_000;
@@ -21,7 +23,8 @@ export function smtpMode(): SmtpMode {
     return { configured: false };
   }
 }
-export type OutboxMessage = { id: string; toEmail: string; fromEmail: string; subject: string; bodyText: string };
+export type OutboxMessage = { id: string; toEmail: string; fromEmail: string; subject: string; bodyText: string; bodyHtml?: string | null;
+  attachments?: Array<{ filename: string; content: Buffer; contentType: "application/pdf" }> };
 
 /** A dedicated transport lets a deadline close only this message's connection. */
 export async function sendViaSmtp(mode: Extract<SmtpMode, { configured: true }>, msg: OutboxMessage): Promise<void> {
@@ -36,7 +39,8 @@ export async function sendViaSmtp(mode: Extract<SmtpMode, { configured: true }>,
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     await Promise.race([
-      transporter.sendMail({ from: msg.fromEmail, to: msg.toEmail, subject: msg.subject, text: msg.bodyText,
+      transporter.sendMail({ from: msg.fromEmail, to: msg.toEmail, subject: msg.subject, text: msg.bodyText, html: msg.bodyHtml || undefined,
+        attachments: msg.attachments,
         messageId: `<${msg.id}@outbox.docurama>` }),
       new Promise<never>((_resolve, reject) => {
         timer = setTimeout(() => { transporter.close(); reject(new Error("SMTP delivery deadline exceeded")); }, SEND_DEADLINE_MS);
@@ -48,7 +52,7 @@ export async function sendViaSmtp(mode: Extract<SmtpMode, { configured: true }>,
   }
 }
 
-export type ProcessOutboxResult = { mode: "smtp" | "outbox-only"; processed: number; sent: number; failed: number; deferred: number };
+export type ProcessOutboxResult = { mode: "smtp" | "outbox-only"; processed: number; sent: number; failed: number; deferred: number; cancelled?: number };
 /** At least once. A crash after SMTP accepts but before acknowledgement may retry. */
 export async function processOutbox(limit = 20): Promise<ProcessOutboxResult> {
   const mode = smtpMode();
@@ -77,7 +81,55 @@ export async function processOutbox(limit = 20): Promise<ProcessOutboxResult> {
     const attempt = row.attempts + 1;
     let lastError: string | null = null;
     try {
-      await sendViaSmtp(mode, row);
+      if (["SIGN_INVITE", "REMINDER", "SIGN_COMPLETED"].includes(row.template) && !row.envelopeId) {
+        const cancelled = await db.mailOutbox.updateMany({ where: { id: row.id, claimToken, status: "QUEUED" },
+          data: { status: "CANCELLED", lastError: "Signing notification is missing envelope correlation; review before requeue",
+            nextAttemptAt: null, claimToken: null, claimUntil: null } });
+        if (cancelled.count === 1) result.cancelled = (result.cancelled ?? 0) + 1;
+        continue;
+      }
+      if (row.envelopeId && ["SIGN_INVITE", "REMINDER"].includes(row.template)) {
+        const envelope = await db.envelope.findUnique({ where: { id: row.envelopeId },
+          select: { status: true, tenant: { select: { status: true } }, recipients: { select: { id: true, role: true, status: true, order: true } } } });
+        const firstPending = envelope?.recipients
+          .filter(recipient => recipient.role === "SIGNER" && ["PENDING", "DELIVERED"].includes(recipient.status))
+          .sort((a, b) => a.order - b.order || a.id.localeCompare(b.id))[0];
+        if (!envelope || signerReadRestriction(envelope.tenant) || !["SENT", "PARTIALLY_SIGNED"].includes(envelope.status)
+          || !row.recipientId || firstPending?.id !== row.recipientId) {
+          const cancelled = await db.mailOutbox.updateMany({ where: { id: row.id, claimToken, status: "QUEUED" },
+            data: { status: "CANCELLED", lastError: "Signing invitation superseded by envelope state",
+              nextAttemptAt: null, claimToken: null, claimUntil: null } });
+          if (cancelled.count === 1) result.cancelled = (result.cancelled ?? 0) + 1;
+          continue;
+        }
+      }
+      // This check suppresses stale queued invitations. State may still change
+      // after the check while SMTP is accepting the message; it is not atomic.
+      let message: OutboxMessage = row;
+      if (row.envelopeId && row.template === "SIGN_COMPLETED") {
+        const envelope = await db.envelope.findUnique({ where: { id: row.envelopeId }, include: {
+          document: true, recipients: { orderBy: { order: "asc" } }, events: { orderBy: { at: "asc" } },
+          createdBy: { select: { email: true } }, tenant: { select: { status: true } },
+        } });
+        if (!envelope || envelope.status !== "COMPLETED" || signerReadRestriction(envelope.tenant)) {
+          throw new Error("Completed mail requires a completed envelope in an available workspace");
+        }
+        const recipient = row.recipientId ? envelope.recipients.find(item => item.id === row.recipientId) : null;
+        const destination = row.recipientId
+          ? recipient && ["SIGNER", "CC"].includes(recipient.role) ? recipient.email : null
+          : envelope.createdBy.email;
+        if (!destination || destination !== row.toEmail) throw new Error("Completed mail recipient binding is invalid");
+        if (envelope.document && envelope.document.tenantId !== envelope.tenantId) {
+          throw new Error("Completed mail document workspace binding is invalid");
+        }
+        const final = await buildFinalDocument(envelope);
+        const code = envelope.publicCode.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 100) || "document";
+        message = { ...row, attachments: [
+          { filename: code + "-completed.pdf", content: final.bytes, contentType: "application/pdf" },
+          { filename: code + "-completion-record.pdf", content: final.recordBytes, contentType: "application/pdf" },
+        ] };
+      }
+      await sendViaSmtp(mode, message);
     } catch (error) {
       lastError = (error instanceof Error ? error.message : "SMTP delivery failed").slice(0, 500);
     }

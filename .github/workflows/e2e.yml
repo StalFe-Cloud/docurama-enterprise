@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.2.22"
+          bun-version: "1.4.2"
       - run: bun install --frozen-lockfile
       - run: bunx prisma generate
       - run: bun run lint
@@ -65,7 +65,7 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.2.22"
+          bun-version: "1.4.2"
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -73,13 +73,23 @@ jobs:
       - name: Generate Prisma client
         run: bunx prisma generate
 
-      - name: Prepare environment
+      - name: Verify isolated lifecycle and security boundaries
         run: |
-          cp .env.example .env
-          # Absolute DATABASE_URL so the app and seed agree on the file.
-          sed -i "s|file:./db/custom.db|file:$PWD/db/custom.db|" .env
-          mkdir -p db && touch db/custom.db
-          bunx prisma db push --accept-data-loss
+          node e2e/isolation.test.mjs
+          node e2e/isolation-migrations.test.mjs
+          node e2e/isolation-processes.test.mjs
+          node e2e/isolation-lifecycle.test.mjs
+          node e2e/seaweed-isolation.test.mjs
+          for spec in e2e/request-origin.test.ts scripts/mfa-regression.test.ts e2e/admin-response-security.test.ts e2e/admin-route-security.test.ts e2e/signer-policy.test.ts e2e/evidence-assurance.test.ts e2e/contract-snapshot.test.ts e2e/final-document.test.ts e2e/signing-email.test.ts e2e/signing-email-smtp.test.ts e2e/mail-signing-gate.test.ts e2e/mail-completion-attachments.test.ts scripts/signing-workflow-regression.test.ts; do
+            bun --no-env-file test "$spec"
+          done
+          bun --no-env-file scripts/mfa-sqlite-regression.ts
+
+      - name: Verify core signature-hint field validation
+        if: github.event.repository.name == 'docurama'
+        run: |
+          bun --no-env-file test e2e/envelope-fields.test.ts
+          bun --no-env-file test e2e/envelope-field-routes.test.ts
 
       - name: Install Chrome + no-sandbox wrapper
         run: |
@@ -141,7 +151,7 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.2.22"
+          bun-version: "1.4.2"
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -154,8 +164,8 @@ jobs:
         env:
           DATABASE_URL: ${{ env.PGURL }}
 
-      - name: Apply schema to PostgreSQL
-        run: bunx prisma db push --schema prisma/schema.postgresql.prisma --skip-generate
+      - name: Apply reviewed migrations to the disposable PostgreSQL database
+        run: node node_modules/prisma/build/index.js migrate deploy --schema prisma/postgresql/schema.prisma
         env:
           DATABASE_URL: ${{ env.PGURL }}
 
@@ -176,34 +186,10 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           echo "CHROME_BIN=$CHROME_BIN" >> "$GITHUB_ENV"
 
-      - name: Seed fixtures into PostgreSQL
-        run: bun e2e/seed.ts
+      - name: Run owned PostgreSQL HTTP and browser lifecycle
+        run: node e2e/run-postgres-isolated.mjs
         env:
           DATABASE_URL: ${{ env.PGURL }}
-
-      - name: Boot the app against PostgreSQL
-        run: |
-          cp .env.example .env
-          REKOR_WITNESS=off NEXT_PUBLIC_DEMO_MODE=true DOCURAMA_WORKER=off DOCURAMA_ALLOW_PRIVATE_WEBHOOKS=1             DATABASE_URL="$PGURL" bun run dev > /tmp/pg-dev.log 2>&1 &
-          for _ in $(seq 1 60); do
-            curl -sf -o /dev/null http://127.0.0.1:3000/login && break
-            sleep 2
-          done
-          curl -sf -o /dev/null http://127.0.0.1:3000/login || { cat /tmp/pg-dev.log; exit 1; }
-
-      - name: HTTP + browser suites against PostgreSQL
-        run: |
-          # Warm the routes first: in dev every route compiles on first hit.
-          for r in / /login /welcome /marketing /blog /docs /developers /status /verify /enterprise /modeles-de-contrats; do
-            curl -s -o /dev/null --max-time 180 "http://127.0.0.1:3000$r" || true
-          done
-          bun test e2e/api.test.ts e2e/evidence.test.ts e2e/transparency.test.ts                    e2e/rekor.test.ts e2e/plans.test.ts e2e/webhooks.test.ts
-          bun test e2e/mcp.test.ts
-          bun test e2e/browser/
-        env:
-          DATABASE_URL: ${{ env.PGURL }}
+          E2E_DATABASE_URL: ${{ env.PGURL }}
+          E2E_REMOTE_DISPOSABLE: "1"
           E2E_BASE_URL: http://127.0.0.1:3000
-
-      - name: Dev server log
-        if: failure()
-        run: cat /tmp/pg-dev.log || true

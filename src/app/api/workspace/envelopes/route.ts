@@ -1,3 +1,7 @@
+import { buildSigningEmail } from "@/lib/signing-email";
+import { requestApplicationOrigin } from "@/lib/request-origin";
+import { validateEnvelopeFields, EnvelopeFieldsError } from "@/lib/envelope-fields";
+import { freezeTemplateContract, ContractSnapshotError } from "@/lib/contract-snapshot";
 import { NextRequest } from "next/server";
 import { randomBytes } from "node:crypto";
 import type { Prisma } from "@prisma/client";
@@ -45,7 +49,7 @@ export async function POST(req: NextRequest) {
     const actor = `${me.firstName} ${me.lastName}`;
     const now = new Date();
     const ip = requestClientIp(req);
-    const origin = req.nextUrl.origin;
+    const origin = requestApplicationOrigin(req);
 
     if (body.op === "send") {
       const title = String(data.title ?? "").trim();
@@ -61,11 +65,14 @@ export async function POST(req: NextRequest) {
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254 || !name || name.length > 200) {
           throw jsonError("Every recipient must have a valid email and name");
         }
-        return { name, email, role: item.role === "CC" ? "CC" : "SIGNER" };
+        if (item.role !== undefined && !["CC", "SIGNER"].includes(String(item.role))) throw jsonError("Recipient role must be SIGNER or CC");
+        const locale = typeof item.locale === "string" ? (/^fr(?:-|$)/i.test(item.locale) ? "fr" : "en") : null;
+        return { name, email, role: item.role === "CC" ? "CC" : "SIGNER", locale };
       });
       if (!recipients.some((item) => item.role === "SIGNER")) return jsonError("At least one signer is required");
       const documentId = typeof data.documentId === "string" && data.documentId ? data.documentId : undefined;
       const templateId = typeof data.templateId === "string" && data.templateId ? data.templateId : undefined;
+      if (documentId && templateId) return jsonError("Choose one contract source: an uploaded document or a template", 400);
       // Paid-term catch-up is separate; capacity is decided again in the transaction.
       await currentAllowance(me.tenantId, now);
       const envelope = await serializableTransaction(async (tx) => {
@@ -76,34 +83,42 @@ export async function POST(req: NextRequest) {
           where: { id: templateId, OR: [{ tenantId }, { isBuiltIn: true }] },
         }) : null;
         if (templateId && !template) throw jsonError("Template not found in this workspace", 404);
+        const fields = validateEnvelopeFields(data.fields, { pageCount: document?.pageCount ?? template?.pages ?? 1, recipients });
+        const fieldsJson = fields.length ? JSON.stringify(fields) : null;
+        if (!document && !template) throw jsonError("Attach an uploaded document or a nonempty template contract", 400);
+        const contractSnapshot = template ? freezeTemplateContract(template, fields) : null;
         const reservation = await reserveEnvelopeAllowance(tenantId, tx, now);
         if (!reservation) throw jsonError("Monthly envelope quota reached", 402);
         const code = `DOC-${randomBytes(4).toString("hex").toUpperCase()}`;
         const created = await tx.envelope.create({ data: {
           publicCode: code, title, titleLower: foldForSearch(title), tenantId, createdById: me.id,
-          documentId, templateId, status: "SENT", message: String(data.message ?? "").slice(0, 10_000),
+          fields: fieldsJson, documentId, templateId, contractSnapshot, status: "SENT", message: String(data.message ?? "").slice(0, 10_000),
           pages: document?.pageCount ?? template?.pages ?? 1, sha256: document?.sha256, createdAt: now,
         } });
         if (template) await tx.template.update({ where: { id: template.id }, data: {
           usageCount: { increment: 1 }, lastUsedAt: now,
         } });
         const tokens = recipients.map(() => randomBytes(32).toString("base64url"));
+        const recipientIds = recipients.map(() => randomBytes(16).toString("hex"));
         await tx.recipient.createMany({ data: recipients.map((item, index) => ({
-          envelopeId: created.id, ...item, order: index + 1, status: "PENDING", accessToken: tokens[index],
+          id: recipientIds[index], envelopeId: created.id, ...item, locale: item.locale ?? (template?.locale === "fr" ? "fr" : "en"), order: index + 1, status: "PENDING", accessToken: tokens[index],
         })) });
-        await tx.mailOutbox.createMany({ data: recipients.map((item, index) => ({
-          toEmail: item.email, template: item.role === "SIGNER" ? "SIGN_INVITE" : "COPY_NOTICE",
-          subject: item.role === "SIGNER" ? `${actor} asks for your signature: ${title}` : `${actor} added you as a copy recipient: ${title}`,
-          bodyText: item.role === "SIGNER"
-            ? `Hello ${item.name},\n\n${actor} sent you "${title}" for electronic signature via Docurama.\n\nOpen your personal signing link (unique to you, do not forward):\n${origin}/sign/${tokens[index]}\n\nVerification code once completed: ${code}\n`
-            : `Hello ${item.name},\n\n${actor} added you as a copy recipient for "${title}". No signature is required from you.\n\nVerification code: ${code}\n`,
-          linkUrl: item.role === "SIGNER" ? `${origin}/sign/${tokens[index]}` : null,
-          createdAt: now,
-        })) });
+        // Sequential routing: later signers receive their private invitation
+        // only after the previous signer commits. Copy recipients never block signing.
+        const firstSigner = recipients.findIndex(item => item.role === "SIGNER");
+        const queued = recipients.flatMap((item, index) => {
+          if (item.role === "SIGNER" && index !== firstSigner) return [];
+          return [{ ...buildSigningEmail({
+            kind: item.role === "SIGNER" ? "invite" : "copy", locale: item.locale ?? template?.locale,
+            title, senderName: actor, recipientName: item.name,
+            message: created.message, linkUrl: `${origin}/sign/${tokens[index]}`,
+          }), envelopeId: created.id, recipientId: recipientIds[index], toEmail: item.email, createdAt: now }];
+        });
+        await tx.mailOutbox.createMany({ data: queued });
         await tx.envelopeEvent.createMany({ data: [
           { envelopeId: created.id, actor, action: "CREATED", at: now, detail: "Document prepared in Builder" },
           { envelopeId: created.id, actor: "Docurama", action: "SENT", at: now,
-            detail: `Signing invitations and copy notices queued for ${recipients.length} recipients` },
+            detail: `${queued.length} invitation/copy notice(s) queued; remaining signers await their turn` },
         ] });
         await queueEnvelopeEvent(tx, tenantId, "envelope.sent", {
           code, title, status: "SENT", recipientCount: recipients.length, recipients,
@@ -111,7 +126,7 @@ export async function POST(req: NextRequest) {
         return created;
       });
       wakeDelivery();
-      return jsonOk({ ok: true, message: `Sent to ${recipients.length} recipient${recipients.length > 1 ? "s" : ""} - code ${envelope.publicCode}` });
+      return jsonOk({ ok: true, message: `Envelope prepared for ${recipients.length} recipients; the first signing invitation and copy notices are queued - code ${envelope.publicCode}` });
     }
 
     if (body.op === "remind") {
@@ -123,12 +138,13 @@ export async function POST(req: NextRequest) {
         if (envelope.lastRemindedAt && now.getTime() - envelope.lastRemindedAt.getTime() < 6 * 3_600_000) {
           throw jsonError("A reminder was already sent recently - please wait before sending another.");
         }
-        const pending = envelope.recipients.filter((item) => item.role === "SIGNER" && ["PENDING", "DELIVERED"].includes(item.status));
+        const pending = envelope.recipients.filter((item) => item.role === "SIGNER" && ["PENDING", "DELIVERED"].includes(item.status)).sort((a, b) => a.order - b.order).slice(0, 1);
         if (!pending.length) throw jsonError("No pending signers remain");
         await tx.mailOutbox.createMany({ data: pending.map((item) => ({
-          toEmail: item.email, template: "REMINDER", subject: `Reminder: ${envelope.title}`,
-          bodyText: `Hello ${item.name},\n\n${actor} reminds you to sign "${envelope.title}".\n\nYour personal signing link:\n${origin}/sign/${item.accessToken}\n`,
-          linkUrl: `${origin}/sign/${item.accessToken}`, createdAt: now,
+          ...buildSigningEmail({ kind: "reminder", locale: item.locale, title: envelope.title,
+            senderName: actor, recipientName: item.name, message: envelope.message,
+            linkUrl: `${origin}/sign/${item.accessToken}` }),
+          envelopeId: envelope.id, recipientId: item.id, toEmail: item.email, createdAt: now,
         })) });
         await tx.envelope.update({ where: { id }, data: { lastRemindedAt: now, reminderCount: { increment: 1 } } });
         await tx.envelopeEvent.create({ data: { envelopeId: id, actor, action: "REMINDED", at: now,
@@ -163,6 +179,8 @@ export async function POST(req: NextRequest) {
     return jsonError("Unsupported operation");
   } catch (error) {
     if (error instanceof Response) return error;
+    if (error instanceof EnvelopeFieldsError) return jsonError(error.message, 400);
+    if (error instanceof ContractSnapshotError) return jsonError(error.message, 400);
     console.error("[envelopes POST]", error);
     return jsonError("Operation failed", 500);
   }

@@ -64,7 +64,11 @@ async function fixture(limit = 100, role = "OWNER") {
     usageAnchorAt: now, usagePeriodStart: now, usagePeriodEnd: shiftUtcMonth(now, 1),
   } });
   const session = await direct.session.create({ data: { userId: user.id, expiresAt: new Date(Date.now() + 3_600_000) } });
-  return { tenant, user, member, subscription, token: session.id };
+  const template = await direct.template.create({ data: {
+    tenantId: tenant.id, name: "Synthetic verification agreement", publicSlug: `verification-template-${unique}`,
+    bodyMarkdown: "Synthetic verification terms: the fixture parties agree to this isolated test agreement.", pages: 1,
+  } });
+  return { tenant, user, member, subscription, template, token: session.id };
 }
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;
@@ -87,7 +91,7 @@ async function request(path: string, token?: string, body?: unknown) {
 }
 const settings = (token: string, op: string, id = "", data: unknown = {}) => request("/api/workspace/settings", token, { op, id, data });
 const send = (f: Fixture, title = `Concurrency ${randomUUID()}`) => request("/api/workspace/envelopes", f.token, {
-  op: "send", data: { title, recipients: [{ name: "Fixture Signer", email: "signer@example.test" }] },
+  op: "send", data: { title, templateId: f.template.id, recipients: [{ name: "Fixture Signer", email: "signer@example.test" }] },
 });
 async function endpoint(f: Fixture, events = "*") {
   return direct.webhookEndpoint.create({ data: { tenantId: f.tenant.id, url: `http://127.0.0.1:${receiver.port}/hooks`, events, secret: "fixture-secret-not-a-credential", secretMasked: "test", status: "ACTIVE" } });
@@ -183,7 +187,7 @@ describe("atomic quota and lifecycle actions", () => {
     const views = await Promise.all([request(path, undefined, { op: "view" }), request(path, undefined, { op: "view" })]);
     expect(views.every((item) => item.status === 200)).toBe(true);
     expect(await direct.envelopeEvent.count({ where: { envelopeId: e.id, action: "VIEWED" } })).toBe(1);
-    const signed = await Promise.all([request(path, undefined, { op: "sign", name: "Fixture Signer" }), request(path, undefined, { op: "sign", name: "Fixture Signer" })]);
+    const signed = await Promise.all([request(path, undefined, { op: "sign", name: "Fixture Signer", consent: true }), request(path, undefined, { op: "sign", name: "Fixture Signer", consent: true })]);
     expect(signed.map((item) => item.status).sort()).toEqual([200, 409]);
     expect((await direct.envelope.findUniqueOrThrow({ where: { id: e.id } })).status).toBe("COMPLETED");
     for (const action of ["SIGNED", "SEALED"]) expect(await direct.envelopeEvent.count({ where: { envelopeId: e.id, action } })).toBe(1);
@@ -203,7 +207,7 @@ describe("atomic quota and lifecycle actions", () => {
     expect(await direct.mailOutbox.count({ where: { template: "REMINDER", linkUrl: { contains: e.recipients[0].accessToken! } } })).toBe(1);
     expect((await request("/api/workspace/envelopes", f.token, { op: "void", id: e.id, data: { reason: "Fixture cancellation" } })).status).toBe(200);
     expect(await direct.webhookDelivery.count({ where: { endpointId: ep.id, event: "envelope.voided" } })).toBe(1);
-    expect((await request(`/api/sign/${e.recipients[0].accessToken}`, undefined, { op: "sign", name: "Too Late" })).status).toBe(409);
+    expect((await request(`/api/sign/${e.recipients[0].accessToken}`, undefined, { op: "sign", name: "Too Late", consent: true })).status).toBe(409);
     expect((await send(f)).status).toBe(200);
     const other = await latestEnvelope(f);
     expect((await request(`/api/sign/${other.recipients[0].accessToken}`, undefined, { op: "decline", reason: "Fixture rejection" })).status).toBe(200);

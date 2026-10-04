@@ -129,6 +129,13 @@ export async function resolveSessionUser(token: string): Promise<SessionUser | n
   const active =
     user.memberships.find((m) => m.tenantId === activeTenantId) ?? user.memberships[0];
 
+  // Existing password-only sessions cannot bypass a newly enabled tenant policy.
+  // A flag without an enrolled secret is corrupt state, never a completed factor.
+  if (user.totpEnabled && !user.totpSecret) return null;
+  if (active?.tenant.enforceTwoFactor || user.totpEnabled) {
+    if (!user.totpEnabled || !user.totpSecret || !session.mfaVerifiedAt) return null;
+  }
+
   return {
     id: user.id,
     email: user.email,

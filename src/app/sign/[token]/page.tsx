@@ -1,5 +1,8 @@
+import { parseEnvelopeFields, EnvelopeFieldsError } from "@/lib/envelope-fields";
+import { readContractSnapshot, ContractSnapshotError } from "@/lib/contract-snapshot";
 import type { Metadata } from "next";
 import { db } from "@/lib/db";
+import { signerReadRestriction, signerAuthenticationRestriction } from "@/lib/signing-policy";
 import { PublicSign, type SignPageState } from "@/components/marketing/public-sign";
 
 export const dynamic = "force-dynamic";
@@ -22,6 +25,7 @@ export const metadata: Metadata = {
  */
 export default async function SignPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
+  if (!token || token.length > 256) return <PublicSign token="" state={{ phase: "invalid" }} />;
 
   const recipient = await db.recipient.findUnique({
     where: { accessToken: token },
@@ -29,8 +33,7 @@ export default async function SignPage({ params }: { params: Promise<{ token: st
       envelope: {
         include: {
           recipients: { orderBy: { order: "asc" } },
-          tenant: { select: { name: true } },
-          template: { select: { bodyMarkdown: true, sourceNotes: true } },
+          tenant: { select: { name: true, status: true, esignPrefs: { select: { requireReauth: true, part11Mode: true } } } },
           document: { select: { filename: true, pageCount: true, sha256: true } },
           createdBy: { select: { email: true } },
         },
@@ -43,6 +46,14 @@ export default async function SignPage({ params }: { params: Promise<{ token: st
     state = { phase: "invalid" };
   } else {
     const env = recipient.envelope;
+    const restriction = signerReadRestriction(env.tenant);
+    if (restriction) return <PublicSign token="" state={{ phase: "unavailable", reason: restriction }} />;
+    let contract;
+    try { contract = readContractSnapshot(env); }
+    catch (error) {
+      if (!(error instanceof ContractSnapshotError)) throw error;
+      return <PublicSign token="" state={{ phase: "unavailable", reason: error.message }} />;
+    }
     const signers = env.recipients.filter((r) => r.role === "SIGNER");
     const ahead = signers.find((r) => r.status === "PENDING" || r.status === "DELIVERED");
 
@@ -60,7 +71,7 @@ export default async function SignPage({ params }: { params: Promise<{ token: st
       };
     } else if (recipient.role === "CC") {
       state = {
-        phase: "cc", title: env.title, code: env.publicCode,
+        phase: "cc", completed: env.status === "COMPLETED", title: env.title, code: env.publicCode,
         tenantName: env.tenant.name, recipientName: recipient.name,
       };
     } else if (recipient.status === "SIGNED") {
@@ -82,6 +93,14 @@ export default async function SignPage({ params }: { params: Promise<{ token: st
         document,
       };
     } else {
+      const authenticationRestriction = signerAuthenticationRestriction(env.tenant);
+      if (authenticationRestriction) return <PublicSign token="" state={{ phase: "unavailable", reason: authenticationRestriction }} />;
+      let fields;
+      try { fields = parseEnvelopeFields(contract ? JSON.stringify(contract.signatureLocations) : env.fields, { pageCount: env.pages, recipients: env.recipients }); }
+      catch (error) {
+        if (!(error instanceof EnvelopeFieldsError)) throw error;
+        return <PublicSign token="" state={{ phase: "unavailable", reason: error.message }} />;
+      }
       // Anti-phishing trust signal: when the sender's email domain is
       // DNS-TXT-verified for this workspace, the signer sees it next to the
       // sender identity. The lookup is cheap (indexed) and only shown when
@@ -103,7 +122,8 @@ export default async function SignPage({ params }: { params: Promise<{ token: st
         senderDomainVerified: verifiedDomain?.domain ?? null,
         recipientName: recipient.name, recipientEmail: recipient.email,
         signers: signers.map((r) => ({ name: r.name, email: r.email, status: r.status, order: r.order })),
-        bodyMarkdown: env.template?.bodyMarkdown || null,
+        fields,
+        bodyMarkdown: contract?.bodyMarkdown ?? null,
         document,
       };
     }

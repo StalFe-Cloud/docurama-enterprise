@@ -93,12 +93,16 @@ rootDomain: ""
 # external Postgres, e.g.:
 #   - name: DATABASE_URL
 #     value: postgresql://user:pass@postgres:5432/docurama
+# Enterprise always uses selfhost mode and disables public registration.
+# Those two policy variables are reserved; extraEnv overrides fail rendering.
+# Mailbox-bound invitations and offline first-administrator bootstrap remain supported.
 extraEnv: []
 #  - name: DOCURAMA_WORKER
 #    value: "off"
 
-# Env vars from an existing Secret (highest precedence, e.g. SMTP creds when
-# not using smtp.existingSecret).
+# Env vars from an existing Secret (e.g. SMTP creds when not using smtp.existingSecret).
+# Kubernetes explicit env entries take precedence over envFrom, including the
+# fixed Enterprise installation policy above.
 extraEnvFrom: []
 #  - secretRef:
 #      name: docurama-secrets

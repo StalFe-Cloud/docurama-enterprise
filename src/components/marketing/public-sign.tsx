@@ -26,7 +26,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -37,8 +36,9 @@ import { cn } from "@/lib/utils";
 
 export type SignPageState =
   | { phase: "invalid" }
+  | { phase: "unavailable"; reason: string }
   | { phase: "terminal"; status: string; title: string; code: string; voidReason: string | null }
-  | { phase: "cc"; title: string; code: string; tenantName: string; recipientName: string }
+  | { phase: "cc"; completed?: boolean; title: string; code: string; tenantName: string; recipientName: string }
   | { phase: "signed"; title: string; code: string; tenantName: string; recipientName: string; sealed: boolean; document: SignDocument | null }
   | { phase: "completed"; title: string; code: string; tenantName: string }
   | { phase: "wait"; title: string; code: string; tenantName: string; aheadName: string; document: SignDocument | null }
@@ -51,6 +51,7 @@ export type SignPageState =
       signers: { name: string; email: string; status: string; order: number }[];
       bodyMarkdown: string | null;
       document: { filename: string; pages: number; sha256: string } | null;
+      fields?: Array<{ id: string; type: string; pageNumber: number; recipientEmail: string; label?: string; required?: boolean }>;
     };
 
 const FONTS = [
@@ -72,6 +73,7 @@ function SignInner({ token, state }: { token: string; state: SignPageState }) {
   const [name, setName] = useState(state.phase === "active" ? state.recipientName : "");
   const [font, setFont] = useState<string>("caveat");
   const [consent, setConsent] = useState(false);
+  const [values, setValues] = useState<Record<string, string | boolean>>({});
   const [busy, setBusy] = useState<"sign" | "decline" | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Sealed starts from the SERVER truth: a signer revisiting their link after
@@ -108,7 +110,7 @@ function SignInner({ token, state }: { token: string; state: SignPageState }) {
     if (!consent) { setError("Please confirm you have read and agree to sign electronically."); return; }
     setBusy("sign"); setError(null);
     try {
-      const r = await post({ op: "sign", name: name.trim(), font });
+      const r = await post({ op: "sign", name: name.trim(), font, consent, values });
       setSealed(!!r.sealed);
       setPhase("signed");
     } catch (e) { setError(e instanceof Error ? e.message : "Signing failed"); }
@@ -144,13 +146,29 @@ function SignInner({ token, state }: { token: string; state: SignPageState }) {
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Lock className="h-3.5 w-3.5" aria-hidden />
             <span className="hidden sm:inline">Secure signing</span>
-            <span className="rounded-md bg-muted px-2 py-1 font-mono">{state.phase !== "invalid" ? state.code : "—"}</span>
+            <span className="rounded-md bg-muted px-2 py-1 font-mono">{state.phase !== "invalid" && state.phase !== "unavailable" ? state.code : "—"}</span>
           </div>
         </div>
       </header>
 
       <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-8 sm:px-6 sm:py-12">
+        {((phase === "signed" && sealed) || state.phase === "completed" || (state.phase === "signed" && state.sealed) || (state.phase === "cc" && state.completed)) && (
+          <div className="mb-5 flex flex-wrap gap-3 rounded-lg border p-4">
+            <a className="text-sm font-medium underline" href={`/api/sign/${encodeURIComponent(token)}/completed`}>Download completed PDF</a>
+            <a className="text-sm font-medium underline" href={`/api/sign/${encodeURIComponent(token)}/completed?format=record-pdf`}>Download completion record PDF</a>
+          </div>
+        )}
         {/* ── invalid link ─────────────────────────────────────────────── */}
+        {state.phase === "unavailable" && (
+          <Card className="mx-auto max-w-md text-center">
+            <CardContent className="space-y-3 p-8">
+              <Ban className="mx-auto h-10 w-10 text-destructive" aria-hidden />
+              <h1 className="text-xl font-semibold">Signing is unavailable</h1>
+              <p className="text-sm text-muted-foreground">{state.reason}</p>
+            </CardContent>
+          </Card>
+        )}
+
         {phase === "invalid" && (
           <Card className="mx-auto max-w-md text-center">
             <CardContent className="space-y-3 p-8">
@@ -371,6 +389,17 @@ function SignInner({ token, state }: { token: string; state: SignPageState }) {
               </Card>
             )}
 
+            {state.fields?.filter(field => field.recipientEmail.toLowerCase() === state.recipientEmail.toLowerCase() && !["signature", "initials"].includes(field.type)).map(field => (
+              <Card key={field.id}><CardContent className="space-y-2 p-5">
+                <Label htmlFor={`value-${field.id}`}>{field.label ?? field.type}{field.required !== false ? " *" : ""} (page {field.pageNumber})</Label>
+                {field.type === "checkbox"
+                  ? <input type="checkbox" className="size-4 accent-primary" id={`value-${field.id}`} checked={values[field.id] === true} aria-checked={values[field.id] === true} onChange={event => { const checked = event.target.checked; setValues(current => ({...current,[field.id]:checked})); }} />
+                  : <Input id={`value-${field.id}`} type={field.type === "date" ? "date" : "text"} maxLength={2000}
+                      value={typeof values[field.id] === "string" ? values[field.id] as string : ""}
+                      onChange={event => setValues(current => ({...current,[field.id]:event.target.value}))} />}
+              </CardContent></Card>
+            ))}
+            <p className="text-xs text-muted-foreground">The completed PDF records typed signatures in standard italic text. Positioned fields support unrotated, uncropped pages and Western text; dates are calendar dates without a time zone.</p>
             {/* Adopt signature */}
             <Card>
               <CardContent className="space-y-5 p-6 sm:p-8">
@@ -419,20 +448,19 @@ function SignInner({ token, state }: { token: string; state: SignPageState }) {
                     </span>
                   </div>
                   <div className="mt-3 border-t pt-2 text-xs text-muted-foreground">
-                    {state.recipientEmail} · eIDAS simple electronic signature · audit-trailed
+                    {state.recipientEmail} · Email-link typed signature · audit-trailed
                   </div>
                 </div>
 
                 <div className="flex items-start gap-3 rounded-lg border bg-muted/30 p-4">
-                  <Checkbox
-                    id="consent" data-testid="consent" checked={consent}
-                    onCheckedChange={(v) => setConsent(v === true)}
-                    className="mt-0.5"
+                  <input type="checkbox"
+                    id="consent" data-testid="consent" checked={consent} aria-checked={consent}
+                    onChange={event => setConsent(event.target.checked)}
+                    className="mt-0.5 size-4 accent-primary"
                   />
                   <Label htmlFor="consent" className="cursor-pointer text-sm font-normal leading-relaxed text-muted-foreground">
-                    I agree to sign electronically. I understand my electronic signature is the legal equivalent of my
-                    handwritten signature, is uniquely linked to me, and that the signature and audit records are retained
-                    by Docurama SAS in compliance with eIDAS.
+                    I confirm that I have reviewed this document and consent to sign electronically.
+                    My typed name and signing activity will be recorded with the document&apos;s completion evidence.
                   </Label>
                 </div>
 

@@ -3,15 +3,17 @@
  * setup failures fail the suite rather than silently switching to local disk. */
 import { describe, expect, test, beforeAll, afterAll } from "bun:test";
 import { PrismaClient } from "@prisma/client";
-import { cpSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { cpSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import net from "node:net";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { S3Client, HeadBucketCommand, CreateBucketCommand } from "@aws-sdk/client-s3";
+import { assertS3LifecycleSafe } from "./isolation.mjs";
+import { reserveFixturePorts, socketsOwnedBy, terminateFixture, grpcSocketPaths, assertSocketPathsUnused, seaweedEnvironment, localFilerConfiguration } from "./seaweed-isolation.mjs";
 
 const RUN_S3_E2E = process.env.S3_E2E === "1";
 const WEED_BIN = process.env.WEED_BIN || "weed";
+if (RUN_S3_E2E) assertS3LifecycleSafe(WEED_BIN);
 /** Bun.spawn on Windows drops backslashes from arguments (weed sees
  * -mdir="C:Users…" and exits 255), and file: URLs are cleaner with '/'.
  * Everything that crosses a process boundary uses forward slashes. */
@@ -20,47 +22,92 @@ const SCRATCH_DIR = mkdtempSync(path.join(tmpdir(), "docurama-s3-test-"));
 const SCRATCH = path.join(SCRATCH_DIR, "fixture.db");
 const STORAGE_SCRATCH = mkdtempSync(path.join(tmpdir(), "docurama-s3-storage-"));
 if (RUN_S3_E2E) {
-  cpSync("db/custom.db", SCRATCH);
+  if (!process.env.E2E_FIXTURE_DB) throw new Error("S3 E2E requires the migrated scratch fixture from e2e/run.sh");
+  cpSync(process.env.E2E_FIXTURE_DB, SCRATCH);
   process.env.DATABASE_URL = `file:${posix(SCRATCH)}`;
   process.env.STORAGE_DIR = posix(STORAGE_SCRATCH);
 }
 const db = RUN_S3_E2E ? new PrismaClient({ datasources: { db: { url: `file:${posix(SCRATCH)}` } } }) : null;
 
-function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const { port } = server.address() as net.AddressInfo;
-      server.close(() => resolve(port));
-    });
-  });
-}
-type Weed = { s3Port: number; dataDir: string; proc: ReturnType<typeof Bun.spawn> };
+type Weed = { s3Port: number; dataDir: string; proc: ReturnType<typeof Bun.spawn>;
+  accessKeyId: string; secretAccessKey: string; logsDone: Promise<void>[] };
 async function startWeed(): Promise<Weed> {
-  const s3Port = await freePort();
-  const dataDir = mkdtempSync(path.join(tmpdir(), "docurama-weed-"));
-  const proc = Bun.spawn([WEED_BIN, "server", `-dir=${posix(dataDir)}`, "-ip=127.0.0.1", "-ip.bind=127.0.0.1",
-    `-master.port=${s3Port + 1}`, `-volume.port=${s3Port + 2}`, `-filer.port=${s3Port + 3}`,
-    "-s3", `-s3.port=${s3Port}`, "-master.volumeSizeLimitMB=1024"],
-    { stdin: "ignore", stdout: "ignore", stderr: "ignore" });
-  const probe = new S3Client({ endpoint: `http://127.0.0.1:${s3Port}`, region: "us-east-1",
-    forcePathStyle: true, maxAttempts: 1, credentials: { accessKeyId: "fixture-probe", secretAccessKey: "fixture-probe" } });
+  const leases = await reserveFixturePorts();
+  const ports = leases.map((lease) => lease.port);
+  const [s3Port, masterPort, volumePort, filerPort, masterGrpc, volumeGrpc, filerGrpc, s3Grpc] = ports;
+  const unreleased = [...leases];
+  let dataDir = "";
+  let proc: ReturnType<typeof Bun.spawn> | undefined;
+  let probe: S3Client | undefined;
+  let logTail = "";
+  const logsDone: Promise<void>[] = [];
+  const accessKeyId = randomBytes(16).toString("hex");
+  const secretAccessKey = randomBytes(32).toString("hex");
+  const capture = async (stream: ReadableStream<Uint8Array>) => {
+    const reader = stream.getReader();
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) return;
+        logTail = (logTail + Buffer.from(value).toString("utf8")).slice(-65536);
+      }
+    } finally { reader.releaseLock(); }
+  };
   let lastError: unknown;
   try {
+    dataDir = mkdtempSync(path.join(tmpdir(), "docurama-weed-"));
+    const executable = Bun.which(WEED_BIN);
+    if (!executable) throw new Error("Configured SeaweedFS executable is unavailable");
+    // Shadow every configuration file this server loads before global search
+    // paths can contribute external storage/auth settings. Child HOME and cwd
+    // also point at this owned directory; WEED_* settings are scrubbed.
+    writeFileSync(path.join(dataDir, "filer.toml"), localFilerConfiguration(dataDir));
+    for (const name of ["security.toml", "master.toml"]) writeFileSync(path.join(dataDir, name), "# isolated fixture\n");
+    const config = path.join(dataDir, "s3.json");
+    writeFileSync(config, JSON.stringify({ identities: [{ name: "isolated-e2e",
+      credentials: [{ accessKey: accessKeyId, secretKey: secretAccessKey }],
+      actions: ["Admin", "Read", "List", "Tagging", "Write"] }] }), { mode: 0o600 });
+    // Seaweed derives additional Unix gRPC names from these ports. Refuse
+    // pre-existing paths instead of letting its startup unlink a foreign file.
+    await assertSocketPathsUnused(grpcSocketPaths([masterGrpc, volumeGrpc, filerGrpc, s3Grpc]));
+    // Port handoff can race. No network request is authorized until the kernel
+    // proves this exact spawned PID owns ALL eight loopback listener sockets.
+    while (unreleased.length) await unreleased.pop()!.release();
+    const launched = Bun.spawn([executable, `-config_dir=${posix(dataDir)}`, "server", `-dir=${posix(dataDir)}`, "-ip=127.0.0.1", "-ip.bind=127.0.0.1",
+      `-master.port=${masterPort}`, `-volume.port=${volumePort}`, `-filer.port=${filerPort}`,
+      `-master.port.grpc=${masterGrpc}`, `-volume.port.grpc=${volumeGrpc}`, `-filer.port.grpc=${filerGrpc}`,
+      "-s3", `-s3.port=${s3Port}`, `-s3.port.grpc=${s3Grpc}`, `-s3.config=${posix(config)}`,
+      `-filer.localSocket=${posix(path.join(dataDir, "filer.sock"))}`,
+      `-s3.localSocket=${posix(path.join(dataDir, "s3.sock"))}`,
+      "-s3.port.iceberg=0", "-s3.port.lance=0", "-master.telemetry=false", "-master.volumeSizeLimitMB=1024"],
+      { cwd: dataDir, env: seaweedEnvironment(process.env, dataDir), stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+    proc = launched;
+    logsDone.push(capture(launched.stdout).catch((error) => { logTail += `stdout capture: ${error}`; }),
+      capture(launched.stderr).catch((error) => { logTail += `stderr capture: ${error}`; }));
+    probe = new S3Client({ endpoint: `http://127.0.0.1:${s3Port}`, region: "us-east-1",
+      forcePathStyle: true, maxAttempts: 1, credentials: { accessKeyId, secretAccessKey } });
+    const requireOwnership = async () => {
+      if (proc!.exitCode !== null || !await socketsOwnedBy(proc!.pid, ports)) {
+        throw new Error("Owned SeaweedFS listener proof lost; refusing S3 request");
+      }
+    };
     const deadline = Date.now() + 45_000;
     while (Date.now() < deadline) {
       if (proc.exitCode !== null) throw new Error(`SeaweedFS exited early: ${proc.exitCode}`);
+      if (!await socketsOwnedBy(proc.pid, ports)) { await Bun.sleep(400); continue; }
       try {
+        await requireOwnership();
         await probe.send(new HeadBucketCommand({ Bucket: "docurama-e2e-ready" }), { abortSignal: AbortSignal.timeout(2000) });
-        return { s3Port, dataDir, proc };
+        return { s3Port, dataDir, proc, accessKeyId, secretAccessKey, logsDone };
       } catch (error) {
         lastError = error;
         if ((error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode === 404) {
           try {
+            await requireOwnership();
             await probe.send(new CreateBucketCommand({ Bucket: "docurama-e2e-ready" }), { abortSignal: AbortSignal.timeout(2000) });
+            await requireOwnership();
             await probe.send(new HeadBucketCommand({ Bucket: "docurama-e2e-ready" }), { abortSignal: AbortSignal.timeout(2000) });
-            return { s3Port, dataDir, proc };
+            return { s3Port, dataDir, proc, accessKeyId, secretAccessKey, logsDone };
           } catch (createError) { lastError = createError; }
         }
       }
@@ -68,11 +115,15 @@ async function startWeed(): Promise<Weed> {
     }
     throw new Error(`SeaweedFS S3 gateway never became ready: ${lastError}`);
   } catch (error) {
-    proc.kill();
-    await Promise.race([proc.exited, Bun.sleep(3000)]);
-    rmSync(dataDir, { recursive: true, force: true });
+    if (proc) await terminateFixture(proc); // If exit cannot be confirmed, retain data.
+    await Promise.all(logsDone);
+    if (logTail) console.error(logTail);
+    if (dataDir) rmSync(dataDir, { recursive: true, force: true });
     throw error;
-  } finally { probe.destroy(); }
+  } finally {
+    probe?.destroy();
+    while (unreleased.length) await unreleased.pop()!.release();
+  }
 }
 
 let weed: Weed | null = null;
@@ -85,8 +136,8 @@ function configureS3Env(bucket: string, autoCreate: string) {
   if (!weed) throw new Error("SeaweedFS fixture has not completed initialization");
   process.env.S3_ENDPOINT = `http://127.0.0.1:${weed.s3Port}`;
   process.env.S3_BUCKET = bucket;
-  process.env.S3_ACCESS_KEY_ID = "docurama-e2e";
-  process.env.S3_SECRET_ACCESS_KEY = "docurama-e2e-secret";
+  process.env.S3_ACCESS_KEY_ID = weed.accessKeyId;
+  process.env.S3_SECRET_ACCESS_KEY = weed.secretAccessKey;
   process.env.S3_REGION = "us-east-1";
   process.env.S3_AUTO_CREATE_BUCKET = autoCreate;
   objectStore?.resetS3ClientCache();
@@ -111,8 +162,8 @@ afterAll(async () => {
   await db?.$disconnect();
   if (RUN_S3_E2E && lib) await (await import("../src/lib/db")).db.$disconnect();
   if (weed) {
-    weed.proc.kill();
-    await Promise.race([weed.proc.exited, Bun.sleep(3000)]);
+    await terminateFixture(weed.proc);
+    await Promise.all(weed.logsDone);
     rmSync(weed.dataDir, { recursive: true, force: true });
   }
   rmSync(SCRATCH_DIR, { recursive: true, force: true });

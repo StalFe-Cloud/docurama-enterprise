@@ -82,6 +82,9 @@ model Session {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  // Set only after a verified second factor; legacy sessions remain unverified.
+  mfaVerifiedAt DateTime?
+
 }
 
 model AuthChallenge {
@@ -136,12 +139,15 @@ model Invitation {
 // admin console (demo / air-gapped mode) instead of silently dropping.
 model MailOutbox {
   id        String    @id @default(cuid())
+  envelopeId String?   // Internal correlation; never a public download authorization
+  recipientId String?
   toEmail   String
   fromEmail String    @default("Docurama Sign <notifications@docurama.eu>")
   subject   String
   template  String    // SIGNUP_VERIFICATION | TEAM_INVITE | REMINDER | TEST
   status    String    @default("QUEUED") // QUEUED | SENT | FAILED
   bodyText  String
+  bodyHtml  String?   // optional localized HTML; bodyText remains the fallback
   linkUrl   String?
   createdAt DateTime  @default(now())
   sentAt    DateTime?
@@ -158,6 +164,7 @@ model MailOutbox {
   @@index([status, nextAttemptAt])
   @@index([claimUntil])
   @@index([toEmail])
+  @@index([envelopeId, recipientId])
 }
 
 model Member {
@@ -251,6 +258,9 @@ model Envelope {
   tenantId          String
   createdById       String
   documentId        String?   // the signed artefact; null while an envelope is a DRAFT
+  fields            String? // Validated recipient-bound field locations
+  evidenceSha256    String?   // Separate immutable contract/adoption/value seal; sha256 remains uploaded file checksum
+  contractSnapshot  String?   // Immutable server-generated template terms and signature location hints at send
   templateId        String?   // template the envelope was sent from (signer preview + evidence chain)
   status            String    @default("DRAFT") // DRAFT | SENT | PARTIALLY_SIGNED | COMPLETED | VOIDED | DECLINED | EXPIRED
   message           String?
@@ -286,10 +296,12 @@ model Recipient {
   envelopeId  String
   name        String
   email       String
+  locale      String?   // Recipient-selected mail and signing locale (en/fr)
   role        String    @default("SIGNER") // SIGNER | CC | APPROVER
   status      String    @default("PENDING") // PENDING | DELIVERED | SIGNED | DECLINED
   order       Int       @default(1)
   authMethod  String    @default("EMAIL") // EMAIL | SMS | PASSKEY
+  signatureData String? // Immutable adoption, explicit consent and recipient-bound field values
   signedAt    DateTime?
   accessToken String    @unique // signing access token (never exposed to other recipients in UI)
 

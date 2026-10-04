@@ -3,6 +3,7 @@ import { promises as dns } from "dns";
 import { db } from "@/lib/db";
 import { requirePlatformAdmin, recordAudit } from "@/lib/auth";
 import { publicRecipient, isos, iso, jsonError, jsonOk } from "@/lib/serializers";
+import { publicAdminUserSelect, publicAdminTenant, publicAdminSettings, publicAdminApiKey, publicAdminWebhook } from "@/lib/admin-serializers";
 import { purgeExpired, storageHealthProbe } from "@/lib/document-store";
 import {
   COMPANY, EMAIL_ACCOUNTS, SUBDOMAINS, DNS_RECORDS,
@@ -52,7 +53,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           },
           stats: isos(stats), planDist,
           securityEvents: isos(securityEvents), auditEvents: isos(auditEvents),
-          health: iso(settings!),
+          health: publicAdminSettings(settings),
         });
       }
 
@@ -84,7 +85,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         const t = await db.tenant.findUnique({
           where: { id },
           include: {
-            members: { include: { user: true }, orderBy: { createdAt: "asc" } },
+            members: { include: { user: { select: publicAdminUserSelect } }, orderBy: { createdAt: "asc" } },
             subscriptions: { orderBy: { renewalAt: "asc" } },
             domains: true,
             _count: { select: { envelopes: true, templates: true, apiKeys: true, webhookEndpoints: true } },
@@ -97,7 +98,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         });
         const statusCounts = await db.envelope.groupBy({ by: ["status"], where: { tenantId: id }, _count: true });
         return jsonOk({
-          tenant: iso(t),
+          tenant: publicAdminTenant(t),
           members: t.members.map((m) => ({
             id: m.id, role: m.role, status: m.status, createdAt: m.createdAt.toISOString(),
             userId: m.user.id, name: `${m.user.firstName} ${m.user.lastName}`,
@@ -284,15 +285,15 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           include: { endpoint: { select: { url: true } } }, orderBy: { at: "desc" }, take: 40,
         });
         return jsonOk({
-          apiKeys: keys.map((k) => ({ ...iso(k), tenantName: k.tenant?.name ?? "Docurama Platform" })),
-          webhooks: hooks.map((h) => ({ ...iso(h), tenantName: h.tenant.name })),
+          apiKeys: keys.map((k) => ({ ...publicAdminApiKey(k), tenantName: k.tenant?.name ?? "Docurama Platform" })),
+          webhooks: hooks.map((h) => ({ ...publicAdminWebhook(h), tenantName: h.tenant.name })),
           deliveries: deliveries.map((dl) => ({ ...iso(dl), url: dl.endpoint.url })),
         });
       }
 
       case "settings": {
         const settings = await db.platformSetting.findUnique({ where: { id: "singleton" } });
-        return jsonOk({ settings: iso(settings!) });
+        return jsonOk({ settings: publicAdminSettings(settings) });
       }
 
       // ── Email & DNS provisioning for docurama.eu (brand, mailboxes, zone) ──
@@ -332,7 +333,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         const secLast24h = await db.securityEvent.count({ where: { at: { gte: new Date(Date.now() - 86400000) } } });
         const failingHooks = await db.webhookEndpoint.count({ where: { status: "FAILING" } });
         return jsonOk({
-          settings: iso(settings!),
+          settings: publicAdminSettings(settings),
           weekStats: isos(stats.reverse()),
           lastAudit: lastAudit ? iso(lastAudit) : null,
           secLast24h, failingHooks,
@@ -387,7 +388,6 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           db.consent.findMany({ where: { subjectEmail: email } }),
         ]);
 
-        await db.dsarRequest.update({ where: { id }, data: { status: "COMPLETED", completedAt: new Date() } });
         await recordAudit({ actor: `${admin.firstName} ${admin.lastName}`, actorRole: "PLATFORM_ADMIN", action: "dsar.exported", resource: `dsar:${email}`, severity: "INFO" });
 
         const exportData = {
@@ -539,10 +539,20 @@ export async function POST(req: NextRequest, ctx: Ctx) {
           return jsonOk({ ok: true, message: next === "ACTIVE" ? "User reactivated" : "User deactivated" });
         }
         if (op === "force-2fa") {
-          await db.user.update({ where: { id }, data: { totpEnabled: true } });
           const u = await db.user.findUnique({ where: { id } });
-          await recordAudit({ actor, actorRole: "PLATFORM_ADMIN", action: "user.mfa_enforced", resource: `user:${u!.email}`, severity: "WARNING" });
-          return jsonOk({ ok: true, message: "Two-factor enforcement applied" });
+          if (!u) return jsonError("User not found", 404);
+          const memberships = await db.member.findMany({ where: { userId: id, status: "ACTIVE" }, select: { tenantId: true } });
+          const tenantId = String(data.tenantId ?? u.activeTenantId ?? (memberships.length === 1 ? memberships[0].tenantId : ""));
+          if (!tenantId || !memberships.some((m) => m.tenantId === tenantId)) {
+            return jsonError("Select an active workspace membership to enforce its two-factor policy", 409);
+          }
+          // Enforcement is a workspace policy; enrollment requires the user's verified factor.
+          await db.$transaction([
+            db.tenant.update({ where: { id: tenantId }, data: { enforceTwoFactor: true } }),
+            db.session.deleteMany({ where: { userId: id } }),
+          ]);
+          await recordAudit({ actor, actorRole: "PLATFORM_ADMIN", action: "user.mfa_enforced", resource: `user:${u.email}`, severity: "WARNING", detail: `Two-factor policy enabled for workspace ${tenantId}; enrollment remains user-verified` });
+          return jsonOk({ ok: true, message: "Workspace two-factor policy enabled; unenrolled members must complete enrollment" });
         }
         return jsonError("Unsupported operation");
       }
@@ -701,6 +711,15 @@ export async function POST(req: NextRequest, ctx: Ctx) {
           await recordAudit({ actor, actorRole: "PLATFORM_ADMIN", action: "dmca.resolved", resource: `dmca:${id}`, severity: "WARNING", detail: note.slice(0, 80) });
           return jsonOk({ ok: true, message: "Notice resolved" });
         }
+        if (op === "complete-dsar") {
+          const result = await db.dsarRequest.updateMany({
+            where: { id, status: "RUNNING" },
+            data: { status: "COMPLETED", completedAt: new Date() },
+          });
+          if (result.count !== 1) return jsonError("Only a running DSAR request can be completed", 409);
+          await recordAudit({ actor, actorRole: "PLATFORM_ADMIN", action: "dsar.completed", resource: `dsar:${id}`, severity: "INFO" });
+          return jsonOk({ ok: true, message: "Request completed" });
+        }
         if (op === "run-dsar" || op === "cancel-dsar") {
           const r = await db.dsarRequest.findUnique({ where: { id } });
           if (!r) return jsonError("Request not found", 404);
@@ -814,16 +833,15 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         if (op === "retry-payment") {
           const sub = await db.subscription.findUnique({ where: { id } });
           if (!sub) return jsonError("Subscription not found", 404);
-          await db.subscription.update({ where: { id }, data: { failedPayment: false, status: "ACTIVE" } });
-          await recordAudit({ actor, actorRole: "PLATFORM_ADMIN", action: "billing.payment_retried", resource: `subscription:${id}`, severity: "INFO" });
-          return jsonOk({ ok: true, message: "Payment retried - invoice settled" });
+          return jsonError("Retry payment through the configured billing provider; activation requires a verified settled payment", 409);
         }
         if (op === "payment.approve") {
           // Manual (bank-transfer) checkouts: approving a PENDING payment runs
           // the exact same activation path as a Stripe checkout completion.
           const payment = await db.payment.findUnique({ where: { id } });
           if (!payment) return jsonError("Payment not found", 404);
-          if (payment.status !== "PENDING") return jsonError(`Payment is ${payment.status} — only PENDING payments can be approved`);
+          if (payment.provider !== "manual") return jsonError("Provider-managed payments require verified settlement from their billing provider", 409);
+          if (payment.status !== "PENDING") return jsonError(`Payment is ${payment.status} - only PENDING payments can be approved`);
           const note = String(data.note ?? "").trim();
           if (!note) return jsonError("A confirmation note is required (bank reference or receipt id)");
           const { activateSubscription } = await import("@/lib/payments");

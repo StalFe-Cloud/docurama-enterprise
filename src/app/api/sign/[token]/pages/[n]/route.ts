@@ -1,5 +1,7 @@
+import { readContractSnapshot, ContractSnapshotError } from "@/lib/contract-snapshot";
 import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
+import { signerReadRestriction } from "@/lib/signing-policy";
 import { jsonError } from "@/lib/serializers";
 import { readDocumentBytes } from "@/lib/document-store";
 import { renderPage, clampDpi } from "@/lib/docintel/text-extract";
@@ -40,18 +42,23 @@ type Ctx = { params: Promise<{ token: string; n: string }> };
 export async function GET(req: NextRequest, ctx: Ctx) {
   try {
     const { token, n } = await ctx.params;
-    const pageNumber = parseInt(n, 10);
-    if (!Number.isFinite(pageNumber) || pageNumber < 1) {
+    if (!token || token.length > 256) return jsonError("This signing link is not valid.", 404);
+    if (!/^[1-9][0-9]*$/.test(n)) return jsonError("Invalid page number", 400);
+    const pageNumber = Number(n);
+    if (!Number.isSafeInteger(pageNumber) || pageNumber < 1) {
       return jsonError("Invalid page number", 400);
     }
 
     const recipient = await db.recipient.findUnique({
       where: { accessToken: token },
-      include: { envelope: { include: { document: true } } },
+      include: { envelope: { include: { document: true, tenant: { select: { status: true } } } } },
     });
     if (!recipient) return jsonError("This signing link is not valid. Check the link in your invitation email.", 404);
 
     const env = recipient.envelope;
+    if (env.document && env.document.tenantId !== env.tenantId) return jsonError("Invalid document workspace binding", 409);
+    const restriction = signerReadRestriction(env.tenant);
+    if (restriction) return jsonError(restriction, 409);
     if (env.status !== "SENT" && env.status !== "PARTIALLY_SIGNED") {
       return jsonError(`This document is not open for signing (status: ${env.status.toLowerCase()}).`, 409);
     }
@@ -59,6 +66,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       return jsonError("You receive a copy of this document. The live preview is available to signers.", 403);
     }
 
+    readContractSnapshot(env);
     const doc = env.document;
     if (!doc) return jsonError("This envelope has no attached document to preview.", 404);
     if (doc.pageCount < 1) return jsonError("This document has no renderable pages.", 404);
@@ -119,6 +127,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       },
     });
   } catch (err) {
+    if (err instanceof ContractSnapshotError) return jsonError(err.message, 409);
     console.error("[sign page render GET]", err);
     return jsonError("Failed to render page image", 500);
   }

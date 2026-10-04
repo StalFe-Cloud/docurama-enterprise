@@ -93,13 +93,14 @@ test("production login and signing reach the local SMTP and webhook receivers", 
   expect(login.status).toBe(200);
   expect(typeof login.body.token).toBe("string");
   const token = login.body.token as string;
-  const sent = await post("/api/workspace/envelopes", { op: "send", data: { title: `Runtime ${id}`, recipients: [{ name: "CI Signer", email: "signer@example.test" }] } }, token);
+  const template = await db.template.create({ data: { tenantId: tenant.id, name: "Synthetic runtime agreement", publicSlug: `runtime-template-${id}`, bodyMarkdown: "Synthetic runtime CI agreement terms.", pages: 1 } });
+  const sent = await post("/api/workspace/envelopes", { op: "send", data: { title: `Runtime ${id}`, templateId: template.id, recipients: [{ name: "CI Signer", email: "signer@example.test" }] } }, token);
   expect(sent.status).toBe(200);
   const envelope = await db.envelope.findFirstOrThrow({ where: { tenantId: tenant.id }, include: { recipients: true } });
   const signer = envelope.recipients[0];
   await waitFor(async () => messages.some((message) => message.includes(signer.accessToken!)), "SMTP invitation");
   expect((await post(`/api/sign/${signer.accessToken}`, { op: "view" })).status).toBe(200);
-  const signed = await post(`/api/sign/${signer.accessToken}`, { op: "sign", name: "CI Signer" });
+  const signed = await post(`/api/sign/${signer.accessToken}`, { op: "sign", name: "CI Signer", consent: true });
   expect(signed.status).toBe(200);
   expect(signed.body.envelopeStatus).toBe("COMPLETED");
   await waitFor(async () => deliveries.some((delivery) => {

@@ -23,10 +23,13 @@
  * Run: bun test e2e/browser/workspace.test.ts   (needs a server + fresh seed)
  */
 
-import { afterAll, beforeAll, describe, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import type { Browser } from "playwright";
+import { readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { PDFDocument } from "pdf-lib";
 import {
-  clickByName, clickText, closeBrowser, goto, launchBrowser,
+  BASE, clickByName, clickText, closeBrowser, goto, launchBrowser,
   seePlaceholder, seeText, signIn, textGone, withPage,
 } from "./harness";
 
@@ -157,7 +160,7 @@ describe("workspace and signer surfaces", () => {
       await page.locator("#recipient-1-email").fill("jonas.weber@example.com");
 
       await clickByName(page, /Send for signature/);
-      await seeText(page, /Sent to 1 recipient/);
+      await seeText(page, /Envelope prepared for 1 recipients; the first signing invitation and copy notices are queued/);
 
       await clickByName(page, /Documents/);
       await seeText(page, "E2E Playwright NDA");
@@ -167,16 +170,16 @@ describe("workspace and signer surfaces", () => {
   flow("envelope detail shows signers and voiding works", async (b) =>
     withPage(b, async (page) => {
       await signIn(page);
-      await clickByName(page, /Documents/);
-      await seeText(page, /New envelope/);
-      await clickByName(page, /New envelope/);
+      await clickByName(page, /Templates/);
+      await seeText(page, /Use template/);
+      await clickByName(page, /Use template/);
 
       await seeText(page, "Send a document for signature");
       await page.locator("#doc-title").fill("E2E Void Fixture");
       await page.locator("#recipient-1-name").fill("Karla Blanc");
       await page.locator("#recipient-1-email").fill("karla.blanc@example.com");
       await clickByName(page, /Send for signature/);
-      await seeText(page, /Sent to 1 recipient/);
+      await seeText(page, /Envelope prepared for 1 recipients; the first signing invitation and copy notices are queued/);
 
       await clickText(page, "E2E Void Fixture");
       await seeText(page, "Signers");
@@ -248,8 +251,129 @@ describe("workspace and signer surfaces", () => {
   flow("the sealed signer-journey envelope verifies on the public portal", async (b) =>
     withPage(b, async (page) => {
       await goto(page, "/verify?code=DOC-E2E0004");
-      await seeText(page, /Verified - cryptographic evidence found/, 30_000);
+      await seeText(page, /Completion record found/, 30_000);
       await seeText(page, "E2E Fixture — Service Agreement (signer journey)");
       await seeText(page, "E2E Testing");
     }));
+  // Uses the existing CI server/scratch database and real UI submission. API
+  // calls set up the contract and read owner-authorized handoff links only.
+  flow("two signers complete all field types on desktop and mobile with private PDFs", async (b) => {
+    const title = `E2E mobile signing ${crypto.randomUUID()}`;
+    const recipients = [
+      { name: "Alex Mobile", email: "alex.mobile@example.test", role: "SIGNER" },
+      { name: "Jamie Desktop", email: "jamie.desktop@example.test", role: "SIGNER" },
+    ];
+    const fields = recipients.flatMap((recipient, recipientIndex) =>
+      ["signature", "initials", "text", "date", "checkbox"].map((type, index) => ({
+        id: `workflow-${recipientIndex}-${type}`, type, pageNumber: 1,
+        x: recipientIndex === 0 ? 5 : 53, y: 25 + index * 12,
+        width: type === "checkbox" ? 5 : 40, height: 6,
+        recipientIndex, recipientEmail: recipient.email, recipientName: recipient.name,
+        label: `${recipient.name} ${type}`, required: true,
+      })));
+    let links: string[] = [];
+    await withPage(b, async (page) => {
+      await signIn(page);
+      links = await page.evaluate(async ({ title, recipients, fields }) => {
+        const templatesResponse = await fetch("/api/workspace/templates");
+        if (!templatesResponse.ok) throw new Error("Template setup read failed");
+        const templates = await templatesResponse.json();
+        const template = templates.rows.find((row: {name: string}) => row.name === "E2E Clause Library");
+        if (!template) throw new Error("Missing isolated contract fixture");
+        const sent = await fetch("/api/workspace/envelopes", {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ op: "send", data: { title, recipients, fields, templateId: template.id } }),
+        });
+        if (!sent.ok) throw new Error(`Send failed: ${sent.status}`);
+        const listed = await fetch(`/api/workspace/envelopes?search=${encodeURIComponent(title)}`);
+        const list = await listed.json();
+        const envelope = list.rows.find((row: {title: string}) => row.title === title);
+        if (!envelope) throw new Error("Sent envelope was not listed");
+        const detailResponse = await fetch(`/api/workspace/envelope-detail?id=${encodeURIComponent(envelope.id)}`);
+        if (!detailResponse.ok) throw new Error("Owner handoff read failed");
+        const detail = await detailResponse.json();
+        return detail.recipients.map((recipient: {signLink: string | null}) => recipient.signLink);
+      }, { title, recipients, fields });
+      expect(links).toHaveLength(2);
+      expect(links.every(link => typeof link === "string" && link.startsWith("/sign/"))).toBe(true);
+    });
+    const completedPath = (link: string) => `/api${link}/completed`;
+    await withPage(b, async (page) => {
+      await goto(page, links[1]);
+      await seeText(page, "It is not your turn to sign yet");
+      expect((await page.request.get(`${BASE}${completedPath(links[1])}`)).status()).toBe(409);
+    });
+    for (let index = 0; index < recipients.length; index++) {
+      await withPage(b, async (page) => {
+        if (index === 0) await page.setViewportSize({ width: 390, height: 844 });
+        const viewed = page.waitForResponse(response => response.request().method() === "POST" &&
+          response.url().endsWith(`/api${links[index]}`) && response.request().postDataJSON()?.op === "view",
+          { timeout: 30_000 });
+        await goto(page, links[index]);
+        expect((await viewed).status()).toBe(200);
+        await seeText(page, /Adopt your signature/);
+        await page.locator("#sign-name-input").fill(recipients[index].name);
+        await page.getByTestId("font-great-vibes").click();
+        await page.waitForFunction(() => document.querySelector('[data-testid="font-great-vibes"]')?.getAttribute("aria-checked") === "true");
+        await page.locator(`#value-workflow-${index}-text`).fill(`Reviewed by ${recipients[index].name}`);
+        await page.locator(`#value-workflow-${index}-date`).fill("2026-10-04");
+        const checkbox = page.locator(`#value-workflow-${index}-checkbox`);
+        await checkbox.check();
+        await page.waitForFunction(id => document.getElementById(id)?.getAttribute("aria-checked") === "true", `value-workflow-${index}-checkbox`);
+        await page.locator("#consent").check();
+        await page.waitForFunction(() => document.getElementById("consent")?.getAttribute("aria-checked") === "true");
+        const signed = page.waitForResponse(response => response.request().method() === "POST" &&
+          response.url().endsWith(`/api${links[index]}`) && response.request().postDataJSON()?.op === "sign", { timeout: 30_000 });
+        await page.getByTestId("sign-submit").click();
+        const response = await signed;
+        expect(response.status()).toBe(200);
+        const payload = response.request().postDataJSON();
+        expect(payload.consent).toBe(true);
+        expect(payload.name).toBe(recipients[index].name);
+        expect(payload.font).toBe("great-vibes");
+        expect(payload.values).toEqual({
+          [`workflow-${index}-text`]: `Reviewed by ${recipients[index].name}`,
+          [`workflow-${index}-date`]: "2026-10-04",
+          [`workflow-${index}-checkbox`]: true,
+        });
+        expect((await response.json()).sealed).toBe(index === 1);
+        await seeText(page, "Document signed");
+        if (index === 0) {
+          expect((await page.request.get(`${BASE}${completedPath(links[0])}`)).status()).toBe(409);
+          expect(await page.getByRole("link", {name: "Download completed PDF", exact: true}).count()).toBe(0);
+        }
+      });
+    }
+    // A mobile signer returning after the second signature can download both
+    // genuine PDF artifacts through the recipient-only links.
+    await withPage(b, async (page) => {
+      await page.setViewportSize({ width: 390, height: 844 });
+      await goto(page, links[0]);
+      await seeText(page, "Document signed");
+      const recordResponse = await page.request.get(`${BASE}${completedPath(links[0])}?format=record`);
+      expect(recordResponse.status()).toBe(200);
+      const record = await recordResponse.json();
+      expect(record.status).toBe("COMPLETED");
+      expect(record.signers.map((signer: {adoptedName: string}) => signer.adoptedName)).toEqual(recipients.map(recipient => recipient.name));
+      expect(record.signers.every((signer: {consentAcceptedAt: string; authMethod: string}) => !!signer.consentAcceptedAt && signer.authMethod === "EMAIL_LINK")).toBe(true);
+      for (const [label, hash, pages] of [
+        ["Download completed PDF", record.finalDocumentSha256, 2],
+        ["Download completion record PDF", record.completionRecordSha256, null],
+      ] as const) {
+        const downloadPromise = page.waitForEvent("download", { timeout: 30_000 });
+        await page.getByRole("link", {name: label, exact: true}).click();
+        const download = await downloadPromise;
+        expect(await download.failure()).toBeNull();
+        const path = await download.path();
+        if (!path) throw new Error("Missing browser download artifact");
+        const bytes = await readFile(path);
+        expect(bytes.subarray(0, 5).toString()).toBe("%PDF-");
+        expect(createHash("sha256").update(bytes).digest("hex")).toBe(hash);
+        const pdf = await PDFDocument.load(bytes);
+        if (pages !== null) expect(pdf.getPageCount()).toBe(pages);
+        else expect(pdf.getPageCount()).toBeGreaterThan(0);
+      }
+    });
+  });
+
 });

@@ -1,3 +1,5 @@
+import { buildFinalDocument } from "@/lib/final-document";
+import { readContractSnapshot, ContractSnapshotError } from "@/lib/contract-snapshot";
 /**
  * Evidence pack — the portable, self-verifying proof of a completed envelope.
  *
@@ -7,7 +9,7 @@
  *   README.txt                        bilingual instructions
  *   verify.html                       offline verifier — browser, no server
  *   CERTIFICATE-OF-COMPLETION.html    human proof, print-to-PDF ready (FR/EN)
- *   document/<file>                   the sealed artefact, byte-exact
+ *   document/<file>                   the original document, byte-exact
  *   evidence/event-ledger.csv         the complete event ledger
  *   evidence/envelope.json            machine-readable envelope record
  *   certificate/evidence-key.pem      the signing certificate (DNS-SAN when the
@@ -79,7 +81,6 @@ async function loadEnvelope(key: string, tenantId: string) {
       events: { orderBy: { at: "asc" } },
       tenant: { select: { name: true } },
       document: true,
-      template: { select: { name: true, bodyMarkdown: true } },
       createdBy: { select: { firstName: true, lastName: true, email: true } },
     },
   });
@@ -145,7 +146,8 @@ function renderCertificateHtml(e: FullEnvelope): string {
     <div><b>Document</b>${escapeHtml(e.title)}</div>
     <div><b>Organisation / Organization</b>${escapeHtml(e.tenant.name)}</div>
     <div><b>Expéditeur / Sender</b>${escapeHtml(`${e.createdBy.firstName} ${e.createdBy.lastName}`)} &lt;${escapeHtml(e.createdBy.email)}&gt;</div>
-    <div><b>Statut / Status</b>${escapeHtml(e.status)}${e.conformanceLevel ? ` · PAdES ${escapeHtml(e.conformanceLevel)}` : ""}</div>
+    <div><b>Statut / Status</b>${escapeHtml(e.status)}</div>
+    <div><b>Conformance enregistrée / Recorded conformance</b>${e.conformanceLevel ? escapeHtml(e.conformanceLevel) : "Not asserted"}</div>
     <div><b>Scellé le / Sealed on</b>${escapeHtml(fmtFr(e.sealedAt))}<span class="en"> (${escapeHtml(fmtEn(e.sealedAt))})</span></div>
     <div><b>Pages</b>${escapeHtml(String(e.pages))}</div>
   </div>
@@ -160,8 +162,9 @@ function renderCertificateHtml(e: FullEnvelope): string {
   <p class="sub">${signed.length}/${signers.length} signataire(s) ont signé · ${signed.length}/${signers.length} signer(s) completed</p>
 
   <h2>Preuve cryptographique · Cryptographic evidence</h2>
-  <p class="sub">Empreinte SHA-256 du document scellé (calculée à la signature et vérifiable sur le portail public verify.docurama.eu) ·
-  SHA-256 digest of the sealed document (computed at sealing time, verifiable on the public portal):</p>
+  <p class="sub">${e.documentId
+    ? "Empreinte SHA-256 du document original importé. Ce parcours de signature ne modifie pas le PDF. — SHA-256 of the original uploaded document; this signing flow leaves the PDF unchanged."
+    : "Empreinte SHA-256 des champs d'identité et d'état de signature de l'enveloppe. — SHA-256 binding the frozen template terms and location hints with selected envelope identity and signing-state fields at completion."}</p>
   <div class="digest">${escapeHtml(e.sha256 ?? "")}</div>
 
   <h2>Piste d'audit · Audit trail</h2>
@@ -169,11 +172,14 @@ function renderCertificateHtml(e: FullEnvelope): string {
   ${e.events.length} timestamped event(s) recorded — full detail in <code>evidence/event-ledger.csv</code>.</p>
 
   <footer>
-    <p><b>Honnêteté de conformance · Compliance honesty.</b>
-    Docurama n'est pas un prestataire qualifié (QTSP) au sens du règlement eIDAS. Le niveau de conformance indiqué
-    reflète exactement les mécanismes appliqués (SES / AdES / alignement QES, PAdES ${escapeHtml(e.conformanceLevel ?? "B-T")}).
-    &nbsp;<span class="en">Docurama is not a qualified trust service provider under eIDAS. The stated conformance level reflects
-    exactly the mechanisms applied; it is a conformance claim, not a qualified-seal claim.</span></p>
+    <p><b>Portée de la preuve — Evidence scope.</b>
+    La signature du manifeste authentifie les fichiers exportés. Elle ne constitue pas une signature PDF PAdES,
+    un horodatage de confiance ou une certification de conformité réglementaire.
+    &nbsp;<span class="en">${e.conformanceLevel
+      ? `Recorded conformance label: ${escapeHtml(e.conformanceLevel)}; this certificate does not independently validate that label.`
+      : "PAdES conformance: not asserted. No PAdES PDF signature or trusted timestamp was created by this signing flow."}
+    The evidence-key signature authenticates the exported artifacts; it does not certify signer identity,
+    qualified-signature status or regulatory compliance.</span></p>
     <p>Docurama SAS · 1 Rue Marguerin, 75014 Paris, France · docurama.eu — Généré le / Generated on ${escapeHtml(fmtFr(new Date()))}</p>
   </footer>
 </div>
@@ -431,7 +437,7 @@ CONTENU / CONTENTS
                                    Offline verifier — open it in any browser
   CERTIFICATE-OF-COMPLETION.html   Certificat de signature bilingue, prêt à imprimer en PDF
                                    Bilingual signature certificate, print-to-PDF ready
-  document/                        Le document scellé, octet pour octet / the sealed artefact, byte-exact
+  document/                        Le document original, octet pour octet / the original document, byte-exact
   evidence/event-ledger.csv        Piste d'audit horodatée complète / full timestamped audit ledger
   evidence/envelope.json           Enregistrement d'enveloppe lisible par machine / machine-readable record
   certificate/evidence-key.pem     Certificat X.509 de la clé de signature (SAN DNS si domaine vérifié)
@@ -458,16 +464,18 @@ CONFIANCE / TRUST
   enveloppe dans une chaîne append-only (hachages chaînés) et un point de contrôle
   signé — verify.html re-hache toute la chaîne hors ligne ; toute réécriture de
   l'historique la casserait.
-  Docurama n'est pas un QTSP eIDAS — le niveau de conformance indiqué reflète
-  exactement les mécanismes appliqués.
+  Une conformance vide signifie qu'aucune conformance PAdES n'est affirmée.
+  La signature du manifeste authentifie les fichiers exportés ; elle ne crée pas
+  de signature PDF qualifiée ni d'horodatage de confiance.
 
   The manifest is signed by the issuing workspace's evidence key. The certificate
   thumbprint is recorded in the manifest; the SAN domain was verified via a DNS TXT
   record before the certificate was issued. The manifest also carries a transparency
   registry: this envelope's entry in an append-only hash chain plus a signed
   checkpoint — verify.html re-hashes the whole chain offline; any rewrite of
-  history would break it. Docurama is not an eIDAS QTSP — the stated conformance
-  level reflects exactly the mechanisms applied.
+  history would break it. Null conformance means no PAdES conformance is asserted.
+  The manifest signature authenticates the exported artifacts; it does not create
+  a qualified PDF signature or a trusted timestamp.
 
 Docurama SAS · 1 Rue Marguerin, 75014 Paris, France · docurama.eu
 `;
@@ -488,6 +496,13 @@ export async function buildEvidencePack(envelopeKey: string, tenantId: string): 
     throw new EvidencePackError("An evidence pack can only be exported for a completed, sealed envelope", 400);
   }
 
+  if (e.document && e.document.tenantId !== e.tenantId) throw new EvidencePackError("Invalid document workspace binding", 409);
+  let contract;
+  try { contract = readContractSnapshot(e); }
+  catch (error) {
+    if (!(error instanceof ContractSnapshotError)) throw error;
+    throw new EvidencePackError(error.message, 409);
+  }
   const key = await getOrCreateEvidenceKey(e.tenantId);
 
   /* Transparency registry: the seal commitment is appended to the tenant's
@@ -529,8 +544,7 @@ export async function buildEvidencePack(envelopeKey: string, tenantId: string): 
   if (e.documentId && e.document) {
     try {
       const data = await readStoredBytes(e.document.storageKey);
-      const safeName = (e.document.filename || "document.pdf").replace(/[\\/:*?"<>|]/g, "_").slice(0, 120);
-      artifacts.push({ path: `document/${safeName}`, data });
+      artifacts.push({ path: "document/original.pdf", data });
     } catch {
       artifacts.push({
         path: "document/FILE-MISSING.txt",
@@ -541,11 +555,27 @@ export async function buildEvidencePack(envelopeKey: string, tenantId: string): 
         ),
       });
     }
-  } else if (e.template?.bodyMarkdown) {
+  }
+  if (contract) {
     artifacts.push({
       path: "document/contract-text.md",
-      data: Buffer.from(e.template.bodyMarkdown, "utf8"),
+      data: Buffer.from(contract.bodyMarkdown, "utf8"),
     });
+  }
+
+  if (contract) artifacts.push({ path: "evidence/contract-snapshot.json", data: Buffer.from(canonicalJson(contract), "utf8") });
+
+  let finalDocumentSha256: string | null = null;
+  let finalDocumentPages: number | null = null;
+  let completionRecordSha256: string | null = null;
+  const signedRecipients = e.recipients.filter(r => r.role === "SIGNER");
+  if (signedRecipients.length && signedRecipients.every(r => r.signatureData)) {
+    const final = await buildFinalDocument(e);
+    finalDocumentSha256 = final.sha256;
+    finalDocumentPages = final.pages;
+    completionRecordSha256 = final.recordSha256;
+    artifacts.push({ path: "document/completed.pdf", data: final.bytes });
+    artifacts.push({ path: "completion/record.pdf", data: final.recordBytes });
   }
 
   /* Ledger CSV + envelope record */
@@ -575,6 +605,12 @@ export async function buildEvidencePack(envelopeKey: string, tenantId: string): 
       status: r.status, signedAt: iso(r.signedAt),
     })),
     eventCount: e.events.length,
+    finalDocumentSha256,
+    finalDocumentPages,
+    completionRecordSha256,
+    originalFilename: e.document?.filename ?? null,
+    evidenceSha256: e.evidenceSha256 ?? null,
+    adoptionEvidence: signedRecipients.map(r => ({ order: r.order, email: r.email, signatureData: r.signatureData ? JSON.parse(r.signatureData) : null })),
   };
   artifacts.push({ path: "evidence/envelope.json", data: Buffer.from(JSON.stringify(envelopeRecord, null, 2), "utf8") });
 
@@ -598,6 +634,10 @@ export async function buildEvidencePack(envelopeKey: string, tenantId: string): 
       status: e.status,
       pages: e.pages,
       sha256: e.sha256,
+      finalDocumentSha256,
+      finalDocumentPages,
+      completionRecordSha256,
+      evidenceSha256: e.evidenceSha256 ?? null,
       conformance: e.conformanceLevel,
       createdAt: iso(e.createdAt),
       sealedAt: iso(e.sealedAt),

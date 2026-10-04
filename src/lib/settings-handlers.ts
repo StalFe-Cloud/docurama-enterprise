@@ -497,10 +497,17 @@ export async function postSettingsOp(
       return jsonError("That code is not valid yet - make sure your authenticator app added the account and check its clock", 401);
     }
     const { codes, hashes } = generateRecoveryCodes();
-    await db.user.update({
-      where: { id: me.id },
-      data: { totpSecret: pending, totpPendingSecret: null, totpEnabled: true, totpRecoveryCodes: JSON.stringify(hashes) },
+    const enabled = await db.$transaction(async (tx) => {
+      const result = await tx.user.updateMany({
+        where: { id: me.id, totpPendingSecret: pending },
+        data: { totpSecret: pending, totpPendingSecret: null, totpEnabled: true, totpRecoveryCodes: JSON.stringify(hashes) },
+      });
+      if (result.count !== 1) return false;
+      await tx.session.updateMany({ where: { userId: me.id, revokedAt: null, NOT: { id: me.sessionId ?? "" } }, data: { revokedAt: new Date() } });
+      if (me.sessionId) await tx.session.updateMany({ where: { id: me.sessionId, userId: me.id, revokedAt: null }, data: { mfaVerifiedAt: new Date() } });
+      return true;
     });
+    if (!enabled) return jsonError("Enrollment changed; start again", 409);
     await db.securityEvent.create({
       data: { type: "2FA_ENABLED", severity: "INFO", actor: me.email, ip, actorUserId: me.id, subjectUserId: me.id, tenantId, blocked: false, detail: "TOTP enrolled from Settings → Profile" },
     });
@@ -510,6 +517,10 @@ export async function postSettingsOp(
   }
 
   if (op === "2fa.disable") {
+    const enforced = await db.member.findFirst({
+      where: { userId: me.id, status: "ACTIVE", tenant: { enforceTwoFactor: true, status: { not: "SUSPENDED" } } },
+    });
+    if (enforced) return jsonError("Your workspace requires two-factor authentication; it cannot be disabled", 403);
     if (!user.totpEnabled) return jsonError("Two-factor authentication is not enabled");
     if (!(await verifyPasswordAsync(String(data.password ?? ""), user.passwordHash))) {
       return jsonError("Password is incorrect", 401);

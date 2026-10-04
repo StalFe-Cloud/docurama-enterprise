@@ -258,6 +258,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   try {
     const me = await requireUser();
     const { section } = await ctx.params;
+    if (section === "envelopes") {
+      const dedicated = await import("../envelopes/route");
+      return dedicated.POST(req);
+    }
     const body = (await req.json().catch(() => ({}))) as { op?: string; id?: string; data?: Record<string, unknown> };
     const op = body.op ?? "";
     const id = body.id ?? "";

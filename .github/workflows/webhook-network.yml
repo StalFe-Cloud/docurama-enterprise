@@ -22,7 +22,7 @@ jobs:
           persist-credentials: false
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.2.22"
+          bun-version: "1.4.2"
       - run: bun install --frozen-lockfile
       - name: Verify real local TLS under Node and Bun, with strict trust checks
         run: node --test --test-concurrency=1 e2e/webhook-network.test.mjs

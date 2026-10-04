@@ -1,4 +1,4 @@
-FROM oven/bun:1.2.22 AS base
+FROM oven/bun:1.4.2 AS base
 WORKDIR /app
 # Prisma must detect the installed OpenSSL ABI during client generation and
 # find the same libraries when the generated engine starts in the runner.

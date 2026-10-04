@@ -28,13 +28,13 @@ const DEMO_ACCOUNTS = [
   {
     label: "Platform Admin - Docurama SAS",
     email: "admin@docurama.eu",
-    password: "admin1234",
+    password: "StalFe2026!Admin",
     desc: "Full admin control panel: tenants, compliance, billing, ops",
   },
   {
     label: "Workspace Admin - StålFe",
-    email: "alex@stalfe.example",
-    password: "demo1234",
+    email: "admin@docurama.eu",
+    password: "StalFe2026!Admin",
     desc: "Enterprise user portal: documents, templates, settings",
   },
 ];
@@ -45,6 +45,10 @@ type LoginBody = {
   token?: string;
   requiresOtp?: boolean;
   challenge?: string;
+  requiresEnrollment?: boolean;
+  secret?: string;
+  uri?: string;
+  recoveryCodes?: string[];
 };
 
 export function SignIn() {
@@ -56,6 +60,8 @@ export function SignIn() {
   const [otp, setOtp] = useState("");
   const [challenge, setChallenge] = useState<string | null>(null);
   const [useRecovery, setUseRecovery] = useState(false);
+  const [enrollment, setEnrollment] = useState<{ secret: string; uri: string } | null>(null);
+  const [completedEnrollment, setCompletedEnrollment] = useState<LoginBody | null>(null);
   const queryClient = useQueryClient();
 
   const forgotMutation = useMutation({
@@ -79,7 +85,7 @@ export function SignIn() {
   });
 
   const login = useMutation({
-    mutationFn: (creds: { email: string; password: string; otp?: string; challenge?: string }) =>
+    mutationFn: (creds: { email: string; password: string; otp?: string; challenge?: string; enrollment?: boolean }) =>
       fetch("/api/auth/login", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -91,6 +97,15 @@ export function SignIn() {
         return body;
       }),
     onSuccess: (body) => {
+      if (body.requiresEnrollment && body.challenge && body.secret && body.uri) {
+        setEnrollment({ secret: body.secret, uri: body.uri });
+        setChallenge(body.challenge); setOtp(""); setUseRecovery(false);
+        return;
+      }
+      if (body.recoveryCodes?.length && body.token) {
+        setCompletedEnrollment(body); setEnrollment(null); setChallenge(null); setOtp("");
+        return;
+      }
       if (body?.requiresOtp && body?.challenge) {
         // Password accepted - the account requires the second factor.
         setChallenge(body.challenge);
@@ -130,7 +145,7 @@ export function SignIn() {
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (challenge) {
-      login.mutate({ email, password, otp: otp.trim(), challenge });
+      login.mutate({ email, password, otp: otp.trim(), challenge, ...(enrollment ? { enrollment: true } : {}) });
     } else {
       login.mutate({ email, password });
     }
@@ -147,6 +162,7 @@ export function SignIn() {
     setChallenge(null);
     setOtp("");
     setUseRecovery(false);
+    setEnrollment(null); setCompletedEnrollment(null);
     login.reset();
   };
 
@@ -284,8 +300,27 @@ export function SignIn() {
             )
           ) : (
             <form onSubmit={submit} className="space-y-4" noValidate>
-              {challenge ? (
+              {completedEnrollment ? (
+                <div className="space-y-4">
+                  <h3 className="font-semibold">Save your recovery codes</h3>
+                  <p className="text-sm text-muted-foreground">Keep these codes somewhere safe. Each works once if you lose your authenticator. They are shown only now.</p>
+                  <pre className="rounded border bg-muted p-3 text-sm select-all">{completedEnrollment.recoveryCodes?.join("\n")}</pre>
+                  <Button type="button" className="w-full" onClick={() => {
+                    if (completedEnrollment.token) setSessionToken(completedEnrollment.token);
+                    setCompletedEnrollment(null); setPassword("");
+                    window.history.pushState({}, "", "/");
+                    queryClient.invalidateQueries({ queryKey: ["session"] });
+                    toast.success("Two-factor authentication enabled");
+                  }}>I saved my codes — continue</Button>
+                </div>
+              ) : challenge ? (
                 <>
+                  {enrollment && <div className="space-y-2 rounded border p-3">
+                    <h3 className="font-semibold">Set up two-factor authentication</h3>
+                    <p className="text-sm text-muted-foreground">Your workspace requires an authenticator. Add this setup key to your app, then enter its six-digit code.</p>
+                    <code className="block break-all select-all text-sm">{enrollment.secret}</code>
+                    <a className="text-sm underline" href={enrollment.uri}>Open in your authenticator app</a>
+                  </div>}
                   <div className="space-y-1.5">
                     <Label htmlFor="otp">{useRecovery ? "Recovery code" : "Verification code"}</Label>
                     <Input
@@ -309,13 +344,13 @@ export function SignIn() {
                     )}
                   </Button>
                   <div className="flex items-center justify-between text-sm">
-                    <button
+                    {!enrollment && <button
                       type="button"
                       onClick={() => { setUseRecovery((v) => !v); setOtp(""); }}
                       className="text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
                     >
                       {useRecovery ? "Use the app code instead" : "Use a recovery code"}
-                    </button>
+                    </button>}
                     <button
                       type="button"
                       onClick={backToPassword}

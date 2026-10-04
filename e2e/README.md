@@ -1,211 +1,137 @@
-# Docurama E2E — browser suite
+# Docurama E2E — isolated browser and API suites
 
-End-to-end coverage of the critical user journeys. Everything runs under
-`bun test`; the browser suites drive Chromium through Playwright.
-
-> Previously these journeys ran on [Maestro](https://github.com/mobile-dev-inc/Maestro)
-> as YAML flows under `e2e/flows/`. Maestro drove its own bundled browser over
-> CDP and flaked on roughly one flow per CI run — a different flow each time —
-> while the Playwright suites ran green, and a full pass took ~19 minutes
-> against ~95 seconds. All 29 flows were ported and Maestro was removed.
-> `e2e/browser/harness.ts` carries the detail.
-
+Current browser tests use Playwright through `bun test` in `e2e/browser/`.
+Maestro YAML flows belong to historical cycles; `docs/IMPROVEMENT-PLAN.md`,
+`docs/QUALITY-VERIFICATION-20260920.md` and `worklog.md` preserve their receipts.
+Those results and timings do not establish a pass on a new revision.
 
 ## Quick start
 
+For the full local lifecycle, use an isolated **Linux** checkout with installed
+dependencies, a generated Prisma client, Node, Bun, Bash and Chrome/Chromium.
+The default local runner refuses Windows before scratch creation, migration or
+server launch because crash-safe child-tree ownership is not available there.
+Use an isolated Linux VM or CI for full local/browser acceptance. Focused Node
+isolation/helper/migration tests can run on Windows; they do not establish a
+complete local E2E or browser pass:
+
 ```bash
-bun run test:e2e                 # boots a dev server (if needed), seeds, runs everything
+bash e2e/run.sh
+# Equivalent orchestrator entry point:
+# node e2e/run-isolated.mjs
+
+# Focused isolation-policy regression; does not run the full app suite:
+node e2e/isolation.test.mjs
 ```
 
-To iterate on one browser suite against a server that is already up:
+The runner rejects `.env`, `.env.local`, `.env.development` and
+`.env.development.local` in the checkout because Next.js loads these separately
+from Bun. Use a separate clean checkout instead of moving an operator's live
+configuration. Bun child commands use `--no-env-file`.
+Use a Bun release that supports this option. Local validation used Bun 1.4.2;
+Bun 1.2.22 does not support `--no-env-file` and cannot run this safe entry point.
+Keep the CI tool pin and its acceptance receipt aligned with the runner.
 
-```bash
-E2E_BASE_URL=http://127.0.0.1:3000 bun test e2e/browser/public.test.ts
-```
+Local runs ignore ambient `DATABASE_URL` and refuse `E2E_DATABASE_URL`. Each run
+creates an owned `docurama-e2e-*` directory under the operating system temporary
+directory, containing `suite.db`, an unseeded migrated `fixture.db`, copied SQLite
+schema/history, document storage and `server.log`. Reviewed SQLite migrations
+initialize fresh targets; the runner never copies, pushes or seeds `db/custom.db`.
+Mail and S3 suites copy only the runner-provided `E2E_FIXTURE_DB`.
 
-Requirements: `bun` and a Chrome/Chromium binary. Resolution order is
-`CHROME_BIN`, then a Playwright-managed build in `~/.cache/ms-playwright`
-(`bunx playwright install chromium`), then `PATH`, then the well-known Windows
-install locations. In unprivileged containers Chrome needs `--no-sandbox`,
-which the harness passes for you.
+The runner starts and stops its own Next.js dev server on `127.0.0.1`, choosing
+an unused port by default. An explicit `E2E_BASE_URL` must be plain
+`http://127.0.0.1:<port>`; a listening server on that port is refused. It never
+reuses a separately running application. Scratch files and the owned server are
+cleaned on success or failure; failure logs are printed before cleanup. Capture
+the command output outside the scratch directory when collecting release evidence.
 
-## Layout
+The runner constructs a strict allowlist of required process/test settings rather
+than forwarding inherited configuration. External storage, payment, IdP, CAPTCHA,
+AI-provider, witnessing and portal/API/auth credentials are excluded. Next telemetry
+is disabled; the Bash entry clears `NODE_OPTIONS` and `BUN_OPTIONS`. For explicit
+remote/test dispatch on Windows, installed Git Bash is selected by default;
+`E2E_BASH_BIN` accepts an absolute executable path override. This does not enable
+the unsupported Windows full local lifecycle.
 
-```
-e2e/
-  browser/       Playwright browser suites (bun test) — the critical user
-                 journeys. harness.ts holds the shared browser lifecycle,
-                 Chromium resolution and locator helpers;
-                 public/auth/workspace/admin.test.ts cover the four surfaces.
-                 The workspace suite mutates seeded fixtures and needs a fresh
-                 `bun e2e/seed.ts` per run. E2E_SKIP_BROWSER=1 skips them.
-                 Target origin: E2E_BASE_URL.
-  seed.ts        Idempotent Prisma seed. Dedicated "E2E Testing" tenant,
-                 e2e@docurama.eu / e2ePass1234! (workspace) and
-                 e2e-admin@docurama.eu / e2eAdmin1234! (platform admin),
-                 fixed-code fixtures DOC-E2E0001 (SENT), DOC-E2E0002
-                 (COMPLETED + sealed), DOC-E2E0003 (decline flow) and
-                 DOC-E2E0004 (signer journey), fixed signing tokens for the
-                 signer-portal flows, an API key (ENVELOPES scope) plus a
-                 cold-bucket MCP rate key for the API-layer tests, an MCP
-                 config (enabled, all 4 tools, 120/min) + a workspace
-                 template fixture for the MCP suite, a spent "E2E Quota"
-                 STARTER tenant (25/25 envelopes this month,
-                 e2e-quota@docurama.eu / e2eQuota1234!) for the 402 test,
-                 and an attested-verification fixture
-                 DOC-E2EATST (remote "self-hosted instance" registry row
-                 with a real openssl key, a real transparency chain claim,
-                 and a portal-log witnessing entry). Wipes its own fixtures
-                 and the portal registry tables on every run — demo data is
-                 never touched.
-  api.test.ts    API-layer suite (bun test): X-API-Key auth, scope 403s,
-                 verify-engine states, list/detail reads, sign-endpoint
-                 validation, and a leak check that signing tokens never
-                 appear in v1 payloads. Also: the signer-preview watermark
-                 (unit ink-bounds + an owner-vs-signer pixel diff that locks
-                 the watermark into the rendered page) and the spent-plan
-                 quota 402 (a STARTER tenant whose month the seed fills).
-  evidence.test.ts  Evidence-layer suite (bun test): downloads an evidence
-                 pack over the v1 API, parses the raw ZIP itself, re-verifies
-                 the manifest signature + every artifact hash (what
-                 verify.html does in a browser); runs the /api/attestations
-                 receiver loopback (TOFU registration, idempotent re-push,
-                 tampered signature, stolen thumbprint, pinned-key swap,
-                 cross-instance code claim 409); pure-function tests for the
-                 SPF/DMARC posture parsers.
-  transparency.test.ts  Transparency-registry suite (bun test): pack
-                 transparency block verified offline (commitment recomputed
-                 from manifest-only fields → chain → signed checkpoint),
-                 tampered commitment/segment detection, receiver chain-claim
-                 validation (commitment mismatch 400, inconsistent entry
-                 400), **chain rewrite detection 409**, idempotent no-grow,
-                 signed checkpoint verification, and inclusion proofs for the
-                 seeded fixture (incl. a tamper path).
-  mcp.test.ts    MCP server suite (bun test): JSON-RPC handshake, tools/list
-                 with the tenant allowlist, real tool calls against the
-                 seeded fixtures, 401/403 gates, RPC error codes, and the
-                 per-key rate limit (429) — config mutations always restore.
-  plans.test.ts  Pricing/onboarding/billing suite (bun test, cycle 10): the
-                 shared plan catalog (SOLO = Starter at one seat, 50-envelope
-                 STARTER, incremental term discounts 0/5/10/15%, rollover
-                 caps, outcome framing instead of "most popular"), the
-                 pricing + /enterprise pages, signup plan prefill with hard
-                 seat limits (SOLO invite → 403), the public enterprise-lead
-                 pipeline (outbox copy to sales@, 429 throttle, admin
-                 triage), envelope rollover on renewal (carry-forward incl.
-                 the one-allowance cap and idempotency), and small-team-group
-                 ops (create/assign/delete, non-admin 403).
-  webhooks.test.ts  Webhook dispatcher suite (bun test, in-process lib + real
-                 server): signed delivery with HMAC-SHA256 verification over
-                 the raw body, subscription filtering, a 500 → retry-pass
-                 recovery that must be byte-identical (same payload snapshot,
-                 same HMAC), the documented backoff schedule, and one
-                 full-path check — an envelope sent over the workspace API
-                 produces a signed envelope.sent webhook at the receiver.
-  mail.test.ts   Mail delivery engine suite (bun test, own process — it owns
-                 DATABASE_URL + SMTP_URL): a miniature SMTP relay over
-                 node:net captures real dialogs. Covers outbox-only mode,
-                 delivery + SENT transitions, temporary-failure backoff and
-                 deferral of not-due rows, recovery on retry, terminal FAILED
-                 at 5 attempts, and SMTP_URL parsing (tls=off, garbage
-                 degrades to outbox-only).
-  visual.test.ts Visual-regression smoke (bun test + Playwright): every
-                 public route screenshotted in a frozen context (fixed
-                 viewport, reduced motion, animations finished, dev overlay
-                 hidden) and diffed against e2e/baselines/. Also measures
-                 LCP on / and /templates with a generous dev-mode budget.
-  baselines/     Committed PNG baselines for visual.test.ts (see below).
-  run.sh         Orchestrator: env guard → server (DOCURAMA_WORKER=off so
-                 retry passes are explicit, not raced with the 30s worker) →
-                 warm-up → seed → tsc gate → API + evidence + transparency +
-                 MCP + webhooks tests → mail suite (own process) → browser →
-                 report. Accepts zero or more flow paths (default: all).
-  flows/
-    public/      No-auth surfaces: marketing, French catalog, verify portal
-                 (NOT_FOUND + seeded VERIFIED + attested DOC-E2EATST),
-                 docs/developers/status, signer-portal invalid-link state.
-    auth/        Typed sign-in, demo one-click buttons, wrong password,
-                 forgot password, sign-out.
-    workspace/   Documents table, templates catalog, template→send→SENT
-                 journey, envelope detail→void, in-app verify, per-signer
-                 link copy + QR handoff, evidence-pack export entry point,
-                 and the signer journeys: sign→seal→public-verify and
-                 decline-with-reason.
-    admin/       Platform overview, users directory, platform settings.
-```
+Test defaults disable the background worker and Rekor, use manual billing and
+empty SMTP configuration, and enable demo mode and private webhook fixtures only
+inside the disposable test process. These defaults are not production settings.
+Do not invoke mutating browser/API suites against retained or production servers.
 
-## Selector conventions
+## Explicit disposable CI PostgreSQL mode
 
-Prefer accessible locators — `getByRole`, `getByLabel`, `getByText` — over
-`data-testid`, and add a testid only where no accessible name exists. The
-helpers in `e2e/browser/harness.ts` (`seeText`, `clickByName`, `clickText`,
-`seePlaceholder`, `scrollToText`) cover most cases.
+For Linux CI that needs an owned application process, use
+`node e2e/run-postgres-isolated.mjs`. It requires `CI=true`,
+`E2E_REMOTE_DISPOSABLE=1` and an explicit loopback PostgreSQL
+`E2E_DATABASE_URL` whose database name ends in `_test` or `_e2e`.
+It reserves an explicit `E2E_BASE_URL` port or chooses a fresh loopback port,
+starts its own Next server, proves direct PID/socket ownership through `/proc`,
+and stops that owned process. It creates no SQLite schema or fixture. The caller
+must apply the reviewed PostgreSQL migrations beforehand and owns the database
+lifecycle; this runner owns the application process only. Actual PostgreSQL
+integration acceptance remains pending. Windows full lifecycle fails closed.
 
-Three things are not rendered text and need their own locator:
+`E2E_START_SERVER=0` is reserved for a caller-managed synthetic CI installation.
+It requires `CI=true`, `E2E_REMOTE_DISPOSABLE=1`, an explicit plain loopback
+`E2E_BASE_URL`, and `E2E_DATABASE_URL` selecting a loopback PostgreSQL database
+whose name ends in `_test` or `_e2e`. All conditions must hold; the flags are
+an assertion of ownership, not proof that an arbitrary database is disposable.
+The caller owns schema migration, provider-specific client generation, server
+lifecycle and database deletion. `remote-suites.sh` runs only the PostgreSQL
+HTTP/browser tier; local SQLite fixture, security and provider suites are excluded.
+This remote PostgreSQL tier has not been executed locally in this hardening review. The runner seeds the selected database unless
+`E2E_SKIP_SEED=1`; that skip requires equivalent fixtures already prepared.
+Never supply deployment credentials or a retained database to this mode.
 
-| what | locator |
-| --- | --- |
-| input placeholders (`Search documents…`) | `seePlaceholder` / `getByPlaceholder` |
-| icon-button `aria-label`s (`Void <title>`) | `getByRole("button", { name })` |
-| `data-testid` (`font-great-vibes`, `evidence-pack-download`) | `getByTestId` |
+## Suite layout and selectors
 
-Playwright normalises whitespace and auto-waits, so neither the tolerant
-`" ?Text ?"` regexes nor explicit wait steps are needed. Keep an explicit
-timeout only where a route cold-compiles in dev mode.
+| Path | Purpose |
+|---|---|
+| `run.sh`, `run-isolated.mjs`, `isolation.mjs` | Guarded orchestration, owned scratch targets and owned server lifecycle |
+| `suites.sh` | Local type gate, deterministic synthetic seed, API/evidence/integration suites and browser tests |
+| `remote-suites.sh` | Caller-owned disposable CI PostgreSQL HTTP/browser subset; excludes SQLite local suites |
+| `isolation.test.mjs` | Target refusal, port collision, scratch ownership and unchanged repository sentinel checks on success/failure |
+| `seed.ts` | Synthetic tenant/account/envelope/API fixtures; contains fixture credentials and mutates its selected target |
+| `browser/` | Playwright public, auth, workspace and admin journeys; shared lifecycle and locator helpers in `harness.ts` |
+| `visual.test.ts`, `baselines/` | Public-route image comparisons and dev-mode performance smoke |
+| `api`, `evidence`, `transparency`, `rekor`, `mcp` tests | API access and recorded digest/attestation/transparency contracts |
+| Billing, SSO, bot guard, mail, webhooks, storage and security tests | Synthetic integration contracts and focused denial/retry/configuration regressions |
 
-`withPage` fails a flow on any uncaught page error, so a spec cannot pass
-against a page that is throwing. Next.js dev hydration warnings are filtered
-as dev-server noise — see the note on `DEV_SERVER_NOISE` in the harness.
+Prefer accessible `getByRole`, `getByLabel` and `getByText` locators. Use
+`getByPlaceholder` for placeholders and test IDs only where no accessible name
+exists. Browser flows can spend their seeded state; run through fresh orchestration
+when evaluating the full journeys. A passing evidence-pack test verifies its stated
+digest/attestation contract, not embedded PAdES/TSA conformance.
 
+## Optional tools, visual baselines and acceptance receipts
 
-## CI
+Chromium resolution uses `CHROME_BIN`, Playwright-managed cache, PATH and supported
+Windows installation paths. In an environment without Chromium,
+`E2E_SKIP_BROWSER=1` and `E2E_SKIP_VISUAL=1` explicitly omit those gates. S3 coverage
+requires Linux and a safe SeaweedFS lifecycle. With a configured `WEED_BIN`
+(or `weed` found on PATH), the fixture leases eight loopback HTTP/gRPC ports,
+uses unique credentials, and proves each listener belongs to its exact child PID
+through Linux `/proc` socket inodes before storage probes or writes. It disables
+optional services and telemetry and confirms child exit before removing scratch
+files. Unsupported platforms fail closed for configured S3 coverage.
+`E2E_SKIP_S3=1` remains an explicit optional omission; without a binary the
+existing optional local behavior skips honestly. Run
+`node e2e/seaweed-isolation.test.mjs` for portable policy tests and mandatory Linux
+live ownership cases. The Windows review passed portable cases but skipped Linux
+live cases; actual Linux ownership and real S3 integration/CI evidence remain
+required. No real S3 integration pass is claimed at this checkpoint.
+Record every skip: an omitted suite cannot satisfy its release gate.
 
-`.github/workflows/e2e.yml` runs the suite on push/PR against `quality` and
-`main`: bun install → prisma generate → seed → `bash e2e/run.sh`. The CI image needs a
-`chromium` wrapper that injects `--no-sandbox --disable-dev-shm-usage` (the
-workflow creates one), and downloads the **SeaweedFS** binary so
-`e2e/s3-seaweed.test.ts` exercises the S3 storage backend against a real
-`weed server -s3` (skipped locally when no `weed` is on PATH — set `WEED_BIN`
-to enable it, `E2E_SKIP_S3=1` to force off).
+Visual comparisons use committed `e2e/baselines/*.png`. A missing baseline is
+created by the existing visual test, so success alone does not establish comparison
+coverage. Review missing/new baselines explicitly. `UPDATE_BASELINES=1` intentionally
+regenerates them; review image changes before accepting the result. Dev-mode LCP
+smoke is not a production performance benchmark.
 
-## Visual baselines (e2e/visual.test.ts)
-
-The visual suite screenshots the public routes in a deterministic context and
-compares against the committed baselines (`e2e/baselines/*.png`): per-pixel
-tolerance 25, at most 1.5% of pixels may differ. The marketing surfaces use
-Geist via next/font (self-hosted webfont), so rendering does not depend on
-system fonts and the threshold has ample headroom for antialiasing noise —
-its job is to catch layout catastrophes (blank page, missing hero), not
-subpixel drift.
-
-- A route without a baseline is baselined and passes (fail-only-on-drift).
-- After an intentional redesign: `UPDATE_BASELINES=1 bun test e2e/visual.test.ts`,
-  then commit the new PNGs. Never edit baselines by hand.
-- Chromium discovery: `CHROME_BIN` env → the ms-playwright cache →
-  `google-chrome`/`chromium` on PATH. CI exports `CHROME_BIN`.
-- No Chromium in an environment? `E2E_SKIP_VISUAL=1` skips the file honestly
-  (an honest skip, not a silent pass).
-- LCP is measured on every route and gated (<6s, dev-server budget) on `/`
-  and `/templates` — the gate catches catastrophic asset regressions, it
-  does not benchmark (dev-mode compile inflates the number).
-- The suite always runs right after the seed and before the browser suites —
-  pages that render DB counts (e.g. `/status`) are deterministic at that
-  point in the pipeline.
-
-## Writing new specs
-
-Add to the file matching the surface (`public`, `auth`, `workspace`,
-`admin`), using the `flow(...)` helper already in each file so the skip flag
-and timeout are handled. Keep each spec self-contained: build the state it
-needs, or rely on a seeded fixture, and prefer a unique identifier per run
-over a fixed one where the endpoint deduplicates (see the enterprise-lead
-spec).
-
-Two properties are worth preserving:
-
-- **State.** The workspace suite spends seeded fixtures — it declines
-  DOC-E2E0003 and seals DOC-E2E0004 — so it needs a fresh `bun e2e/seed.ts`
-  per run. `e2e/run.sh` seeds before it.
-- **Order.** The signer-journey spec must precede the seal-verification spec,
-  which asserts the seal it creates. `bun test` runs specs in declaration
-  order within a file; keep dependent pairs in one file and in order.
+CI jobs are defined in `.github/workflows/e2e.yml` and release-specific workflows.
+Their presence does not prove execution. Retain the exact revision, command,
+provider, browser/tool versions, outcome, logs and skips for a promotion candidate.
+The local isolation regression covers orchestration safety; full SQLite/PostgreSQL
+browser/API, production-image and deployment-specific acceptance remain distinct
+gates in `docs/GO-LIVE-CHECKLIST.md`.

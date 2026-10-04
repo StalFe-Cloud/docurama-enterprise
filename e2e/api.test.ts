@@ -119,7 +119,7 @@ describe("public signing endpoint (/api/sign)", () => {
   });
 
   test("sign without a name is rejected (validation, no mutation)", async () => {
-    const { status, body } = await post("/api/sign/e2e-fixed-journey-token-0000000000000001", { op: "sign", name: "" });
+    const { status, body } = await post("/api/sign/e2e-fixed-journey-token-0000000000000001", { op: "sign", name: "", consent: true });
     expect(status).toBe(400);
     expect(String(body.error)).toContain("full name");
   });
@@ -344,9 +344,12 @@ describe("monthly envelope quota (402, spent STARTER plan)", () => {
     const direct = new (await import("@prisma/client")).PrismaClient({
       datasources: { db: { url: process.env.DATABASE_URL ?? "file:../db/custom.db" } },
     });
+    let quotaTemplateId: string | undefined;
     try {
       const quotaTenant = await direct.tenant.findUnique({ where: { slug: "e2e-quota" } });
       if (!quotaTenant) throw new Error("quota fixture missing — seed first");
+      const quotaTemplate = await direct.template.create({ data: { tenantId: quotaTenant.id, name: "Synthetic quota agreement", publicSlug: `quota-fixture-${crypto.randomUUID()}`, bodyMarkdown: "Synthetic quota regression terms.", pages: 1 } });
+      quotaTemplateId = quotaTemplate.id;
 
       const login = await post("/api/auth/login", { email: QUOTA_EMAIL, password: "e2eQuota1234!" });
       expect(login.status).toBe(200);
@@ -362,6 +365,7 @@ describe("monthly envelope quota (402, spent STARTER plan)", () => {
           op: "send",
           data: {
             title: "Should be refused - quota spent",
+            templateId: quotaTemplate.id,
             recipients: [{ name: "Anyone", email: "anyone@example.com", role: "SIGNER" }],
           },
         }),
@@ -374,6 +378,7 @@ describe("monthly envelope quota (402, spent STARTER plan)", () => {
       const after = await direct.envelope.count({ where: { tenantId: quotaTenant.id } });
       expect(after).toBe(100);
     } finally {
+      if (quotaTemplateId) await direct.template.delete({ where: { id: quotaTemplateId } });
       await direct.$disconnect();
     }
   });

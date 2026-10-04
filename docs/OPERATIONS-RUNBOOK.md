@@ -1,6 +1,6 @@
 # Operations Runbook — Docurama
 
-Audience: the on-call operator of a Docurama instance (cloud SaaS at docurama.eu or a self-hosted deployment). Everything here is safe to run against production unless marked otherwise. Companion docs: `DEPLOYMENT.md`, `SECURITY.md`, `PAYMENTS.md`, `docs/PRODUCTION-PLAN.md`.
+Audience: the on-call operator of a Docurama instance (cloud SaaS at docurama.eu or a self-hosted deployment). Read-only health checks can inspect a deployment. Queue mutation, migration, restore and deployment commands require a reviewed target and change procedure; do not run them as discovery steps. Companion docs: `DEPLOYMENT.md`, `SECURITY.md`, `PAYMENTS.md`, `docs/PRODUCTION-PLAN.md`.
 
 ## 1. Health checks
 
@@ -27,7 +27,7 @@ Every system email is a row in `MailOutbox` (QUEUED → SENT/FAILED), journaled 
 | `SENT` | delivered | none |
 | `FAILED` | 5 attempts exhausted (terminal) | resend manually or via console |
 
-Drain/retry commands (safe to re-run; claiming is by status transition, never row locks):
+Drain/retry commands require an approved target and coordination with the worker. Delivery uses leased claims; a manual retry must preserve message identity and account for prior delivery:
 
 ```bash
 # Inspect the queue (scratch read-only)
@@ -69,10 +69,10 @@ Single-instance rule: exactly one replica must run the worker. Multi-replica tie
 
 ```bash
 # Cron (03:15 nightly):  15 3 * * * /opt/docurama/scripts/backup.sh >> /var/log/docurama-backup.log 2>&1
-# Restore drill (quarterly):
+# Recovery example only after an isolated drill, approved recovery point and stopped writers:
 systemctl stop docurama
 gpg -d db-….sqlite.gpg > /opt/docurama/db/custom.db      # if encrypted
-tar xzf storage-….tar.gz -C /opt/docurama/storage --strip-components=2
+tar xzf storage-….tar.gz -C /opt/docurama/storage
 systemctl start docurama && curl -fsS https://app.example.com/api/health
 ```
 

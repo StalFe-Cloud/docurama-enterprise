@@ -43,11 +43,11 @@ services:
 
 Compose merges volume entries by container target, so these replace the fixture mounts. See [Docker's merge rules](https://docs.docker.com/reference/compose-file/merge/). Inspect resolved mount targets privately; configuration output can contain secrets.
 
-Build the reviewed version and initialize the empty schema with a one-off container. This command neither accepts destructive schema changes nor seeds users:
+Build the reviewed version and initialize the empty schema with a one-off container. The provider-specific reviewed migration history initializes an empty database; review SQL and rehearse before any existing-database upgrade. This step does not seed users:
 
 ```sh
 docker compose -f docker-compose.yml -f compose.production.yml build
-docker compose -f docker-compose.yml -f compose.production.yml run --rm --no-deps --entrypoint bun docurama /app/node_modules/prisma/build/index.js db push --skip-generate
+docker compose -f docker-compose.yml -f compose.production.yml run --rm --no-deps --entrypoint bun docurama /app/node_modules/prisma/build/index.js migrate deploy --schema /app/prisma/sqlite/schema.prisma
 ```
 
 Export `DOCURAMA_BOOTSTRAP_EMAIL` in the operator session and pipe a fresh password from the approved secret manager into the packaged offline bootstrap:
@@ -64,9 +64,19 @@ After the approved deployment, sign in as the administrator. Create the first or
 
 1. Pin the reviewed application/image version and record the current schema, tenant count and storage backend. Encrypt database/storage backups and prove an isolated restore. A running SQLite database requires its backup API or stopping the application; copying only `custom.db` during WAL writes is not a consistent backup.
 2. Apply the candidate schema/image to an isolated restored copy first. This release adds SSO state and payment-related tables/columns. Retain existing data rather than replacing it with upstream fixtures. Never use `prisma db push --accept-data-loss`, `db reset` or demo seeding on production.
-3. The entrypoint executes `prisma db push --skip-generate` and refuses to start on schema failure. Resolve failures through a reviewed migration. Use `DOCURAMA_SKIP_DB_PUSH=1` only after a separate successful schema step.
+3. The entrypoint executes `prisma migrate deploy --schema prisma/$DOCURAMA_DB_PROVIDER/schema.prisma` and refuses to start on migration failure. An existing database created with `db push` requires the reviewed offline comparison/baseline procedure in [deployment §2.2](docs/DEPLOYMENT.md#22-reviewed-migrations-and-existing-databases); boot never baselines automatically. Use `DOCURAMA_SKIP_MIGRATIONS=1` only after a separate successful migration step against the same target/image (legacy `DOCURAMA_SKIP_DB_PUSH` alias).
 4. Verify health, login, revoked-session rejection, tenant boundaries, invitations, verification mail, documents, signing evidence and restore behavior. Complete provider browser checks and approved payment test events where configured.
 5. Roll back with the pinned prior image and a database/storage snapshot proven compatible with it. Image rollback does not reverse schema or data changes.
+
+The immutable-contract migration intentionally leaves historical `contractSnapshot`
+values null. Template/contentless envelopes without a valid snapshot stop at signer,
+render or export gates; APIs return 409 and the signer page reports unavailable.
+Review historic sources before deliberately reissuing pending agreements, preserve
+old records and never backfill from today's mutable template. Uploaded-only historic
+records can retain their original PDF under existing policy checks. The final-document
+assembly and recipient/completion-mail journey require the functional acceptance gate
+in [the go-live checklist](docs/GO-LIVE-CHECKLIST.md); a completion status or evidence
+snapshot alone does not establish delivery of a filled completed document.
 
 The image does not guarantee a `sqlite3` CLI. Use an approved host tool or dedicated backup container instead of assuming `docker exec ... sqlite3` is available. Recovery also requires keys, configuration and any object-store contents.
 

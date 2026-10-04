@@ -151,7 +151,8 @@ trust model; the paid tiers are revenue-triggered upgrades, not requirements.
   verification, inclusion proofs for the seeded fixture, and tamper paths.
 - `e2e/seed.ts` fixtures a realistic remote instance ("Acme Corp
   (self-hosted fixture)", DNS-verified `acme-corp.example`, real chain claim,
-  witnessed at portal log entry #1) for the `public/verify-attested.yaml`
-  Maestro flow.
+  witnessed at portal log entry #1). Current browser coverage is in
+  `e2e/browser/public.test.ts`; the historical Maestro YAML receipt remains
+  documented in the improvement plan.
 - End-to-end push (seal → sign → POST → registry) is exercised by the
   signer-journey suite when `EVIDENCE_PORTAL_URL` points at the app itself.

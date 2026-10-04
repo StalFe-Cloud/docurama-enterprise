@@ -1,3 +1,5 @@
+import { captureSignatureData } from "../src/lib/signature-data";
+import { computeEnvelopeEvidenceDigest } from "../src/lib/esign";
 /**
  * E2E seed — deterministic, idempotent fixtures for the Maestro suite.
  *
@@ -55,6 +57,8 @@ const E2E_QUOTA_FILLER = 100; // == PLAN_CATALOG.STARTER.envelopeLimit (src/lib/
 // storage keys instead of accumulating files.
 const E2E_DOC_NDA = `doc_${"e2e" + "0".repeat(28)}1`;
 const E2E_DOC_SERVICE = `doc_${"e2e" + "0".repeat(28)}2`;
+const E2E_DOC_DECLINE = `doc_${"e2e" + "0".repeat(28)}3`;
+const E2E_DOC_SEALED = `doc_${"e2e" + "0".repeat(28)}4`;
 
 /**
  * Minimal valid multi-page PDF (standard Helvetica, no embedded fonts) —
@@ -332,11 +336,17 @@ async function main() {
   );
   console.log(`documents: ${ndaDoc.filename} (3 pages) + ${serviceDoc.filename} (4 pages)`);
 
+  const declineDoc = await seedDocument(E2E_DOC_DECLINE, "consultant-decline-e2e.pdf",
+    ["Consultant Agreement - page 1 of 2", "Consultant Agreement - page 2 of 2"], tenant.id, wsUser.id);
+  const sealedDoc = await seedDocument(E2E_DOC_SEALED, "supply-agreement-e2e.pdf",
+    Array.from({ length: 5 }, (_, index) => `Supply Agreement - page ${index + 1} of 5`), tenant.id, wsUser.id);
+
   /* ── Fixture envelopes (deterministic verify-portal targets) ─────── */
   // SENT, one pending recipient — verify portal must report NOT_SEALED.
   await db.envelope.create({
     data: {
       publicCode: "DOC-E2E0001",
+      sha256: ndaDoc.sha256,
       documentId: ndaDoc.id,
       title: "E2E Fixture — Mutual NDA (sent)",
       titleLower: "e2e fixture — mutual nda (sent)",
@@ -379,6 +389,8 @@ async function main() {
   await db.envelope.create({
     data: {
       publicCode: "DOC-E2E0003",
+      sha256: declineDoc.sha256,
+      documentId: declineDoc.id,
       title: "E2E Fixture — Consultant Agreement (decline)",
       titleLower: "e2e fixture — consultant agreement (decline)",
       tenantId: tenant.id,
@@ -408,23 +420,31 @@ async function main() {
   });
 
   // COMPLETED + sealed — verify portal must report VERIFIED with digest.
-  const sealedDigest = createHash("sha256")
-    .update("docurama-e2e-sealed-fixture")
-    .digest("hex");
+  const sealedAt = new Date();
+  const sealedSignatureData = JSON.stringify(captureSignatureData({ name: "Fixture Signer", font: "caveat", consent: true },
+    [], "fixture-signer@example.com", sealedAt));
+  const sealedTitle = "E2E Fixture — Supply Agreement (sealed)";
+  const sealedEvidenceDigest = computeEnvelopeEvidenceDigest({ id: "", publicCode: "DOC-E2E0002",
+    title: sealedTitle, pages: 5, createdAt: sealedAt,
+    documentSha256: sealedDoc.sha256, recipients: [{ email: "fixture-signer@example.com", role: "SIGNER",
+      status: "SIGNED", order: 1, signedAt: sealedAt, signatureData: sealedSignatureData }], events: [] });
   await db.envelope.create({
     data: {
       publicCode: "DOC-E2E0002",
-      title: "E2E Fixture — Supply Agreement (sealed)",
+      documentId: sealedDoc.id,
+      createdAt: sealedAt,
+      evidenceSha256: sealedEvidenceDigest,
+      title: sealedTitle,
       titleLower: "e2e fixture — supply agreement (sealed)",
       tenantId: tenant.id,
       createdById: wsUser.id,
       status: "COMPLETED",
       message: "Seeded sealed fixture.",
       pages: 5,
-      sha256: sealedDigest,
-      sealedAt: new Date(),
-      completedAt: new Date(),
-      conformanceLevel: "B-LT",
+      sha256: sealedDoc.sha256,
+      sealedAt,
+      completedAt: sealedAt,
+      conformanceLevel: null,
       recipients: {
         create: [
           {
@@ -433,7 +453,8 @@ async function main() {
             role: "SIGNER",
             order: 1,
             status: "SIGNED",
-            signedAt: new Date(),
+            signedAt: sealedAt,
+            signatureData: sealedSignatureData,
             accessToken: randomBytes(32).toString("base64url"),
           },
         ],
@@ -455,6 +476,7 @@ async function main() {
   await db.envelope.create({
     data: {
       publicCode: "DOC-E2E0004",
+      sha256: serviceDoc.sha256,
       documentId: serviceDoc.id,
       title: "E2E Fixture — Service Agreement (signer journey)",
       titleLower: "e2e fixture — service agreement (signer journey)",

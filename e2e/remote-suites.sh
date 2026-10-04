@@ -13,8 +13,9 @@ for route in / /login /welcome /modeles-de-contrats /verify /docs /sign; do
   curl -s -o /dev/null --max-time 180 "$E2E_BASE_URL$route" || true
 done
 if [[ "${E2E_SKIP_API:-0}" != "1" ]]; then
-  bun --no-env-file test e2e/api.test.ts e2e/evidence.test.ts e2e/transparency.test.ts e2e/rekor.test.ts e2e/plans.test.ts e2e/webhooks.test.ts
-  bun --no-env-file test e2e/mcp.test.ts
+  # Multi-request HTTP correctness includes cold dev compilation; bounded per test.
+  bun --no-env-file test --timeout 30000 e2e/api.test.ts e2e/evidence.test.ts e2e/transparency.test.ts e2e/rekor.test.ts e2e/plans.test.ts e2e/webhooks.test.ts
+  bun --no-env-file test --timeout 30000 e2e/mcp.test.ts
 fi
 if [[ "${E2E_SKIP_BROWSER:-0}" != "1" ]]; then
   bun --no-env-file test e2e/browser/

@@ -3,6 +3,7 @@
  * setup failures fail the suite rather than silently switching to local disk. */
 import { describe, expect, test, beforeAll, afterAll } from "bun:test";
 import { PrismaClient } from "@prisma/client";
+import { createRetentionFixture, deleteRetentionFixture } from "./retention-fixture";
 import { cpSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -248,17 +249,12 @@ describe.skipIf(!RUN_S3_E2E)("S3 document storage against real SeaweedFS", () =>
   });
 
   test("retention sweep deletes orphaned uploads but never envelope-backed evidence", async () => {
-    const member = await db!.member.findFirstOrThrow({ select: { userId: true, tenantId: true } });
+    const tenantId = `s3-retention-${randomBytes(16).toString("hex")}`;
     const orphanId = "doc_" + "0a0b0c0d".repeat(4);
-    const orphan = await lib.storeUpload(chunksOf(PDF), TENANT, orphanId);
-    await db!.document.create({ data: { id: orphanId, tenantId: member.tenantId, uploadedById: member.userId,
-      filename: "orphan.pdf", storageKey: orphan.storageKey, byteSize: orphan.byteSize, mimeType: "application/pdf", pageCount: 1, sha256: orphan.sha256 } });
+    const orphan = await lib.storeUpload(chunksOf(PDF), tenantId, orphanId);
     const docId = "doc_" + "1e2f3a4b".repeat(4);
-    const evidence = await lib.storeUpload(chunksOf(PDF), member.tenantId, docId);
-    await db!.document.create({ data: { id: docId, tenantId: member.tenantId, uploadedById: member.userId,
-      filename: "evidence.pdf", storageKey: evidence.storageKey, byteSize: evidence.byteSize, mimeType: "application/pdf", pageCount: 1, sha256: evidence.sha256 } });
-    const envelope = await db!.envelope.findFirstOrThrow({ select: { id: true, documentId: true } });
-    await db!.envelope.update({ where: { id: envelope.id }, data: { documentId: docId } });
+    const evidence = await lib.storeUpload(chunksOf(PDF), tenantId, docId);
+    const fixture = await createRetentionFixture(db!, tenantId, orphanId, orphan, docId, evidence);
     try {
       await Bun.sleep(50);
       const result = await lib.purgeExpired(0);
@@ -272,10 +268,9 @@ describe.skipIf(!RUN_S3_E2E)("S3 document storage against real SeaweedFS", () =>
       expect(keys).toContain(evidence.storageKey);
       expect(await db!.document.findUnique({ where: { id: docId } })).not.toBeNull();
     } finally {
-      await db!.envelope.update({ where: { id: envelope.id }, data: { documentId: envelope.documentId } });
-      await db!.document.deleteMany({ where: { id: { in: [docId, orphanId] } } });
-      await lib.deleteDocumentFile(docId, member.tenantId);
-      await lib.deleteDocumentFile(orphanId, TENANT);
+      await deleteRetentionFixture(db!, fixture);
+      await lib.deleteDocumentFile(docId, tenantId);
+      await lib.deleteDocumentFile(orphanId, tenantId);
     }
   });
 

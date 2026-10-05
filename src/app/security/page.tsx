@@ -13,33 +13,33 @@ export const metadata: Metadata = {
 const PRACTICES = [
   {
     icon: Lock,
-    title: "Encryption in transit and at rest",
-    body: "All traffic is served over TLS. API keys, TOTP secrets and recovery codes are stored as SHA-256 hashes, never in plaintext. Certificate passphrases are never persisted.",
+    title: "Transport and credential protection",
+    body: "Deployment operators configure HTTPS and encrypted storage. Passwords, API keys and recovery codes use hash-based verification; TOTP seeds require protected storage.",
   },
   {
     icon: KeyRound,
     title: "Strong authentication",
-    body: "RFC 6238 two-factor authentication with one-time recovery codes, revocable server-side sessions bound to device and IP metadata, and organization-level 2FA enforcement.",
+    body: "RFC 6238 two-factor authentication with one-time recovery codes, revocable server-side sessions, and organization-level 2FA enforcement.",
   },
   {
     icon: ScrollText,
-    title: "Tamper-evident audit chain",
-    body: "Every mutation writes an audit event. The chain can be sealed and its integrity re-verified, so deletions and edits leave traces.",
+    title: "Document and adoption evidence",
+    body: "Envelope evidence binds frozen contract terms and signature adoption. Evidence exports include ledger events for independent verification.",
   },
   {
     icon: Timer,
-    title: "Independent timestamps",
-    body: "Signatures are anchored to RFC 3161 Timestamp Authorities. Timestamp evidence does not depend on our own infrastructure.",
+    title: "Recorded signing times",
+    body: "The email-link flow records application signing times. It does not obtain trusted RFC 3161 timestamps or embed PAdES signatures.",
   },
   {
     icon: FileCheck2,
-    title: "EU data residency",
-    body: "Documents and records are processed and stored in the European Union. Sub-processors are documented and reviewed.",
+    title: "Deployment residency",
+    body: "Data residency depends on the selected application, database, storage and mail deployments. Operators must verify their regions and sub-processors.",
   },
   {
     icon: ShieldCheck,
     title: "Operational readiness",
-    body: "Access reviews, risk registers, change management and restore drills are tracked inside the platform's own compliance tooling.",
+    body: "Production acceptance requires access reviews, monitoring, approved changes and verified backup restoration for the actual deployment.",
   },
 ];
 
@@ -122,9 +122,9 @@ export default function SecurityPage() {
         <section aria-label="Compliance posture" className="mt-10 rounded-xl border bg-muted/40 p-6">
           <h2 className="text-lg font-semibold tracking-tight">Compliance posture, stated plainly</h2>
           <ul className="mt-4 space-y-2.5 text-sm leading-relaxed text-muted-foreground">
-            <li>GDPR: EU data residency, DSAR workflows, versioned consent records, DPO at privacy@docurama.eu.</li>
-            <li>eIDAS: Simple, Advanced and Qualified-aligned signature workflows with honest conformance reporting. Docurama is not an accredited QTSP.</li>
-            <li>21 CFR Part 11: optional mode with signature manifestation, versioned consent and re-authentication controls.</li>
+            <li>Privacy: versioned signing-consent records are supported. The deployment operator must establish applicable residency, processing and data-subject procedures.</li>
+            <li>Signing: the supported flow uses email-link access and typed-name adoption. Advanced and Qualified policies require separate implementation and qualification.</li>
+            <li>21 CFR Part 11 and signer re-authentication policies: signing fails closed while these configured requirements are unsupported; enabling a flag does not establish compliance.</li>
           </ul>
           <p className="mt-4 text-xs text-muted-foreground">
             Full legal documents, including the Data Processing Agreement and

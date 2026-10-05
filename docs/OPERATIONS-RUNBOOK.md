@@ -1,5 +1,7 @@
 # Operations Runbook — Docurama
 
+**Engineering checkpoint (2026-10-04 UTC):** reviewed source `25ae19c50e26a423e9d2386e3c76ecaf713c71f3` passed all seven CI checks. [Exact-head runtime evidence](https://github.com/StalFe-Cloud/docurama-enterprise/actions/runs/37244852380) records API 89/89, MCP 15/15 and browser 31/31 on SQLite and PostgreSQL; the SQLite suite also passed visual 7/7 and required real SeaweedFS 7/7. Native backup/restore and schema-drift checks passed for both providers. The browser suite includes desktop/mobile two-signer completion and actual completed-PDF and completion-record-PDF downloads with hash and PDF checks. This is a prior-source checkpoint: subsequent source changes require fresh CI, and qualification of the approved image digest and customer installation remains pending. Do not mark production or stronger signature-assurance acceptance complete from this checkpoint.
+
 Audience: the on-call operator of a Docurama instance (cloud SaaS at docurama.eu or a self-hosted deployment). Read-only health checks can inspect a deployment. Queue mutation, migration, restore and deployment commands require a reviewed target and change procedure; do not run them as discovery steps. Companion docs: `DEPLOYMENT.md`, `SECURITY.md`, `PAYMENTS.md`, `docs/PRODUCTION-PLAN.md`.
 
 ## 1. Health checks
@@ -12,7 +14,7 @@ Audience: the on-call operator of a Docurama instance (cloud SaaS at docurama.eu
 | Storage | `/api/health` → `checks.storage` | `ok: true`, `backend` is `"local"` or `"s3"` |
 | Mail | `/api/health` → `checks.mail` | `mode: "smtp"`, queue depths near zero |
 | Webhooks | `/api/health` → `checks.webhooks` | `failing: 0` |
-| Rekor | `/api/health` → `checks.rekor` | `enabled: true`, `witnessed: true` |
+| Rekor | `/api/health` -> `checks.rekor` | Approved SaaS witnessing: enabled/current. AWS Private Cloud: `REKOR_WITNESS=off`; monitor local pinned checkpoints and historical consistency separately. |
 
 `/api/health` (src/app/api/health/route.ts) returns **503** when either critical check (database or storage) fails — Docker HEALTHCHECK, Helm liveness/readiness probes and your external monitor all key off that status code. The payload is operational state only (no tenant data). Daily: verify 200 once. Weekly: read the full JSON and confirm `mail.mode` is what you think it is (an unset `SMTP_URL` silently means outbox-only).
 
@@ -24,8 +26,8 @@ Every system email is a row in `MailOutbox` (QUEUED → SENT/FAILED), journaled 
 |---|---|---|
 | `QUEUED`, `nextAttemptAt` null/past | waiting for the drain | none — worker picks it up within 30 s |
 | `QUEUED`, future `nextAttemptAt` | deferred by backoff (30 s, 2 m, 8 m, 30 m) | wait; check `lastError` |
-| `SENT` | delivered | none |
-| `FAILED` | 5 attempts exhausted (terminal) | resend manually or via console |
+| `SENT` | SMTP relay acknowledged the message; not proof of inbox delivery | Verify delivery/bounces separately; do not automatically resend an acknowledged message |
+| `FAILED` | 5 attempts exhausted (terminal in this edition) | Review the error and current envelope/recipient state before an authorized retry or reissue |
 
 Drain/retry commands require an approved target and coordination with the worker. Delivery uses leased claims; a manual retry must preserve message identity and account for prior delivery:
 
@@ -36,7 +38,7 @@ bunx prisma studio          # or: sqlite3 db/custom.db "select status, count(*) 
 bun -e 'const m = await import("./src/lib/mail"); console.log(await m.processOutbox(50));' --experimental  # shape: processOutbox(limit)
 ```
 
-Retry a terminal FAILED row: reset it in the admin console (Ops Health / outbox feed) or via Prisma (`update MailOutbox set status='QUEUED', attempts=0, nextAttemptAt=null`). In outbox-only mode (no `SMTP_URL`) rows intentionally stay QUEUED — nothing is silently dropped; inspect them in the admin console. The hermetic contract for this engine is `e2e/mail.test.ts` (7 tests: delivery, backoff, deferral, terminal FAILED, parsing).
+Retry a terminal FAILED row only under the reviewed queue-change procedure: coordinate the worker, inspect current envelope/recipient eligibility, preserve message identity and account for earlier SMTP acknowledgment. Do not blindly reset status/attempts or erase active claims. In outbox-only mode rows remain inspectable. The prior SMTP fixture checkpoint passed 8/8; new sender configuration and real inbox delivery still need qualification.
 
 ## 3. Billing operations
 
@@ -76,7 +78,7 @@ tar xzf storage-….tar.gz -C /opt/docurama/storage
 systemctl start docurama && curl -fsS https://app.example.com/api/health
 ```
 
-Run the drill against a **copy** first. The standard test trick (used by every E2E suite): copy `db/custom.db` to a scratch path and point `DATABASE_URL` at the copy — tests never mutate the committed seed. S3-backed deployments: snapshot the bucket (versioning/lifecycle) in addition to the DB backup; document bytes are not in the SQLite file.
+Run the recovery drill against an isolated copy first. Current CI creates and migrates fresh owned scratch databases with synthetic fixtures; never use a repository or live database as test storage. S3 deployments must preserve matching object versions and trust identities alongside the database; document bytes are not in SQLite. Measure the customer-specific RPO/RTO separately from CI native backup restoration.
 
 ## 6. Incident response
 
@@ -101,3 +103,5 @@ Where evidence lives: `AuditEvent` (every mutation, severities INFO/WARNING/CRIT
 | Evidence-key regeneration | treat as a **key-rotation event** | The evidence key is TOFU-pinned: the first key an instance registers with the verification portal is the key every later attestation must match. Regenerating breaks portal pins and continuity of public verification until re-attestation — announce, rotate deliberately, keep the old cert for verifying existing evidence packs |
 
 Escalation contacts: support@docurama.eu (product), security@docurama.eu (incidents/disclosure), billing@docurama.eu (payments).
+
+Operator acceptance for this candidate remains pending: explicit consent and current session/MFA policy, mailbox-bound recipient access, historical snapshot review/reissue, and independently verified completed document/evidence downloads. Stronger authentication or signature policies must fail closed when unsupported. PAdES, RFC 3161/TSA and Part 11 claims require their own applicable implementation and validation evidence.

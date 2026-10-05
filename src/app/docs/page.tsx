@@ -11,7 +11,7 @@ export const metadata: Metadata = {
   alternates: { canonical: "/docs" },
   title: "Docurama documentation",
   description:
-    "Guides and API reference for Docurama: sending envelopes, templates, verification, sending domains, notifications, the REST API, webhooks, MCP and compliance modes.",
+    "Guides and API reference for Docurama: sending envelopes, templates, verification, sending domains, notifications, the REST API, webhooks, MCP and signer policy restrictions.",
 };
 
 const SECTIONS = [
@@ -30,7 +30,7 @@ const SECTIONS = [
   { id: "self-hosting", label: "Self-hosting" },
   { id: "troubleshooting", label: "Troubleshooting" },
   { id: "tutorials", label: "Tutorials" },
-  { id: "compliance", label: "Compliance modes" },
+  { id: "compliance", label: "Signer policy restrictions" },
   { id: "legal", label: "Legal" },
 ];
 
@@ -101,7 +101,7 @@ export default function DocsPage() {
             <h1 className="text-3xl font-semibold tracking-tight">Documentation</h1>
             <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
               Everything Docurama does, how to drive it from the UI and the API,
-              and what the compliance controls actually enforce. The API
+              and what the supported signer restrictions actually enforce. The API
               reference below documents live endpoints on this deployment, not
               an aspirational list.
             </p>
@@ -369,27 +369,27 @@ export default function DocsPage() {
 
           {/* Compliance */}
           <section>
-            <H2 id="compliance">Compliance modes</H2>
+            <H2 id="compliance">Signer policy restrictions</H2>
             <div className="mt-4 max-w-2xl space-y-4 text-sm leading-relaxed text-muted-foreground">
               <p>
-                <span className="font-medium text-foreground">Part 11 mode</span> enforces
-                21 CFR Part 11 controls organization-wide: signature
-                manifestation under §11.50, versioned signer consent under
-                §11.100, and optional re-authentication before each signing
-                action. Enable it under Settings, Account.
+                <span className="font-medium text-foreground">Signing controls.</span> The
+                email-link flow records typed adoption and explicit consent.
+                Stronger authentication or regulated assurance requirements need
+                a supported, validated implementation; a saved setting does not
+                certify compliance or satisfy those requirements by itself.
               </p>
               <p>
-                <span className="font-medium text-foreground">eIDAS levels.</span> Envelopes
-                declare their signature level (SES, AdES-aligned, QES-aligned).
-                The level applied is the level reported in the evidence
-                record. For Qualified Electronic Signatures, pair Docurama
-                with an accredited EU QTSP.
+                <span className="font-medium text-foreground">Signature assurance.</span> This
+                flow does not perform advanced or qualified certificate signing,
+                embed PAdES signatures or obtain independent RFC 3161 timestamps.
+                Review the contract, consent and digest evidence actually recorded
+                for the envelope rather than inferring assurance from a label.
               </p>
               <p>
-                <span className="font-medium text-foreground">GDPR.</span> Data stays in the
-                EU. DSAR requests (access, erasure, rectification,
-                portability) are tracked with statutory deadlines. Consent
-                records are captured and versioned at signup.
+                <span className="font-medium text-foreground">Deployment and privacy.</span> Storage
+                region, mail delivery and external integrations depend on the
+                deployment. Validate the configured services and applicable
+                privacy obligations before using them with personal data.
               </p>
             </div>
           </section>
@@ -402,8 +402,8 @@ export default function DocsPage() {
               <Link className="font-semibold text-foreground underline underline-offset-2" href="/docs/legal">
                 Legal & Compliance Center (/docs/legal)
               </Link>{" "}
-              for the Information Security Policy (PSSI), GDPR policies, and eIDAS compliance statements.
-              Explore our ready-to-sign{" "}
+              for the Information Security Policy (PSSI), GDPR policies, and signing assurance information.
+              Review and adapt the available{" "}
               <Link className="font-semibold text-foreground underline underline-offset-2" href="/modeles-de-contrats">
                 French Legal Templates (/modeles-de-contrats)
               </Link>.

@@ -5,7 +5,7 @@
  * driven by the orchestrator's timeline state. All coordinates are logical
  * pixels inside the fixed 1000 x 600 demo canvas.
  *
- * Mirrors the real product UI: the New envelope dialog fields, the signing
+ * Illustrates the supported product flow with synthetic values: the New envelope dialog fields, the signing
  * page with signature adoption, and the cryptographic evidence drawer from
  * the documents table.
  */
@@ -354,7 +354,7 @@ export function SignerScene({ visible, sigFocus, signing, signed, adopting, adop
         <span>
           <span style={{ display: "block", fontSize: 11, fontWeight: 600, color: INK }}>Signing as Lars Bergström</span>
           <span style={{ display: "block", fontSize: 9, color: FAINT }}>
-            lars@nordjarm.example · identity verified by unique signing link
+            lars@nordjarm.example · access through a personal signing link
           </span>
         </span>
         <span style={{ marginLeft: "auto", display: "flex", gap: 10, alignItems: "center" }}>
@@ -390,10 +390,10 @@ export function SignerScene({ visible, sigFocus, signing, signed, adopting, adop
 export function EvidenceDrawer({ open, hash, audit }: { open: boolean; hash: string; audit: boolean }) {
   const auditRows: [string, string][] = [
     ["envelope created", "Alexandra Fischer · StålFe"],
-    ["sent", "Docurama · signing link delivered"],
+    ["sent", "Docurama · signing invitation queued"],
     ["viewed", "Lars Bergström · Nordjärm Gjuteri"],
-    ["signed", "Lars Bergström · PAdES compliant"],
-    ["sealed", "Docurama · RFC 3161 timestamp applied"],
+    ["signed", "Lars Bergström · typed-name adoption"],
+    ["sealed", "Docurama · completion evidence recorded"],
   ];
   return (
     <aside
@@ -418,16 +418,16 @@ export function EvidenceDrawer({ open, hash, audit }: { open: boolean; hash: str
 
       {([
         ["Sealed", "Sep 15, 2026 · 08:41 CET"],
-        ["Conformance", null],
+        ["Signing method", null],
         ["SHA-256 digest", null],
-        ["Timestamp", "RFC 3161 · DigiCert"],
+        ["Time source", "Application clock"],
       ] as const).map(([k, v], i) => (
         <div key={k} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "5.5px 0" }}>
           <span style={{ fontSize: 10.5, color: MUTED }}>{k}</span>
           {v ? (
             <span style={{ fontSize: 10.5, color: INK }}>{v}</span>
-          ) : k === "Conformance" ? (
-            <span style={{ background: EMERALD_SOFT, color: EMERALD, fontSize: 9.5, fontWeight: 700, borderRadius: 5, padding: "2px 7px" }}>PAdES B-LT</span>
+          ) : k === "Signing method" ? (
+            <span style={{ background: EMERALD_SOFT, color: EMERALD, fontSize: 9.5, fontWeight: 700, borderRadius: 5, padding: "2px 7px" }}>Email link</span>
           ) : (
             <span style={{ fontSize: 10, color: INK, fontFamily: "var(--font-geist-mono), monospace", maxWidth: 190, overflow: "hidden", whiteSpace: "nowrap" }}>
               {hash || "…"}
@@ -442,7 +442,7 @@ export function EvidenceDrawer({ open, hash, audit }: { open: boolean; hash: str
         <span style={{ width: 24, height: 24, borderRadius: "50%", background: EMERALD_SOFT, color: EMERALD, fontSize: 9, fontWeight: 700, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>1</span>
         <span style={{ minWidth: 0 }}>
           <span style={{ display: "block", fontSize: 10.5, fontWeight: 600, color: INK }}>Lars Bergström</span>
-          <span style={{ display: "block", fontSize: 9, color: FAINT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>lars@nordjarm.example · email verification</span>
+          <span style={{ display: "block", fontSize: 9, color: FAINT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>lars@nordjarm.example · personal signing link</span>
         </span>
         <span style={{ marginLeft: "auto", textAlign: "right" }}>
           <DemoChip status="SIGNED" />

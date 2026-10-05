@@ -2,9 +2,10 @@
 import { expect, mock, test } from "bun:test";
 let sends = 0;
 let lookupFails = false;
-let envelope: { status: string; tenant: { status: string }; recipients: { id: string; role: string; status: string; order: number }[] } | null = null;
+let envelope: { tenantId: string; status: string; tenant: { status: string }; recipients: { id: string; role: string; status: string; order: number }[] } | null = null;
 let row: Record<string, unknown>;
 const database = {
+  notificationSettings: { findUnique: async () => null },
   mailOutbox: {
     findMany: async () => [{ ...row }],
     updateMany: async ({ where, data }: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
@@ -22,6 +23,7 @@ mock.module("nodemailer", () => ({ createTransport: () => ({
   sendMail: async () => { sends++; return { accepted: ["synthetic@example.invalid"] }; },
   close: () => {},
 }) }));
+process.env.SMTP_FROM = "Synthetic Sender <sender@approved.test>";
 process.env.SMTP_URL = "smtp://127.0.0.1:49123?tls=off";
 const { processOutbox } = await import("../src/lib/mail");
 const signer = { id: "first", role: "SIGNER", status: "PENDING", order: 1 };
@@ -33,7 +35,7 @@ function fixture(template = "SIGN_INVITE", recipientId: string | null = "first",
 test("superseded invitation remains durably CANCELLED without invoking SMTP", async () => {
   for (const status of ["DRAFT", "COMPLETED", "VOIDED", "DECLINED", "EXPIRED", null]) {
     fixture();
-    envelope = status ? { status, tenant: { status: "ACTIVE" }, recipients: [signer] } : null;
+    envelope = status ? { tenantId: "tenant", status, tenant: { status: "ACTIVE" }, recipients: [signer] } : null;
     const result = await processOutbox();
     expect(sends).toBe(0);
     expect(row.status).toBe("CANCELLED");
@@ -56,7 +58,7 @@ test("failed state lookup defers instead of sending unchecked invitation", async
 test("missing, signed, CC and out-of-order recipients do not receive invitations", async () => {
   for (const recipients of [[], [{ ...signer, status: "SIGNED" }], [{ ...signer, role: "CC" }], [{ ...signer, id: "earlier", order: 0 }, signer]]) {
     fixture("REMINDER");
-    envelope = { status: "PARTIALLY_SIGNED", tenant: { status: "ACTIVE" }, recipients };
+    envelope = { tenantId: "tenant", status: "PARTIALLY_SIGNED", tenant: { status: "ACTIVE" }, recipients };
     await processOutbox();
     expect(sends).toBe(0);
     expect(row.status).toBe("CANCELLED");
@@ -65,7 +67,7 @@ test("missing, signed, CC and out-of-order recipients do not receive invitations
 test("current signer and unrelated mail kinds retain SMTP behavior", async () => {
   for (const [template, recipientId, envelopeId] of [["SIGN_INVITE", "first", "envelope"], ["TEAM_INVITE", null, null], ["TEST", "first", null]]) {
     fixture(template!, recipientId!, envelopeId!);
-    envelope = { status: template === "SIGN_COMPLETED" ? "COMPLETED" : "SENT", tenant: { status: "ACTIVE" }, recipients: [{ ...signer, status: "DELIVERED" }] };
+    envelope = { tenantId: "tenant", status: template === "SIGN_COMPLETED" ? "COMPLETED" : "SENT", tenant: { status: "ACTIVE" }, recipients: [{ ...signer, status: "DELIVERED" }] };
     await processOutbox();
     expect(sends).toBe(1);
     expect(row.status).toBe("SENT");
@@ -85,7 +87,7 @@ test("unbound signing invitation reminder and completion cancel without SMTP", a
 });
 test("suspended workspace invitation is cancelled before SMTP", async () => {
   fixture();
-  envelope = { status: "SENT", tenant: { status: "SUSPENDED" }, recipients: [signer] };
+  envelope = { tenantId: "tenant", status: "SENT", tenant: { status: "SUSPENDED" }, recipients: [signer] };
   await processOutbox();
   expect(sends).toBe(0);
   expect(row.status).toBe("CANCELLED");

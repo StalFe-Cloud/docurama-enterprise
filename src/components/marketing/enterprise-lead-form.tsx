@@ -140,10 +140,10 @@ export function EnterpriseLeadForm() {
         </div>
       </div>
       <div className="space-y-1.5">
-        <Label htmlFor="el-req">What do you need? (SSO, Part 11, self-hosting, small team structures…)</Label>
+        <Label htmlFor="el-req">What do you need? (SSO, self-hosting, team structure or assurance requirements)</Label>
         <Textarea id="el-req" rows={4} maxLength={2000} value={form.requirements}
           onChange={(e) => setForm({ ...form, requirements: e.target.value })}
-          placeholder="We're a medical-device company, 40 seats, need Part 11 mode and our own certificates; possible self-hosting later." />
+          placeholder="We have 40 seats and need self-hosting. Please review our document types and signing-assurance requirements." />
       </div>
       <TurnstileField onToken={setTurnstileToken} resetKey={verificationReset} />
       {submit.isError && <p role="alert" className="text-sm text-destructive">{submit.error.message}</p>}

@@ -8,6 +8,7 @@ import { serializableTransaction } from "../src/lib/transaction";
 import { db } from "../src/lib/db";
 import { hashPasswordAsync } from "../src/lib/password-async";
 import { queueEnvelopeEvent, retryFailedDeliveries } from "../src/lib/webhooks";
+import { readConsentSnapshot } from "../src/lib/consent";
 
 // Never repoint these tests at customer data. The workflow creates this database.
 const url = process.env.DATABASE_URL ?? "";
@@ -54,6 +55,8 @@ async function fixture(limit = 100, role = "OWNER") {
   const unique = randomUUID();
   const tenant = await direct.tenant.create({ data: { name: `Verification ${unique}`, slug: `verify-${unique}`, planCode: "STARTER", status: "ACTIVE" } });
   tenantIds.push(tenant.id);
+  await direct.esignPreferences.create({ data: { tenantId: tenant.id, signatureLevel: "simple", requireReauth: false, part11Mode: false,
+    consentText: "I reviewed this isolated verification agreement and consent to sign it electronically.", consentVersion: "verification-fixture-v1" } });
   const user = await direct.user.create({ data: { email: `verify-${unique}@example.test`, firstName: "Identical", lastName: "Name", passwordHash, activeTenantId: tenant.id, status: "ACTIVE" } });
   userIds.push(user.id);
   const member = await direct.member.create({ data: { tenantId: tenant.id, userId: user.id, role, status: "ACTIVE" } });
@@ -98,6 +101,10 @@ async function endpoint(f: Fixture, events = "*") {
 }
 async function latestEnvelope(f: Fixture) {
   return direct.envelope.findFirstOrThrow({ where: { tenantId: f.tenant.id }, orderBy: { createdAt: "desc" }, include: { recipients: true } });
+}
+function signingConsent(snapshot: string | null) {
+  const terms = readConsentSnapshot(snapshot);
+  return { consent: true, consentDigest: terms.digest, consentVersion: terms.version };
 }
 
 // Exercise real HTTP routes, not mocked authentication or extracted handler bodies.
@@ -187,7 +194,8 @@ describe("atomic quota and lifecycle actions", () => {
     const views = await Promise.all([request(path, undefined, { op: "view" }), request(path, undefined, { op: "view" })]);
     expect(views.every((item) => item.status === 200)).toBe(true);
     expect(await direct.envelopeEvent.count({ where: { envelopeId: e.id, action: "VIEWED" } })).toBe(1);
-    const signed = await Promise.all([request(path, undefined, { op: "sign", name: "Fixture Signer", consent: true }), request(path, undefined, { op: "sign", name: "Fixture Signer", consent: true })]);
+    const acknowledgement = signingConsent(e.consentSnapshot);
+    const signed = await Promise.all([request(path, undefined, { op: "sign", name: "Fixture Signer", ...acknowledgement }), request(path, undefined, { op: "sign", name: "Fixture Signer", ...acknowledgement })]);
     expect(signed.map((item) => item.status).sort()).toEqual([200, 409]);
     expect((await direct.envelope.findUniqueOrThrow({ where: { id: e.id } })).status).toBe("COMPLETED");
     for (const action of ["SIGNED", "SEALED"]) expect(await direct.envelopeEvent.count({ where: { envelopeId: e.id, action } })).toBe(1);
@@ -207,7 +215,7 @@ describe("atomic quota and lifecycle actions", () => {
     expect(await direct.mailOutbox.count({ where: { template: "REMINDER", linkUrl: { contains: e.recipients[0].accessToken! } } })).toBe(1);
     expect((await request("/api/workspace/envelopes", f.token, { op: "void", id: e.id, data: { reason: "Fixture cancellation" } })).status).toBe(200);
     expect(await direct.webhookDelivery.count({ where: { endpointId: ep.id, event: "envelope.voided" } })).toBe(1);
-    expect((await request(`/api/sign/${e.recipients[0].accessToken}`, undefined, { op: "sign", name: "Too Late", consent: true })).status).toBe(409);
+    expect((await request(`/api/sign/${e.recipients[0].accessToken}`, undefined, { op: "sign", name: "Too Late", ...signingConsent(e.consentSnapshot) })).status).toBe(409);
     expect((await send(f)).status).toBe(200);
     const other = await latestEnvelope(f);
     expect((await request(`/api/sign/${other.recipients[0].accessToken}`, undefined, { op: "decline", reason: "Fixture rejection" })).status).toBe(200);

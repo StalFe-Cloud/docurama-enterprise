@@ -1,3 +1,4 @@
+import { readConsentSnapshot, ConsentTermsError } from "@/lib/consent";
 import { parseEnvelopeFields, EnvelopeFieldsError } from "@/lib/envelope-fields";
 import { readContractSnapshot, ContractSnapshotError } from "@/lib/contract-snapshot";
 import type { Metadata } from "next";
@@ -33,7 +34,7 @@ export default async function SignPage({ params }: { params: Promise<{ token: st
       envelope: {
         include: {
           recipients: { orderBy: { order: "asc" } },
-          tenant: { select: { name: true, status: true, esignPrefs: { select: { requireReauth: true, part11Mode: true } } } },
+          tenant: { select: { name: true, status: true, esignPrefs: { select: { requireReauth: true, part11Mode: true, signatureLevel: true } } } },
           document: { select: { filename: true, pageCount: true, sha256: true } },
           createdBy: { select: { email: true } },
         },
@@ -95,6 +96,12 @@ export default async function SignPage({ params }: { params: Promise<{ token: st
     } else {
       const authenticationRestriction = signerAuthenticationRestriction(env.tenant);
       if (authenticationRestriction) return <PublicSign token="" state={{ phase: "unavailable", reason: authenticationRestriction }} />;
+      let consent;
+      try { consent = readConsentSnapshot(env.consentSnapshot); }
+      catch (error) {
+        if (!(error instanceof ConsentTermsError)) throw error;
+        return <PublicSign token="" state={{ phase: "unavailable", reason: error.message }} />;
+      }
       let fields;
       try { fields = parseEnvelopeFields(contract ? JSON.stringify(contract.signatureLocations) : env.fields, { pageCount: env.pages, recipients: env.recipients }); }
       catch (error) {
@@ -114,6 +121,7 @@ export default async function SignPage({ params }: { params: Promise<{ token: st
         : null;
       state = {
         phase: "active",
+        consent,
         title: env.title, code: env.publicCode,
         tenantName: env.tenant.name,
         message: env.message || null,

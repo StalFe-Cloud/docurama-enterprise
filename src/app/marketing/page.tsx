@@ -3,9 +3,9 @@ import { MarketingPage } from "@/components/marketing/marketing-page";
 
 export const metadata: Metadata = {
   alternates: { canonical: "/" }, // marketing preview mirrors the homepage
-  title: "Docurama - Sign documents. Prove everything.",
+  title: "Docurama - Sign documents. Record evidence.",
   description:
-    "EU-built eSignatures with cryptographic evidence: X.509 sealing, RFC 3161 timestamps, GDPR, eIDAS-aligned and 21 CFR Part 11 workflows.",
+    "Email-link document signing with typed adoption, immutable contract terms, explicit consent and digest evidence.",
 };
 
 /** Always-on marketing preview (the conditional version lives at `/`). */

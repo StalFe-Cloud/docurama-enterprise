@@ -1,91 +1,61 @@
 ---
-title: Tutorial: verify a signed document
-description: How a third party — counterparty, auditor or court — verifies a Docurama document using the public code, the sealed file, or an offline evidence pack.
+title: "Tutorial: inspect a signed document's evidence"
+description: Distinguish public recorded facts, original-document checksums and checks on exported completion artifacts.
 group: Getting started
 order: 5
 tags: [tutorial, verification, evidence]
 ---
 
-Verification is the half of eSignature nobody demos and everybody needs. This
-tutorial walks through the three verification paths, from a ten-second check
-to a zero-network audit. You never need an account for any of them.
+Verification has several purposes. Retrieving a reported record, comparing file
+bytes and verifying an exported manifest answer different questions.
 
-## The three ways to verify
+## 1. Read the public record
 
-| You have | Path | Takes |
-|---|---|---|
-| The public code (`DOC-XXXXXXXX`) | Public verification portal | 10 seconds |
-| The sealed document + code | Portal digest check | 1 minute |
-| The evidence pack (ZIP) | Offline `verify.html` | 2 minutes, no network |
+Open the verification portal and enter the public code. The current API returns:
 
-## Path 1: the public code
+| Status | What the installation reports |
+| --- | --- |
+| `VERIFIED` | A local envelope is completed and has recorded sealing time/digest. |
+| `NOT_SEALED` | A local envelope exists but lacks the required completion/seal record. |
+| `VOIDED` | The issuer voided the envelope. |
+| `NOT_FOUND` | No matching local envelope or received attestation exists. |
+| `VERIFIED_ATTESTED` | The portal has a signed fingerprint submitted by a self-hosted instance. |
 
-Every completed envelope carries a public code, eight characters after
-`DOC-`. Open [docurama.eu/verify](https://docurama.eu/verify), paste the
-code, and the portal answers with exactly what the evidence shows — never
-more:
+A `VERIFIED` lookup does not recompute the completed PDF or independently verify
+the signer. The current email-link flow does not apply a PAdES conformance level
+or independent trusted timestamp. A historical or instance-supplied label is a
+reported value, not independently validated assurance.
 
-- **VERIFIED** — the seal is intact, the digest matches, the envelope is
-  completed. The result also states the conformance level that was actually
-  applied (PAdES B-B, B-T, B-LT or B-LTA) and, when the sender's domain was
-  DNS-verified, the verified sending domain.
-- **NOT_SEALED** — the envelope exists but is not completed (a signer is
-  still pending, or it was sent as a draft). This is not an error; it is the
-  honest answer.
-- **VOIDED** — the sender voided the envelope after sending.
-- **NOT_FOUND** — no such code (typo, or the envelope predates the registry).
+## 2. Compare the correct file digest
 
-The verifier never needs to trust the sender's screenshot: the result comes
-from the sealed ledger, and seals are hashed into an append-only transparency
-log with Merkle inclusion proofs — a rewritten history is detectable.
+For an uploaded contract, the envelope checksum refers to the **original upload**.
+The completed PDF includes placed values and has its own checksum. For a text
+template, the envelope digest binds recorded contract/adoption evidence; it is
+not the completed PDF's file checksum.
 
-## Path 2: the sealed document itself
+Use the evidence pack's manifest and envelope record to identify the checksum
+for the specific artifact you are checking. Do not compare the completed PDF
+against the original-upload checksum and expect equality.
 
-If you were sent the sealed PDF and want to prove it is *the* signed version
-(not a print-before-signing draft), run the same code lookup and compare the
-**document digest** the portal reports with the file you hold. Docurama
-computes the SHA-256 at seal time; matching digests mean byte-identical
-documents. This closes the "which version did I actually sign?" dispute in
-one comparison.
+## 3. Check the exported evidence pack
 
-## Path 3: the offline evidence pack
+Ask an authorized workspace user for the evidence pack. Open its `verify.html`
+with the exported files available. The verifier checks the signed manifest and
+individual artifact checksums locally. Inspect the actual verdict, artifact
+count, key and any included transparency proof.
 
-For audits, litigation files or air-gapped environments, ask the sender for
-the **evidence pack** — a ZIP they export from the envelope in one click.
-Unzip it and open `verify.html` in any modern browser with your network
-disconnected. The page:
+A successful check means the supplied bytes and signatures passed those checks
+under the supplied key. It does not establish the truth of every event, an
+independently verified identity or the agreement's legal enforceability. Retain
+the pack and the appropriate trusted-key reference for your verification process.
 
-1. Re-verifies the **signed manifest** (RSA-SHA-256 over canonical JSON)
-   using WebCrypto, entirely locally;
-2. Re-hashes every artifact — sealed document, ledger CSV, envelope record,
-   certificate — and checks all seven against the manifest;
-3. Shows a single verdict banner: **VALID** with the artifact count, or the
-   specific mismatch.
+## 4. Understand self-hosted records
 
-No Docurama server is contacted, so the pack is self-proving: it works in
-2041 even if the platform is gone. This is deliberate — evidence that
-depends on the vendor staying online is not evidence.
+A configured self-hosted instance can submit a signed fingerprint to a portal.
+`VERIFIED_ATTESTED` distinguishes that submitted record from a locally held
+envelope. Check the registered instance key and actual integration result; a
+signed submission is not independent identity verification or trusted timestamping.
 
-## Verifying documents from self-hosted instances
-
-Documents signed on a self-hosted Docurama can push a signed, GDPR-minimal
-**attestation** (code, digest, dates, conformance level, signer count — no
-personal data) to a public verification portal at seal time. Those documents
-verify as **VERIFIED_ATTESTED** with the instance's registry facts, so
-on-prem deployments get the same independent check without exposing their
-network. The result is visually distinct from cloud-sealed documents, and
-honest about which instance produced it.
-
-## What verification is *not*
-
-The portal does not certify that the person who signed read the document, or
-that the contract is fair — it proves what happened cryptographically: which
-envelope, which digest, which signers, which timestamps, which seal level,
-and that none of it was altered afterward. Courts and auditors weigh that
-evidence; Docurama's job is to make it unambiguous.
-
-## Try it now
-
-The [live examples](/#examples) page runs a complete signing journey with
-sample data — open it, copy the resulting code, and verify it yourself on
-the [portal](https://docurama.eu/verify).
+The marketing examples are illustrative synthetic data. Their displayed codes
+and badges are not records of real signing transactions. See
+[the assurance limits](/docs/compliance/eidas) before relying on the workflow.

@@ -4,6 +4,9 @@ import { requestApplicationOrigin } from "@/lib/request-origin";
 import { parseEnvelopeFields, EnvelopeFieldsError } from "@/lib/envelope-fields";
 import { captureSignatureData, SignatureDataError } from "@/lib/signature-data";
 import { readContractSnapshot, ContractSnapshotError } from "@/lib/contract-snapshot";
+import { readConsentSnapshot, ConsentTermsError } from "@/lib/consent";
+import { preflightSignatureDocument, FinalDocumentError } from "@/lib/final-document";
+import { resolveConfiguredMailSender, MailSenderError } from "@/lib/mail-sender";
 import { NextRequest } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { jsonError, jsonOk } from "@/lib/serializers";
@@ -16,7 +19,8 @@ import { signerReadRestriction, signerAuthenticationRestriction } from "@/lib/si
 
 /** Signing tokens authenticate recipients; every state decision is re-read in
  * the same serializable transaction as its ledger entry and durable outbox.
- * A retry may replay database work, never a network request. */
+ * A retry may repeat read-only artifact validation. External delivery remains
+ * outside the retried callback. */
 export const dynamic = "force-dynamic";
 type Ctx = { params: Promise<{ token: string }> };
 const SIGNATURE_FONTS = new Set(["caveat", "dancing-script", "great-vibes"]);
@@ -25,9 +29,11 @@ async function loadRecipient(tx: Prisma.TransactionClient, token: string) {
   const recipient = await tx.recipient.findUnique({
     where: { accessToken: token },
     include: { envelope: { include: {
-      recipients: true,
+      recipients: { orderBy: { order: "asc" } },
+      document: { select: { storageKey: true, tenantId: true } },
+      events: { orderBy: { at: "asc" } },
       createdBy: { select: { email: true, firstName: true, lastName: true } },
-      tenant: { select: { status: true, esignPrefs: { select: { requireReauth: true, part11Mode: true } } } },
+      tenant: { select: { status: true, esignPrefs: { select: { requireReauth: true, part11Mode: true, signatureLevel: true } } } },
     } } },
   });
   if (!recipient) throw jsonError("This signing link is not valid. Check the link in your invitation email.", 404);
@@ -37,6 +43,9 @@ async function loadRecipient(tx: Prisma.TransactionClient, token: string) {
     throw jsonError(`This document is no longer available for signing (status: ${recipient.envelope.status.toLowerCase()}).`, 409);
   }
   if (recipient.role !== "SIGNER") throw jsonError("You receive a copy of this document. Only signers can sign it.", 409);
+  if (recipient.envelope.documentId && (!recipient.envelope.document || recipient.envelope.document.tenantId !== recipient.envelope.tenantId)) {
+    throw jsonError("The original document is not available in this workspace.", 409);
+  }
   readContractSnapshot(recipient.envelope);
   return recipient;
 }
@@ -113,18 +122,41 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       if (restriction) throw jsonError(restriction, 409);
       const fields = parseEnvelopeFields(envelope.contractSnapshot ? JSON.stringify(readContractSnapshot(envelope)!.signatureLocations) : envelope.fields, { pageCount: envelope.pages, recipients: envelope.recipients });
       if (recipient.status === "SIGNED") throw jsonError("You have already signed this document.", 409);
-      const adoption = captureSignatureData({ ...body, name, font }, fields, recipient.email, actionAt);
+      const consentTerms = readConsentSnapshot(envelope.consentSnapshot);
+      const adoption = captureSignatureData({ ...body, name, font }, fields, recipient.email, actionAt, consentTerms);
       if (!["SENT", "PARTIALLY_SIGNED"].includes(envelope.status)) throw jsonError("This document can no longer be signed.", 409);
       const signers = envelope.recipients.filter((item) => item.role === "SIGNER").sort((a, b) => a.order - b.order);
       const ahead = signers.find((item) => item.status === "PENDING" || item.status === "DELIVERED");
       if (ahead && ahead.id !== recipient.id) {
         throw jsonError(`${ahead.name} signs before you. You will be able to sign once they have completed.`, 409);
       }
-      await tx.recipient.update({ where: { id: recipient.id }, data: { status: "SIGNED", signedAt: actionAt, signatureData: JSON.stringify(adoption) } });
-      await tx.envelopeEvent.create({ data: {
-        envelopeId: envelope.id, actor: recipient.name, action: "SIGNED", at: actionAt,
+      const signatureData = JSON.stringify(adoption);
+      const fromEmail = await resolveConfiguredMailSender(tx, { tenantId: envelope.tenantId, required: false });
+      const signedEvent = {
+        actor: recipient.name, action: "SIGNED", at: actionAt,
         detail: `Signed by ${name} <${recipient.email}> via signing link (${font} signature)`,
-      } });
+      };
+      const proposedEvents = [...envelope.events, signedEvent];
+      const projectedSigners = signers.map(item => item.id === recipient.id
+        ? { ...item, status: "SIGNED", signedAt: actionAt, signatureData } : item);
+      const proposedSealed = projectedSigners.length > 0 && projectedSigners.every(item => item.status === "SIGNED");
+      if (proposedSealed) {
+        const digest = computeEnvelopeDigest({
+          id: envelope.id, publicCode: envelope.publicCode, title: envelope.title, pages: envelope.pages,
+          createdAt: envelope.createdAt, documentSha256: envelope.documentId ? envelope.sha256 : null,
+          contractSnapshot: envelope.contractSnapshot, fields: envelope.fields,
+          recipients: projectedSigners, events: proposedEvents,
+        });
+        proposedEvents.push({ actor: "Docurama", action: "SEALED", at: actionAt,
+          detail: `All signers completed. Envelope sealed (SHA-256 ${digest.slice(0, 12)}...), verification code ${envelope.publicCode}` });
+      }
+      // Validate pending adoption and prospective ledger text before any
+      // signature, completion, event or notification is committed.
+      await preflightSignatureDocument({ ...envelope, events: proposedEvents }, {
+        email: recipient.email, order: recipient.order, signatureData,
+      });
+      await tx.recipient.update({ where: { id: recipient.id }, data: { status: "SIGNED", signedAt: actionAt, signatureData } });
+      await tx.envelopeEvent.create({ data: { envelopeId: envelope.id, ...signedEvent } });
       const all = await tx.recipient.findMany({ where: { envelopeId: envelope.id, role: "SIGNER" } });
       const sealed = all.length > 0 && all.every((item) => item.status === "SIGNED");
       const signerCount = all.filter((item) => item.status === "SIGNED").length;
@@ -161,6 +193,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
           recipientName: item.name, message: kind === "invite" ? envelope.message : null,
           linkUrl: `${origin}/sign/${item.accessToken}` }),
         envelopeId: envelope.id, recipientId: item.id, toEmail: item.email, createdAt: actionAt,
+        ...(fromEmail ? { fromEmail } : {}),
       });
       if (sealed) {
         // These durable rows share the signing transaction. A replay of a
@@ -172,6 +205,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
             ...buildSigningEmail({ kind: "completed", title: envelope.title, senderName,
               recipientName: senderName, linkUrl: `${origin}/user` }),
             envelopeId: envelope.id, toEmail: envelope.createdBy.email, createdAt: actionAt,
+            ...(fromEmail ? { fromEmail } : {}),
           } });
         }
       } else {
@@ -214,6 +248,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (error instanceof SignatureDataError) return jsonError(error.message, 400);
     if (error instanceof EnvelopeFieldsError) return jsonError(error.message, 409);
     if (error instanceof ContractSnapshotError) return jsonError(error.message, 409);
+    if (error instanceof ConsentTermsError) return jsonError(error.message, 409);
+    if (error instanceof FinalDocumentError) return jsonError(error.message, 409);
+    if (error instanceof MailSenderError) return jsonError(error.message, 409);
     console.error("[sign POST]", error);
     return jsonError("Signing failed. Please try again.", 500);
   }

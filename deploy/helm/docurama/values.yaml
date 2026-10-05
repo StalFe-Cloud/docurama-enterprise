@@ -34,12 +34,16 @@ persistence:
   storageSubPath: storage
 
 # ── Mail delivery ────────────────────────────────────────────────────────────
-# Unset smtpUrl = outbox-only mode (invitations queue in the admin console).
+# Unset SMTP relay = outbox-only mode (invitations queue in the admin console).
 # Provide via an existing Secret in production:
 #   kubectl create secret generic docurama-smtp --from-literal=SMTP_URL='smtp://user:pass@relay:587'
 smtp:
   existingSecret: ""
   secretKey: SMTP_URL
+  # Optional verified sender; blank leaves platform sender/outbox-only available.
+  from: ""
+  # Alternatively select a sender key in existingSecret; missing selected key fails pod setup.
+  fromSecretKey: ""
 
 # ── S3 object storage (multitenant / scale-out) ──────────────────────────────
 # Disabled by default: documents live on the PVC (STORAGE_DIR). Enable to
@@ -146,5 +150,5 @@ nodeSelector: {}
 tolerations: []
 affinity: {}
 
-# Skip the entrypoint's prisma db push (dedicated migration Job instead).
+# Legacy migration-skip option; use only after a reviewed migration Job succeeds.
 skipDbPush: false

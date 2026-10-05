@@ -12,7 +12,7 @@
  * (the hero movie, the bento table and verify demos, and the tabbed live
  * examples), asymmetric hero, bento grid with exact cell count and rhythm,
  * no "Step N" labels, eyebrows rationed to two, middle dots rationed,
- * honest copy ("aligned", never "certified"). The developer section lives
+ * copy limited to implemented signing and evidence behavior. The developer section lives
  * on its own /developers page.
  */
 
@@ -41,7 +41,7 @@ import {
 const NAV = [
   { href: "#product", labelKey: "nav.product", fallback: "Product" },
   { href: "#examples", labelKey: "nav.examples", fallback: "Examples" },
-  { href: "#compliance", labelKey: "nav.compliance", fallback: "Compliance" },
+  { href: "#compliance", labelKey: "nav.compliance", fallback: "Assurance" },
   { href: "#pricing", labelKey: "nav.pricing", fallback: "Pricing" },
   { href: "/docs", labelKey: "nav.docs", fallback: "Docs" },
   { href: "/developers", labelKey: "nav.developers", fallback: "Developers" },
@@ -57,62 +57,62 @@ const BENTO_FEATURES = [
   },
   {
     icon: Fingerprint,
-    title: "Certificates and sealing",
-    body: "One-click RSA-2048 signing certificates per workspace. Seal with PAdES conformance from B-B to B-LTA.",
+    title: "Completed documents and evidence",
+    body: "Download a completed document and a separate completion record containing the captured signer values and frozen terms.",
   },
   {
     icon: Timer,
-    title: "RFC 3161 timestamps",
-    body: "Every signature anchored to an independent Timestamp Authority. Presets for DigiCert, Sectigo, GlobalSign, or your own TSA.",
+    title: "Recorded signing times",
+    body: "Signing events and completion evidence record application times. Independent trusted timestamping is outside this release.",
   },
 ];
 
 /** Capabilities listed below the bento as a quiet two-column cluster. */
 const ALSO_INCLUDED = [
-  { icon: BellRing, title: "Smart reminders", body: "Manual nudges, per-envelope jobs or platform schedules with quiet hours and SMS escalation." },
-  { icon: MessageSquare, title: "SMS and WhatsApp alerts", body: "Fourteen researched providers, from WhatsApp Cloud API's free tier to EU-hosted gateways." },
+  { icon: BellRing, title: "Signing reminders", body: "Nudge the eligible pending signer by email, with the envelope and recipient state checked before dispatch." },
+  { icon: MessageSquare, title: "Recipient notifications", body: "Signing invitations, waiting notices and final copies follow the recipient routing order." },
   {
     icon: ScrollText,
     title: "Templates & Legal Contracts",
-    body: "Turn repeatedly signed documents into templates, or start instantly from our statutory French legal contracts.",
+    body: "Turn recurring agreements into templates, or review and adapt a contract starter before sending.",
     href: "/modeles-de-contrats",
     linkText: "Explore French legal templates →",
   },
-  { icon: BadgeCheck, title: "Sending domains", body: "Send from your own domain after live DNS verification over DNS-over-HTTPS." },
+  { icon: BadgeCheck, title: "Sending domains", body: "Use an authorized sender and SMTP relay; workspace sender overrides require a verified sending domain." },
 ];
 
 const COMPLIANCE = [
   {
     icon: ShieldCheck,
-    tag: "GDPR",
-    title: "European by design",
+    tag: "DATA CONTROLS",
+    title: "Review the deployment data boundaries",
     points: [
-      "EU data residency. Documents are processed and stored in the European Union.",
-      "DSAR intake with access, erasure, rectification and portability workflows.",
-      "Versioned consent records captured at signup (Art. 7 proof).",
-      "DPO reachable at privacy@docurama.eu within statutory deadlines.",
+      "Data location depends on the selected hosting and integrations; approve it before launch.",
+      "Track data-access and other privacy requests; operators review and explicitly record completion.",
+      "Record consent text and version for review alongside signing evidence.",
+      "Assign a privacy contact, retention policy and request-handling process for the installation.",
     ],
   },
   {
     icon: FileCheck2,
-    tag: "eIDAS",
-    title: "Signature levels that mean something",
+    tag: "EMAIL-LINK SIGNING",
+    title: "Know what the signing record contains",
     points: [
-      "Simple, Advanced and Qualified-aligned signing workflows.",
-      "Cryptographic sealing with PAdES conformance levels (B-B to B-LTA).",
-      "Per-tenant signing certificates with revocation and thumbprints.",
-      "Honest conformance reporting. The level shown is the level applied.",
+      "Personal signing links, explicit consent and typed-name signature adoption.",
+      "Frozen contract terms and recipient-bound signature, initials, text, date and checkbox values.",
+      "Private completed-document and completion-record downloads for authorized participants.",
+      "Advanced/Qualified signatures, embedded PAdES and trusted timestamps are unavailable in this release.",
     ],
   },
   {
     icon: Lock,
-    tag: "21 CFR Part 11",
-    title: "Controls for regulated teams",
+    tag: "RELEASE ACCEPTANCE",
+    title: "Qualify the selected installation",
     points: [
-      "§11.50 signature manifestation: printed name, date and meaning on every signature.",
-      "§11.100 identity and consent records, versioned and audit-logged.",
-      "Optional re-authentication before each signing action.",
-      "Organization-wide Part 11 mode with policy enforcement.",
+      "Check the displayed terms, recorded consent, signer values and final document before acceptance.",
+      "Approve the email-link assurance scope for the intended documents.",
+      "Verify the actual sender, relay and mailbox delivery with controlled test addresses.",
+      "Part 11 enforcement requires separate implementation and applicable qualification.",
     ],
   },
 ];
@@ -123,20 +123,20 @@ const FAQS = [
     a: "Solo includes one seat and 30 envelopes for €12/month. Starter includes three seats and 100 envelopes for €29/month. Both include 35 sending days and rollover; Business supports larger teams.",
   },
   {
-    q: "Is Docurama an EU company, and where is my data?",
-    a: "Docurama SAS is registered at 1 Rue Marguerin, 75014 Paris, France. Customer data is processed and stored in the European Union, with no transatlantic transfers of your documents.",
+    q: "Where is my data stored?",
+    a: "Storage and processing locations depend on the approved hosting environment, storage service and integrations. Confirm those locations and the privacy terms for the selected installation before using customer documents.",
   },
   {
-    q: "Are the signatures legally valid?",
-    a: "Docurama implements eIDAS-aligned electronic signature workflows (Simple and Advanced) with cryptographic sealing and RFC 3161 timestamps. For most B2B contracts across the EU, Simple and Advanced eSignatures are sufficient and fully enforceable. The signing level applied to each document is reported honestly in its evidence record.",
+    q: "What signing assurance is supported?",
+    a: "This release supports personal email-link access, explicit consent and typed-name signature adoption with completion evidence. It does not verify an official identity, provide Advanced/Qualified signatures, embed PAdES or obtain trusted RFC 3161 timestamps. Approve this scope for the intended document classes before launch.",
   },
   {
     q: "We're a regulated company. Can you support 21 CFR Part 11?",
-    a: "Yes. Organizations can enable Part 11 mode, which enforces signature manifestation under §11.50 (printed name, date/time and meaning of signature), versioned signer-consent records under §11.100, optional re-authentication before signing, and audit events on every mutation.",
+    a: "Part 11 enforcement is unavailable in this release. Completion records and audit data can support a review, but they do not establish regulated-use qualification. A regulated deployment needs its own approved controls and acceptance evidence.",
   },
   {
     q: "Can we send from our own domain?",
-    a: "Yes. Add your domain in Settings, then Account, and Docurama verifies it over live DNS (TXT) before any mail is sent from it, protecting both deliverability and your brand.",
+    a: "Configure an authorized SMTP relay and sender address. A workspace sender override requires a currently verified sending domain. DNS verification does not configure the relay or guarantee inbox delivery; check delivery with controlled test addresses.",
   },
   {
     q: "Is there an API?",
@@ -144,7 +144,7 @@ const FAQS = [
   },
   {
     q: "How do we exercise GDPR rights?",
-    a: "Write to privacy@docurama.eu or use the DSAR tooling available to workspace administrators. Access, erasure, rectification and portability requests are tracked with statutory due dates and completion records.",
+    a: "Write to privacy@docurama.eu or use the DSAR tooling available to workspace administrators. Access, erasure, rectification and portability requests are tracked for operator review with due dates and explicit completion records.",
   },
 ];
 
@@ -220,17 +220,17 @@ export function MarketingPage() {
               {locale === "fr" ? (
                 <>
                   Signez vos documents.<br />
-                  <span className="text-primary">Prouvez l'essentiel.</span>
+                  <span className="text-primary">Conservez les preuves.</span>
                 </>
               ) : (
                 <>
                   Sign documents.<br />
-                  <span className="text-primary">Prove everything.</span>
+                  <span className="text-primary">Record evidence.</span>
                 </>
               )}
             </h1>
             <p className="hero-in mx-auto mt-5 max-w-xl text-base leading-relaxed text-muted-foreground sm:text-lg" style={{ animationDelay: ".08s" }}>
-              {t("hero.subtitle", "EU-built eSignatures with cryptographic evidence: X.509 sealing, RFC 3161 timestamps and an audit trail built for review.")}
+              {t("hero.subtitle", "Email-link signing with frozen contract terms, typed-name adoption and completion evidence built for review.")}
             </p>
             <div className="hero-in mt-7 flex flex-wrap justify-center gap-3" style={{ animationDelay: ".16s" }}>
               <Button size="lg" asChild>
@@ -249,7 +249,7 @@ export function MarketingPage() {
               <HeroDemo />
             </div>
             <figcaption className="mx-auto mt-4 max-w-2xl text-center text-xs leading-relaxed text-muted-foreground">
-              {t("hero.caption", "The StålFe demo workspace replayed end to end: a mill certificate goes to the foundry, is signed, sealed and proven with cryptographic evidence.")}
+              {t("hero.caption", "An illustrative workspace shows a mill certificate sent for signing, adopted by name and completed with an evidence record. Synthetic values demonstrate the flow.")}
             </figcaption>
           </figure>
         </div>
@@ -258,7 +258,7 @@ export function MarketingPage() {
       {/* Trust strip: quiet, under the hero */}
       <section aria-label="Trust summary" className="border-b bg-muted/40">
         <p className="mx-auto max-w-6xl px-4 py-4 text-center text-xs leading-relaxed text-muted-foreground sm:px-6">
-          {t("trust.summary", "EU data residency. GDPR, eIDAS-aligned and 21 CFR Part 11 workflows. Public status at status.docurama.eu, platform security at security.docurama.eu.")}
+          {t("trust.summary", "Email-link signing, captured consent and private completion records. Hosting, delivery and assurance scope require acceptance for the selected installation.")}
         </p>
       </section>
 
@@ -269,8 +269,8 @@ export function MarketingPage() {
             A complete evidence pipeline, not just a signature in a corner
           </h2>
           <p className="mt-3 max-w-xl text-sm leading-relaxed text-muted-foreground sm:text-base">
-            From the first invitation email to the sealed archive, every step is
-            recorded, hashed and reportable.
+            Capture the contract terms, recipient values and consent, then
+            review the completed PDF and its separate completion record.
           </p>
 
           <div className="mt-10 grid gap-4 md:grid-cols-2 lg:grid-cols-6">
@@ -282,7 +282,7 @@ export function MarketingPage() {
                 </div>
                 <figcaption className="px-5 py-4 text-xs leading-relaxed text-muted-foreground">
                   Signer progress, status and the evidence digest for every
-                  envelope in the workspace, replayed live.
+                  envelope in the workspace, shown with synthetic values.
                 </figcaption>
               </div>
             </figure>
@@ -349,13 +349,13 @@ export function MarketingPage() {
       {/* Compliance: three framework rows, tag and title left, points right */}
       <section id="compliance" className="reveal border-b bg-muted/40">
         <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6 lg:py-24">
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-primary">Compliance</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-primary">Assurance</p>
           <h2 className="mt-3 max-w-xl text-2xl font-semibold tracking-tight sm:text-3xl">
             Evidence you can show an auditor
           </h2>
           <p className="mt-3 max-w-xl text-sm leading-relaxed text-muted-foreground sm:text-base">
-            Three frameworks, each backed by real mechanisms in the product
-            rather than badges on a page.
+            Review the supported signing flow and the deployment decisions
+            required for the documents your team intends to send.
           </p>
 
           <div className="mt-14 space-y-16">
@@ -385,7 +385,7 @@ export function MarketingPage() {
       <section className="reveal border-b">
         <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 lg:py-20">
           <h2 className="max-w-xl text-2xl font-semibold tracking-tight sm:text-3xl">
-            Three moves to a sealed contract
+            Three moves to a completed contract
           </h2>
           <div className="mt-10 grid gap-10 lg:grid-cols-2">
             <div className="space-y-4 rounded-xl border bg-card p-6 sm:p-8">
@@ -394,9 +394,9 @@ export function MarketingPage() {
               </span>
               <h3 className="text-lg font-semibold tracking-tight">Prepare and send</h3>
               <p className="text-sm leading-relaxed text-muted-foreground">
-                Upload your document, drop in signers, set routing and
-                reminders. Invitations go out from notifications@docurama.eu
-                or your own verified domain.
+                Upload a supported PDF or choose a template, add signers and
+                set their routing order. Invitations use the configured sending
+                identity or an authorized verified tenant domain.
               </p>
             </div>
             <div className="grid gap-6">
@@ -406,20 +406,20 @@ export function MarketingPage() {
                 </span>
                 <h3 className="text-lg font-semibold tracking-tight">Sign anywhere</h3>
                 <p className="text-sm leading-relaxed text-muted-foreground">
-                  Signers draw, type or upload a signature on any device.
-                  Identity is captured, consent is versioned, and every action
-                  lands in the event ledger.
+                  Signers review the contract, adopt a typed name and complete
+                  the required fields. The displayed consent and version are
+                  captured with the signing evidence.
                 </p>
               </div>
               <div className="space-y-3 border-t pt-6">
                 <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary-soft text-primary">
                   <BadgeCheck className="h-5 w-5" aria-hidden />
                 </span>
-                <h3 className="text-lg font-semibold tracking-tight">Seal and prove</h3>
+                <h3 className="text-lg font-semibold tracking-tight">Complete and review</h3>
                 <p className="text-sm leading-relaxed text-muted-foreground">
-                  On completion the document is sealed with your certificate,
-                  timestamped via RFC 3161, and gets a public verification code
-                  anyone can check.
+                  Authorized participants can download the completed PDF and
+                  a separate completion record. A public verification code
+                  checks the recorded evidence without exposing the file.
                 </p>
               </div>
             </div>
@@ -518,7 +518,7 @@ export function MarketingPage() {
               Your next contract deserves better than a scanned PDF
             </h2>
             <p className="mt-3 max-w-md text-sm leading-relaxed text-muted-foreground">
-              Set up a compliant eSignature workspace in about two minutes.
+              Prepare a workspace for email-link signing and review the launch requirements.
               Free for 14 days, no credit card required.
             </p>
           </div>
@@ -538,13 +538,13 @@ export function MarketingPage() {
           <div className="space-y-4">
             <BrandLogo tagline size="sm" />
             <p className="text-xs leading-relaxed text-muted-foreground">
-              {BRAND_LEGAL_NAME}<br />{BRAND_ADDRESS}<br />EU data residency. Paris, France.
+              {BRAND_LEGAL_NAME}<br />{BRAND_ADDRESS}<br />Deployment data location is operator-selected.
             </p>
           </div>
           <nav aria-label="Product">
             <p className="mb-4 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Product</p>
             <ul className="space-y-2.5 text-sm">
-              {[["Features", "#product"], ["Live examples", "#examples"], ["Compliance", "#compliance"], ["Pricing", "#pricing"], ["Contract templates", "/modeles-de-contrats"], ["Developers", "/developers"], ["Verify a document", "/verify"], ["Documentation", "/docs"], ["Blog", "/blog"], ["Create account", "/welcome"]].map(([l, h]) => (
+              {[["Features", "#product"], ["Live examples", "#examples"], ["Assurance", "#compliance"], ["Pricing", "#pricing"], ["Contract templates", "/modeles-de-contrats"], ["Developers", "/developers"], ["Verify a document", "/verify"], ["Documentation", "/docs"], ["Blog", "/blog"], ["Create account", "/welcome"]].map(([l, h]) => (
                 <li key={l}><a className="text-muted-foreground transition-colors hover:text-foreground" href={h}>{l}</a></li>
               ))}
             </ul>
@@ -574,10 +574,10 @@ export function MarketingPage() {
         <div className="border-t">
           <p className="mx-auto max-w-6xl px-4 py-5 text-[11px] leading-relaxed text-muted-foreground sm:px-6">
             © 2026 {BRAND_LEGAL_NAME}, {BRAND_ADDRESS}. All transactional mail
-            is sent from notifications@docurama.eu. Docurama implements
-            GDPR-, eIDAS- and 21 CFR Part 11-aligned workflows; it is not an
-            accredited Qualified Trust Service Provider. For QES, pair
-            Docurama with an EU QTSP.
+            uses the configured sending identity. This release supports
+            email-link typed signing and completion records. It provides no
+            Advanced/Qualified signing, embedded PAdES, trusted timestamps
+            or Part 11 enforcement.
           </p>
         </div>
       </footer>

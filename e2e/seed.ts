@@ -1,4 +1,5 @@
 import { captureSignatureData } from "../src/lib/signature-data";
+import { freezeConsentTerms, readConsentSnapshot } from "../src/lib/consent";
 import { computeEnvelopeEvidenceDigest } from "../src/lib/esign";
 /**
  * E2E seed — deterministic, idempotent fixtures for the Maestro suite.
@@ -168,6 +169,19 @@ async function main() {
       },
     }));
   console.log(`tenant: ${tenant.name} (${tenant.id})`);
+
+  // Synthetic tenant policy only: no historical/demo tenant is converted.
+  const consentPrefs = await db.esignPreferences.upsert({
+    where: { tenantId: tenant.id },
+    create: { tenantId: tenant.id, signatureLevel: "simple", requireReauth: false, part11Mode: false,
+      consentText: "I have reviewed this fixture document and agree to sign electronically. My typed name and signing activity are recorded with its completion evidence.",
+      consentVersion: "e2e-consent-v1" },
+    update: { signatureLevel: "simple", requireReauth: false, part11Mode: false,
+      consentText: "I have reviewed this fixture document and agree to sign electronically. My typed name and signing activity are recorded with its completion evidence.",
+      consentVersion: "e2e-consent-v1" },
+  });
+  const consentSnapshot = freezeConsentTerms(consentPrefs);
+  const consentTerms = readConsentSnapshot(consentSnapshot);
 
   /* ── Wipe prior E2E run artifacts (envelopes cascade to recipients/events) ── */
   const wiped = await db.envelope.deleteMany({ where: { tenantId: tenant.id } });
@@ -346,6 +360,7 @@ async function main() {
   await db.envelope.create({
     data: {
       publicCode: "DOC-E2E0001",
+      consentSnapshot,
       sha256: ndaDoc.sha256,
       documentId: ndaDoc.id,
       title: "E2E Fixture — Mutual NDA (sent)",
@@ -389,6 +404,7 @@ async function main() {
   await db.envelope.create({
     data: {
       publicCode: "DOC-E2E0003",
+      consentSnapshot,
       sha256: declineDoc.sha256,
       documentId: declineDoc.id,
       title: "E2E Fixture — Consultant Agreement (decline)",
@@ -421,8 +437,9 @@ async function main() {
 
   // COMPLETED + sealed — verify portal must report VERIFIED with digest.
   const sealedAt = new Date();
-  const sealedSignatureData = JSON.stringify(captureSignatureData({ name: "Fixture Signer", font: "caveat", consent: true },
-    [], "fixture-signer@example.com", sealedAt));
+  const sealedSignatureData = JSON.stringify(captureSignatureData({ name: "Fixture Signer", font: "caveat", consent: true,
+    consentVersion: consentTerms.version, consentDigest: consentTerms.digest },
+    [], "fixture-signer@example.com", sealedAt, consentTerms));
   const sealedTitle = "E2E Fixture — Supply Agreement (sealed)";
   const sealedEvidenceDigest = computeEnvelopeEvidenceDigest({ id: "", publicCode: "DOC-E2E0002",
     title: sealedTitle, pages: 5, createdAt: sealedAt,
@@ -431,6 +448,7 @@ async function main() {
   await db.envelope.create({
     data: {
       publicCode: "DOC-E2E0002",
+      consentSnapshot,
       documentId: sealedDoc.id,
       createdAt: sealedAt,
       evidenceSha256: sealedEvidenceDigest,
@@ -476,6 +494,7 @@ async function main() {
   await db.envelope.create({
     data: {
       publicCode: "DOC-E2E0004",
+      consentSnapshot,
       sha256: serviceDoc.sha256,
       documentId: serviceDoc.id,
       title: "E2E Fixture — Service Agreement (signer journey)",

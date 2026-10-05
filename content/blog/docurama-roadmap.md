@@ -1,6 +1,6 @@
 ---
 title: "The Docurama roadmap: what shipped, what ships next"
-description: "From the signer portal to Rekor-witnessed transparency and S3 storage — a transparent look at what the team has shipped recently and where the product goes next."
+description: "The current signer flow, deployment options and planned work, with assurance limits stated explicitly."
 date: 2026-09-14
 author: "Docurama Team"
 tags: [product, roadmap]
@@ -11,11 +11,11 @@ We keep a public improvement log and a transparency log for the platform itself 
 
 ## Recently shipped
 
-**The complete signer journey.** A public, one-page signing portal at `/sign/{token}` — document preview with per-recipient watermarking, three handwriting fonts for signature adoption, eIDAS consent, turn-order enforcement, decline with reason, and live signer status. Senders get a QR handoff link for in-person signing, and the verify portal prefills from the signer's success screen.
+**The signer journey.** A public signing portal at `/sign/{token}` offers contract review, typed signature adoption, explicit consent, recipient fields, routing order and decline with a reason. Completed envelopes provide separate document and signing-record PDFs.
 
-**Evidence packs and offline verification.** Every completed envelope exports a ZIP — sealed document, ledger CSV, bilingual certificate, signed manifest — with a browser-only verifier that needs zero network access. Proven in real Chromium by our test suite.
+**Evidence packs and offline verification.** Every completed envelope exports a ZIP — generated document artifacts, ledger CSV, bilingual certificate, signed manifest — with a browser-only verifier that needs zero network access. Proven in real Chromium by our test suite.
 
-**A public transparency registry.** CT-style append-only log with Merkle inclusion proofs, plus Sigstore Rekor witnessing of the portal key. Sealed documents get publicly provable existence.
+**Transparency records.** Inclusion proofs can accompany recorded envelope digests where the configured registry produces them. External witnessing must be checked for each deployment.
 
 **S3-compatible storage.** A dual-engine document store: local POSIX by default, or any S3-compatible backend — verified against a real SeaweedFS in CI, with a compose profile to match.
 
@@ -29,12 +29,12 @@ We keep a public improvement log and a transparency log for the platform itself 
 
 In rough priority order:
 
-1. **Qualified signatures (QES) via QTSC partners** — remote qualified signing on the transactions that legally require it, with the same evidence chain.
+1. **Assess stronger identity and certificate signing requirements** — research only; no qualified-signing integration or partner is currently promised.
 2. **Bulk send and merge fields** — CSV-driven mass sending with per-recipient field substitution, for HR and procurement.
-3. **Mobile app** — sign and verify on iOS/Android with the same seals.
+3. **Mobile app** — sign and verify on iOS/Android with the same recorded evidence.
 4. **Template analytics** — time-to-sign, decline reasons and bottleneck analysis per template.
 5. **Webhook catalog expansion** — more events, replay from the admin console, endpoint health history.
-6. **Additional EU languages** — German, Spanish, Italian and Dutch beyond today's English/French.
+6. **Additional interface and message languages** — expand the languages supported by each part of the workflow.
 
 ## How to influence it
 

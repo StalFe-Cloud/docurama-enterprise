@@ -1,30 +1,47 @@
 ---
-title: eIDAS & Legal Admissibility
-description: Understanding EU Regulation No 910/2014, signature tiers, and legal weight under French Civil Code Article 1367.
+title: Signing assurance and workflow limits
+description: What the current email-link flow records and which assurance requirements need separate implementation and qualification.
 group: Compliance
 order: 1
-tags: [eidas, legal, france]
+tags: [signing, assurance, evidence]
 ---
 
-# eIDAS & Legal Admissibility
+# Signing assurance and workflow limits
 
-Under European Union law and Article 1367 of the French Civil Code (*Code civil*), an electronic signature has the same legal value as a handwritten signature when it reliably identifies the signatory and guarantees the integrity of the signed act.
+The current workflow uses an individual recipient email link, typed-name
+adoption and explicit consent. It records the frozen contract, displayed consent
+wording/version and recipient field values. A link is a bearer credential;
+possession does not establish independently verified identity.
 
-## eIDAS Signature Tiers
+## What is recorded
 
-Regulation (EU) No 910/2014 defines three distinct tiers:
+- The contract snapshot or original uploaded document checksum.
+- The typed name, selected style, signing method and assigned values.
+- The exact consent wording, version, digest and application acceptance time.
+- Completion evidence, a separate completed-document PDF and signing-record PDF.
 
-### 1. Simple Electronic Signature (SES)
-- Standard signature affixed via web browser.
-- Authenticated via email link delivery, cryptographic session cookies, and audit log.
-- Suitable for standard business contracts, quotes, and non-contentious agreements.
+The selected handwriting style is recorded. It does not turn a typed name into
+a scanned handwritten signature or certify the signer's identity.
 
-### 2. Advanced Electronic Signature (AES)
-- Uniquely linked to the signatory.
-- Capable of identifying the signatory (e.g. via SMS OTP two-factor authentication).
-- Created using electronic signature creation data that the signatory can, with a high level of confidence, use under their sole control.
-- Linked to the data signed in such a way that any subsequent change in the data is detectable (SHA-256 seal).
+## Unsupported assurance
 
-### 3. Qualified Electronic Signature (QES)
-- Created by a Qualified Electronic Signature Creation Device (QSCD) and based on a qualified certificate issued by an accredited EU QTSP.
-- Carries the automatic legal presumption of equivalence to handwritten signatures across all EU Member States.
+This flow does not perform advanced or qualified signing, embed a PAdES
+certificate signature, obtain an independent RFC 3161 timestamp or establish
+21 CFR Part 11 compliance. Stored certificate or timestamp preferences do not
+add those operations to the signing flow.
+
+Existing advanced, qualified or unknown required policies block signing until
+an administrator deliberately reviews and changes the policy. Required signer
+reauthentication and stored Part 11 restrictions also block this flow; selecting
+email-link typed signing does not silently clear those restrictions.
+
+## Choosing a workflow
+
+Identify the assurance required for your document classes and participants
+before using this workflow. Stronger identity, certificate signing, trusted
+timestamps or regulated controls require separate implementation and
+qualification. This page does not determine legal equivalence, admissibility or
+enforceability for your agreement.
+
+[Inspect the recorded evidence](/docs/getting-started/tutorial-verify-a-document)
+and validate the selected deployment before relying on it.

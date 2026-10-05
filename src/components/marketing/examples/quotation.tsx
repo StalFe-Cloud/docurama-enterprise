@@ -5,7 +5,7 @@
  *
  * Elisa Righi at Fonderia Padana approves quotation QT-2026-114 for cast
  * housings: the price table lands, the total is checked, the approval
- * signature is drawn, and the quotation is sealed to both parties.
+ * typed name is adopted, and the quotation is sealed to both parties.
  */
 
 import { Check, PenLine } from "lucide-react";
@@ -80,7 +80,7 @@ export function ExampleQuotation() {
     <div ref={viewRef} className="demo-root">
       <DemoCanvas
         w={W} h={H}
-        label="Live example: Elisa Righi at Fonderia Padana approves a cast housing quotation from StålFe. The total is checked, the approval signature is drawn, and the sealed copy goes to both parties."
+        label="Illustrative example with synthetic values: Elisa Righi at Fonderia Padana approves a cast housing quotation from StålFe. The total is checked, the approval typed name is adopted, and the sealed copy goes to both parties."
       >
         <div style={{ position: "absolute", inset: 0, background: "#fafaf9" }}>
           <DemoChrome url="app.docurama.eu/sign/9f2c-71kd" />
@@ -163,10 +163,10 @@ export function ExampleQuotation() {
             <div style={{ marginTop: "auto", paddingTop: 10, borderTop: `1px solid ${HAIR}` }}>
               <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={EMERALD} strokeWidth="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                <span style={{ fontSize: 8, fontWeight: 600, color: EMERALD }}>eIDAS-aligned · PAdES</span>
+                <span style={{ fontSize: 8, fontWeight: 600, color: EMERALD }}>Email-link typed signing</span>
               </div>
               <p style={{ fontSize: 7.5, color: FAINT, marginTop: 3, lineHeight: 1.4 }}>
-                Qualified timestamp and SHA-256 seal upon approval.
+                Application time and completion evidence recorded.
               </p>
             </div>
           </div>

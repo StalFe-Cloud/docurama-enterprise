@@ -1,7 +1,7 @@
 import { StandardFontEmbedder, StandardFonts } from "pdf-lib";
-import { DEFAULT_CONSENT_TEXT } from "@/lib/esign";
+import { assertConsentAcknowledgement, readConsentSnapshot, ConsentTermsError, type ConsentTerms } from "@/lib/consent";
 import type { EnvelopeField } from "@/lib/envelope-fields";
-export type SignatureData = { version: 1; name: string; font: string; consent: string; consentAcceptedAt: string;
+export type SignatureData = { version: 1 | 2; consentVersion?: string; consentDigest?: string; name: string; font: string; consent: string; consentAcceptedAt: string;
   authMethod: "EMAIL_LINK"; values: Record<string, string | boolean> };
 export class SignatureDataError extends Error {}
 function fail(message: string): never { throw new SignatureDataError(message); }
@@ -9,8 +9,9 @@ function renderable(text: string): void {
   try { StandardFontEmbedder.for(StandardFonts.Helvetica as unknown as Parameters<typeof StandardFontEmbedder.for>[0]).encodeText(text); }
   catch { fail("This final PDF renderer cannot represent a character in your name or field values. Contact the sender."); }
 }
-export function captureSignatureData(body: Record<string, unknown>, fields: EnvelopeField[], email: string, at: Date): SignatureData {
-  if (body.consent !== true) fail("Explicit consent to sign electronically is required.");
+export function captureSignatureData(body: Record<string, unknown>, fields: EnvelopeField[], email: string, at: Date, terms: ConsentTerms): SignatureData {
+  try { assertConsentAcknowledgement(body, terms); }
+  catch (error) { if (error instanceof ConsentTermsError) fail(error.message); throw error; }
   const name = typeof body.name === "string" ? body.name.trim() : "";
   if (name.length < 2 || name.length > 200) fail("Type your full name (2 to 200 characters).");
   renderable(name);
@@ -35,7 +36,8 @@ export function captureSignatureData(body: Record<string, unknown>, fields: Enve
     if (typeof value === "string") { if (/[\r\n]/.test(value)) fail("Document field values must fit a single line."); renderable(value); }
     values[field.id] = value as string | boolean;
   }
-  return { version: 1, name, font: String(body.font ?? "caveat"), consent: DEFAULT_CONSENT_TEXT,
+  return { version: 2, name, font: String(body.font ?? "caveat"), consent: terms.text,
+    consentVersion: terms.version, consentDigest: terms.digest,
     consentAcceptedAt: at.toISOString(), authMethod: "EMAIL_LINK", values };
 }
 export function readSignatureData(raw: string | null | undefined): SignatureData {
@@ -43,7 +45,11 @@ export function readSignatureData(raw: string | null | undefined): SignatureData
   let parsed: unknown;
   try { parsed = JSON.parse(raw); } catch { fail("Invalid signature adoption evidence."); }
   const s = parsed as SignatureData;
-  if (!s || s.version !== 1 || typeof s.name !== "string" || !s.name.trim() || typeof s.consent !== "string" || !s.consent ||
+  if (!s || ![1, 2].includes(s.version) || typeof s.name !== "string" || !s.name.trim() || typeof s.consent !== "string" || !s.consent ||
     !Number.isFinite(Date.parse(s.consentAcceptedAt)) || s.authMethod !== "EMAIL_LINK" || !s.values || typeof s.values !== "object" || Array.isArray(s.values)) fail("Invalid signature adoption evidence.");
-  return s;
+  if (s.version === 2) {
+    try { readConsentSnapshot(JSON.stringify({ schema: 1, text: s.consent, version: s.consentVersion, digest: s.consentDigest })); }
+    catch (error) { if (error instanceof ConsentTermsError) fail("Invalid frozen consent in signature adoption evidence."); throw error; }
+  }
+  return s; // Version 1 historical wording is retained verbatim, never rewritten.
 }

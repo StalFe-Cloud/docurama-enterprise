@@ -2,7 +2,8 @@
  * SQLite has one writer. Starting many interactive transactions concurrently
  * can exhaust the query engine's worker threads while the lock holder waits.
  * A FIFO turn lets the holder complete; database locks still protect other
- * processes. Never put network requests inside a held transaction turn. */
+ * processes. Allow only bounded, replay-safe source reads inside the turn;
+ * external delivery and mutating network operations stay outside it. */
 export class TransactionQueueBusyError extends Error {
   constructor() {
     super("Database transaction queue is busy. Retry shortly.");

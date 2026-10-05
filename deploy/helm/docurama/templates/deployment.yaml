@@ -1,3 +1,16 @@
+{{- $sender := trim (.Values.smtp.from | default "") }}
+{{- $senderKey := trim (.Values.smtp.fromSecretKey | default "") }}
+{{- if and $sender $senderKey }}
+{{- fail "Choose smtp.from or smtp.fromSecretKey, not both" }}
+{{- end }}
+{{- if and $senderKey (not .Values.smtp.existingSecret) }}
+{{- fail "smtp.fromSecretKey requires smtp.existingSecret" }}
+{{- end }}
+{{- range .Values.extraEnv }}
+{{- if and (eq .name "SMTP_FROM") (or $sender $senderKey) }}
+{{- fail "SMTP_FROM cannot be duplicated through extraEnv when smtp.from or smtp.fromSecretKey is selected" }}
+{{- end }}
+{{- end }}
 {{- range .Values.extraEnv }}
 {{- if has .name (list "DOCURAMA_DEPLOYMENT_MODE" "DOCURAMA_PUBLIC_REGISTRATION") }}
 {{- fail "Enterprise installation policy cannot be overridden through extraEnv" }}
@@ -63,6 +76,17 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.smtp.existingSecret }}
                   key: {{ .Values.smtp.secretKey }}
+            {{- end }}
+            {{- if $sender }}
+            - name: SMTP_FROM
+              value: {{ $sender | quote }}
+            {{- else if $senderKey }}
+            - name: SMTP_FROM
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.smtp.existingSecret }}
+                  key: {{ $senderKey | quote }}
+                  optional: false
             {{- end }}
             {{- if .Values.s3.enabled }}
             - name: S3_ENDPOINT

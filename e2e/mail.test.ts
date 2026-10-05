@@ -26,7 +26,7 @@ import { join } from "node:path";
 
 /* ── A miniature SMTP relay ───────────────────────────────────────────────── */
 
-type CapturedMail = { from: string; to: string[]; subject: string; body: string };
+type CapturedMail = { envelopeFrom: string; from: string; to: string[]; subject: string; body: string };
 
 function startFakeSmtp() {
   const captured: CapturedMail[] = [];
@@ -61,6 +61,7 @@ function startFakeSmtp() {
         if (line === ".") {
           inData = false;
           captured.push({
+            envelopeFrom: current.envelopeFrom ?? "",
             from: current.from ?? "",
             to: current.to ?? [],
             subject: current.subject ?? "",
@@ -89,6 +90,7 @@ function startFakeSmtp() {
       } else if (cmd.startsWith("AUTH LOGIN")) {
         send("334 VXNlcm5hbWU6"); // "Username:"
       } else if (cmd.startsWith("MAIL FROM")) {
+        current.envelopeFrom = /^MAIL FROM:<([^>]+)>/i.exec(line)?.[1] ?? "";
         if (rejectNext > 0) {
           rejectNext--;
           send("450 mailbox temporarily unavailable");
@@ -127,6 +129,8 @@ function startFakeSmtp() {
 
 /* ── Scratch database + lib under test ─────────────────────────────────────── */
 
+const OLD_SMTP_FROM = process.env.SMTP_FROM;
+process.env.SMTP_FROM = "Synthetic Sender <sender@approved.test>";
 const FIXTURE = process.env.E2E_FIXTURE_DB;
 if (!FIXTURE) throw new Error("Mail E2E requires the migrated scratch fixture from e2e/run.sh");
 const SCRATCH_DIR = mkdtempSync(join(tmpdir(), "docurama-mail-test-"));
@@ -151,6 +155,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  if (OLD_SMTP_FROM === undefined) delete process.env.SMTP_FROM; else process.env.SMTP_FROM = OLD_SMTP_FROM;
   await relay.close();
   await db.$disconnect();
   await (await import("../src/lib/db")).db.$disconnect();
@@ -245,7 +250,35 @@ describe("SMTP delivery", () => {
     const got = relay.captured.find((c) => c.subject.includes("NDA"));
     expect(got).toBeDefined();
     expect(got?.to).toContain("signer@example.com");
+    expect(got?.envelopeFrom).toBe("sender@approved.test");
+    expect(got?.from).toBe("Synthetic Sender <sender@approved.test>");
+    expect(row?.fromEmail).toBe('"Synthetic Sender" <sender@approved.test>');
     expect(got?.body).toContain("Please join");
+  });
+
+  test("invalid configured identity sends no mail; corrected identity is re-resolved at dispatch", async () => {
+    const queued = await queueMail("Configured sender boundary");
+    await db.mailOutbox.update({ where: { id: queued.id }, data: { fromEmail: "untrusted@attacker.test" } });
+    const before = relay.captured.length;
+    process.env.SMTP_FROM = "sender@approved.test\r\nBcc: thief@attacker.test";
+    try {
+      const result = await processOutbox(10);
+      expect(result.sent).toBe(0); expect(result.deferred).toBe(1);
+      expect(relay.captured.length).toBe(before);
+      const blocked = await db.mailOutbox.findUniqueOrThrow({ where: { id: queued.id } });
+      expect(blocked.status).toBe("QUEUED"); expect(blocked.sentAt).toBeNull();
+      expect(blocked.fromEmail).toBe("untrusted@attacker.test");
+      expect(blocked.claimToken).toBeNull(); expect(blocked.claimUntil).toBeNull();
+      process.env.SMTP_FROM = "Changed Sender <changed@approved.test>";
+      await db.mailOutbox.update({ where: { id: queued.id }, data: { nextAttemptAt: new Date(0) } });
+      expect((await processOutbox(10)).sent).toBe(1);
+      const delivered = relay.captured.at(-1)!;
+      expect(delivered.envelopeFrom).toBe("changed@approved.test");
+      expect(delivered.from).toBe("Changed Sender <changed@approved.test>");
+      const saved = await db.mailOutbox.findUniqueOrThrow({ where: { id: queued.id } });
+      expect(saved.status).toBe("SENT"); expect(saved.attempts).toBe(2);
+      expect(saved.fromEmail).toBe('"Changed Sender" <changed@approved.test>');
+    } finally { process.env.SMTP_FROM = "Synthetic Sender <sender@approved.test>"; }
   });
 
   test("temporary failure → backoff, not-due rows are deferred, then recovery sends", async () => {

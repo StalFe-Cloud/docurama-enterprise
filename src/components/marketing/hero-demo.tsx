@@ -5,7 +5,7 @@
  *
  * A faithful miniature of the Docurama documents workspace replays the full
  * StålFe story on a loop: an EN 10204 3.1 mill certificate is prepared and
- * sent to the foundry partner, signed with a drawn signature, sealed, and
+ * sent to the foundry partner, signed through typed-name adoption, sealed, and
  * proven with the cryptographic evidence drawer.
  *
  * Choreography:
@@ -263,7 +263,7 @@ export function HeroDemo() {
     <div
       ref={wrapRef}
       role="img"
-      aria-label="Product demo: an EN 10204 3.1 mill certificate from StålFe is sent to the foundry partner, signed with a drawn signature, sealed, and verified with cryptographic evidence."
+      aria-label="Illustrative product demo with synthetic values: an EN 10204 3.1 mill certificate from StålFe is sent to the foundry partner, signed through typed-name adoption, sealed, and verified with cryptographic evidence."
       className="relative w-full mx-auto"
       style={{ height: fit.h, maxWidth: CANVAS_W }}
     >

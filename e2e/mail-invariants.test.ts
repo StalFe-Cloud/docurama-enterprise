@@ -22,8 +22,10 @@ let blockedId: string | undefined;
 let barrier: Promise<void> | undefined;
 let notify: (() => void) | undefined;
 const oldSmtp = process.env.SMTP_URL;
+const oldSender = process.env.SMTP_FROM;
 
 beforeAll(async () => {
+  process.env.SMTP_FROM = "Synthetic Sender <sender@approved.test>";
   server = createServer((socket) => {
     connections.add(socket);
     socket.once("close", () => connections.delete(socket));
@@ -67,6 +69,7 @@ beforeAll(async () => {
   process.env.SMTP_URL = `smtp://127.0.0.1:${address.port}?tls=off`;
 });
 afterAll(async () => {
+  if (oldSender === undefined) delete process.env.SMTP_FROM; else process.env.SMTP_FROM = oldSender;
   if (oldSmtp === undefined) delete process.env.SMTP_URL; else process.env.SMTP_URL = oldSmtp;
   for (const socket of connections) socket.destroy();
   if (server) await new Promise<void>((resolve) => server.close(() => resolve()));

@@ -23,7 +23,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{token:string
     const final=await buildFinalDocument(e);
     if(req.nextUrl.searchParams.get("format")==="record"){
       return Response.json({code:e.publicCode,status:e.status,sealedAt:e.sealedAt.toISOString(),originalSha256:e.documentId?e.sha256:null,
-        finalDocumentSha256:final.sha256,completionRecordSha256:final.recordSha256,pages:final.pages,evidenceSha256:e.evidenceSha256 ?? null,conformance:null,signers:e.recipients.filter(r=>r.role==="SIGNER").map(r=>({name:r.name,email:r.email,order:r.order,status:r.status,signedAt:r.signedAt?.toISOString()??null,authMethod:"EMAIL_LINK",adoptedName:readSignatureData(r.signatureData).name,consentText:readSignatureData(r.signatureData).consent,consentAcceptedAt:readSignatureData(r.signatureData).consentAcceptedAt})),
+        finalDocumentSha256:final.sha256,completionRecordSha256:final.recordSha256,pages:final.pages,evidenceSha256:e.evidenceSha256 ?? null,conformance:null,signers:e.recipients.filter(r=>r.role==="SIGNER").map(r=>({name:r.name,email:r.email,order:r.order,status:r.status,signedAt:r.signedAt?.toISOString()??null,authMethod:"EMAIL_LINK",adoptedName:readSignatureData(r.signatureData).name,consentText:readSignatureData(r.signatureData).consent,consentAcceptedAt:readSignatureData(r.signatureData).consentAcceptedAt,...(readSignatureData(r.signatureData).version===2?{consentVersion:readSignatureData(r.signatureData).consentVersion,consentDigest:readSignatureData(r.signatureData).consentDigest}:{})})),
         eventCount:e.events.length,events:e.events.map(ev=>({at:ev.at.toISOString(),actor:ev.actor,action:ev.action,detail:ev.detail}))},
         {headers:{"cache-control":"no-store"}});
     }

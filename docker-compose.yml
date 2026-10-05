@@ -10,8 +10,11 @@ services:
     environment:
       - NODE_ENV=production
       # Values live in the untracked .env next to this file (SMTP_URL,
-      # ROOT_DOMAIN) so checkouts/deploys never strand local config.
+      # SMTP_FROM, ROOT_DOMAIN) so checkouts/deploys never strand local config.
       - SMTP_URL=${SMTP_URL:-}
+      # Optional operator-verified sender; blank inherits platform configuration.
+      # SMTP credentials and ROOT_DOMAIN do not select a sending identity.
+      - SMTP_FROM=${SMTP_FROM:-}
       - ROOT_DOMAIN=${ROOT_DOMAIN:-}
       - DATABASE_URL=file:/app/db/custom.db
       - STORAGE_DIR=/app/storage

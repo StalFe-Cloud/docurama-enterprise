@@ -20,7 +20,7 @@ const row = {
   documentId: "document-one", document: { tenantId: "tenant-one", filename: "synthetic.pdf", storageKey: "synthetic-only" }, template: null,
 };
 mock.module("../src/lib/db", () => ({ db: { envelope: { findFirst: async () => row } } }));
-mock.module("../src/lib/document-store", () => ({ readStoredBytes: async () => document }));
+mock.module("../src/lib/document-store", () => ({ MAX_UPLOAD_BYTES: 50 * 1024 * 1024, readStoredBytes: async () => document }));
 mock.module("../src/lib/evidence-key", () => ({
   EVIDENCE_SIGNATURE_ALGORITHM: "RSASSA-PKCS1-v1_5-SHA-256",
   getOrCreateEvidenceKey: async () => ({ privateKeyPem, publicKeyPem, certificatePem: "synthetic-certificate-not-an-identity-assertion",

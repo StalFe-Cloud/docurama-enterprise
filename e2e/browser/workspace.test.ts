@@ -296,6 +296,8 @@ describe("workspace and signer surfaces", () => {
   // calls set up the contract and read owner-authorized handoff links only.
   flow("two signers complete all field types on desktop and mobile with private PDFs", async (b) => {
     const title = `E2E mobile signing ${crypto.randomUUID()}`;
+    const reviewedConsent = { text: "Browser fixture consent: I reviewed this agreement and adopt my typed signature for it.", version: "browser-fixture-v7" };
+    const reviewedConsentDigest = createHash("sha256").update(JSON.stringify({ purpose: "DOCURAMA_CONSENT_V1", ...reviewedConsent }), "utf8").digest("hex");
     const recipients = [
       { name: "Alex Mobile", email: "alex.mobile@example.test", role: "SIGNER" },
       { name: "Jamie Desktop", email: "jamie.desktop@example.test", role: "SIGNER" },
@@ -311,7 +313,16 @@ describe("workspace and signer surfaces", () => {
     let links: string[] = [];
     await withPage(b, async (page) => {
       await signIn(page);
-      links = await page.evaluate(async ({ title, recipients, fields }) => {
+      links = await page.evaluate(async ({ title, recipients, fields, reviewedConsent }) => {
+        const preferencesResponse = await fetch("/api/workspace/settings-esign");
+        if (!preferencesResponse.ok) throw new Error("Consent policy setup read failed");
+        const { prefs: originalPreferences } = await preferencesResponse.json();
+        const savePreferences = async (preferences: Record<string, unknown>) => {
+          const response = await fetch("/api/workspace/settings", { method: "POST", headers: { "content-type": "application/json" },
+            body: JSON.stringify({ op: "esign.save", data: preferences }) });
+          if (!response.ok) throw new Error(`Consent policy save failed: ${response.status}`);
+        };
+        await savePreferences({ ...originalPreferences, consentText: reviewedConsent.text, consentVersion: reviewedConsent.version });
         const templatesResponse = await fetch("/api/workspace/templates");
         if (!templatesResponse.ok) throw new Error("Template setup read failed");
         const templates = await templatesResponse.json();
@@ -322,6 +333,8 @@ describe("workspace and signer surfaces", () => {
           body: JSON.stringify({ op: "send", data: { title, recipients, fields, templateId: template.id } }),
         });
         if (!sent.ok) throw new Error(`Send failed: ${sent.status}`);
+        // Settings changed after send must not rewrite this envelope's consent.
+        await savePreferences(originalPreferences);
         const listed = await fetch(`/api/workspace/envelopes?search=${encodeURIComponent(title)}`);
         const list = await listed.json();
         const envelope = list.rows.find((row: {title: string}) => row.title === title);
@@ -330,7 +343,7 @@ describe("workspace and signer surfaces", () => {
         if (!detailResponse.ok) throw new Error("Owner handoff read failed");
         const detail = await detailResponse.json();
         return detail.recipients.map((recipient: {signLink: string | null}) => recipient.signLink);
-      }, { title, recipients, fields });
+      }, { title, recipients, fields, reviewedConsent });
       expect(links).toHaveLength(2);
       expect(links.every(link => typeof link === "string" && link.startsWith("/sign/"))).toBe(true);
     });
@@ -349,6 +362,8 @@ describe("workspace and signer surfaces", () => {
         await goto(page, links[index]);
         expect((await viewed).status()).toBe(200);
         await seeText(page, /Adopt your signature/);
+        expect(await page.getByTestId("consent-text").textContent()).toBe(reviewedConsent.text);
+        expect(await page.getByTestId("consent-version").textContent()).toBe(`Consent version: ${reviewedConsent.version}`);
         await page.locator("#sign-name-input").fill(recipients[index].name);
         await page.getByTestId("font-great-vibes").click();
         await page.waitForFunction(() => document.querySelector('[data-testid="font-great-vibes"]')?.getAttribute("aria-checked") === "true");
@@ -366,6 +381,8 @@ describe("workspace and signer surfaces", () => {
         expect(response.status()).toBe(200);
         const payload = response.request().postDataJSON();
         expect(payload.consent).toBe(true);
+        expect(payload.consentVersion).toBe(reviewedConsent.version);
+        expect(payload.consentDigest).toBe(reviewedConsentDigest);
         expect(payload.name).toBe(recipients[index].name);
         expect(payload.font).toBe("great-vibes");
         expect(payload.values).toEqual({
@@ -393,6 +410,7 @@ describe("workspace and signer surfaces", () => {
       expect(record.status).toBe("COMPLETED");
       expect(record.signers.map((signer: {adoptedName: string}) => signer.adoptedName)).toEqual(recipients.map(recipient => recipient.name));
       expect(record.signers.every((signer: {consentAcceptedAt: string; authMethod: string}) => !!signer.consentAcceptedAt && signer.authMethod === "EMAIL_LINK")).toBe(true);
+      expect(record.signers.every((signer: {consentText: string}) => signer.consentText === reviewedConsent.text)).toBe(true);
       for (const [label, hash, pages] of [
         ["Download completed PDF", record.finalDocumentSha256, 2],
         ["Download completion record PDF", record.completionRecordSha256, null],

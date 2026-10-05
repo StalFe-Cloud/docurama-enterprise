@@ -4,12 +4,12 @@
     "tagline": "Signer, Sceller, Vérifier",
     "legalName": "Docurama SAS",
     "address": "1 Rue Marguerin, 75014 Paris, France",
-    "euDataResidency": "Hébergement et données en Union Européenne. Paris, France."
+    "euDataResidency": "Vérifiez la localisation des données pour le déploiement choisi."
   },
   "nav": {
     "product": "Produit",
     "examples": "Exemples en direct",
-    "compliance": "Conformité",
+    "compliance": "Niveau de signature",
     "pricing": "Tarifs",
     "developers": "Développeurs",
     "faq": "FAQ",
@@ -22,38 +22,38 @@
     "verifyDocument": "Vérifier un document"
   },
   "hero": {
-    "title": "Chaque document signé et scellé selon le droit européen",
-    "subtitle": "Le portail d'e-signature d'entreprise avec scellement cryptographique PAdES, horodatage RFC 3161 et piste d'audit vérifiable.",
+    "title": "Envoyez vos contrats, recueillez le consentement et consultez le dossier final",
+    "subtitle": "Signature par lien personnel envoyé par email, clauses figées, nom saisi et dossier de signature consultable.",
     "startFree": "Commencer l'essai gratuit",
     "verifyDoc": "Vérifier un document",
-    "caption": "Démonstration de l'espace StålFe de bout en bout : un certificat d'usine envoyé au partenaire de fonderie, signé, scellé et attesté par preuve cryptographique."
+    "caption": "Une illustration montre un certificat envoyé pour signature, signé par adoption du nom puis complété avec un dossier de preuve. Les données de démonstration sont fictives."
   },
   "trust": {
-    "summary": "Résidence des données en UE. Processus conformes RGPD, eIDAS et 21 CFR Part 11. Statut public sur status.docurama.eu, sécurité de la plateforme sur security.docurama.eu."
+    "summary": "Signature par lien email, consentement enregistré et dossiers finaux privés. L'hébergement, la réception des emails et le niveau de signature doivent être validés pour l'installation choisie."
   },
   "features": {
-    "bentoTitle": "Une véritable chaîne de preuve, pas seulement une signature dans un coin",
-    "bentoSubtitle": "Docurama lie l'identité, l'intégrité du document et le temps cryptographique dans un PDF scellé PAdES vérifiable hors ligne, sans appel à nos serveurs.",
+    "bentoTitle": "Documents finaux et éléments de signature enregistrés",
+    "bentoSubtitle": "Les clauses figées, les champs attribués aux destinataires et le consentement accompagnent le PDF final et un dossier de signature séparé.",
     "sendAndSign": "Envoi et Signature électronique",
     "sendAndSignDesc": "Enveloppes multi-signataires avec ordre de passage, copies conformes et relances automatiques. Les signataires n'ont pas besoin de créer de compte.",
-    "certsAndSealing": "Certificats et Scellement",
-    "certsAndSealingDesc": "Génération en un clic de certificats de signature RSA-2048 par organisation. Scellement PAdES de niveau B-B à B-LTA.",
-    "timestamps": "Horodatage qualifié RFC 3161",
-    "timestampsDesc": "Chaque signature est ancrée auprès d'une autorité d'horodatage indépendante. Préréglages DigiCert, Sectigo, GlobalSign ou votre propre TSA."
+    "certsAndSealing": "Documents finaux et dossier de preuve",
+    "certsAndSealingDesc": "Téléchargez le document final et un dossier séparé contenant les valeurs des signataires et les clauses figées.",
+    "timestamps": "Heures de signature enregistrées",
+    "timestampsDesc": "Les événements de signature utilisent l'horloge de l'application. L'horodatage par une autorité de confiance ne fait pas partie de cette version."
   },
   "pricing": {
     "title": "Tarification prévisible sans frais cachés par enveloppe",
-    "subtitle": "Chaque forfait inclut un nombre illimité de signataires, la vérification en direct et la gestion des certificats. Évoluez selon vos volumes ou besoins réglementaires.",
+    "subtitle": "Choisissez selon la taille de votre équipe et le volume d'envoi ; validez les intégrations et le niveau de signature avant le lancement.",
     "solo": "Solo",
     "starter": "Starter",
     "smart": "Smart Team",
     "business": "Business",
     "enterprise": "Entreprise",
-    "soloBlurb": "Toutes les fonctions Starter, dimensionnées et tarifées pour une personne.",
-    "starterBlurb": "Le même quota de 50 enveloppes que Solo, avec 3 sièges.",
+    "soloBlurb": "Un utilisateur et 30 enveloppes par mois.",
+    "starterBlurb": "Trois utilisateurs et 100 enveloppes par mois.",
     "smartBlurb": "Pour les équipes qui signent en volume, avec domaine propre et API.",
     "businessBlurb": "Pour les départements et organisations multi-équipes à grande échelle.",
-    "enterpriseBlurb": "Pour les équipes réglementées soumises à des audits stricts.",
+    "enterpriseBlurb": "Précisez vos exigences de déploiement et de signature.",
     "perMonth": "/mois",
     "monthlyNoEngagement": "Mensuel — sans engagement, résiliable à tout moment",
     "termDiscount": "−{pct}% pour un engagement de {months} mois",
@@ -62,11 +62,11 @@
     "contactSales": "Contacter l'équipe commerciale"
   },
   "compliance": {
-    "title": "Conçu pour les entreprises européennes réglementées",
-    "subtitle": "Docurama SAS est régie par le droit français et européen. Nous ne transférons jamais vos documents hors de l'Union Européenne.",
-    "eidas": "Conformité eIDAS",
-    "gdpr": "Conformité RGPD",
-    "part11": "Mode 21 CFR Part 11",
+    "title": "Examinez le niveau de signature disponible",
+    "subtitle": "La localisation des données et la validation des intégrations dépendent de l'installation approuvée. Les services de signature renforcée et la qualification des usages réglementés nécessitent des étapes distinctes.",
+    "eidas": "Niveau de signature",
+    "gdpr": "Gestion des données personnelles",
+    "part11": "Examen des usages réglementés",
     "legalHub": "Centre Légale & PSSI",
     "frenchTemplates": "Modèles de contrats français"
   },

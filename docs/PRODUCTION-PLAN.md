@@ -1,8 +1,10 @@
 # Docurama Portal — Production Plan
 
+**Engineering checkpoint (2026-10-04 UTC):** reviewed source `25ae19c50e26a423e9d2386e3c76ecaf713c71f3` passed all seven CI checks. [Exact-head runtime evidence](https://github.com/StalFe-Cloud/docurama-enterprise/actions/runs/37244852380) records API 89/89, MCP 15/15 and browser 31/31 on SQLite and PostgreSQL; the SQLite suite also passed visual 7/7 and required real SeaweedFS 7/7. Native backup/restore and schema-drift checks passed for both providers. The browser suite includes desktop/mobile two-signer completion and actual completed-PDF and completion-record-PDF downloads with hash and PDF checks. This is a prior-source checkpoint: subsequent source changes require fresh CI, and qualification of the approved image digest and customer installation remains pending. Do not mark production or stronger signature-assurance acceptance complete from this checkpoint.
+
 **Target:** `https://app.docurama.eu` (workspace) · `https://admin.docurama.eu` (platform console) · `https://verify.docurama.eu` (public verification)
 **Entity/configuration:** Names, addresses, domains and infrastructure examples below are operator-supplied historical context; verify them for the installation before release.
-**Delivery line:** `quality` branch on `github.com/StalFe-Cloud/docurama` (source of truth)
+**Delivery line:** reviewed repository commit and immutable provider-specific image digest; branch names and historical references are not release identities.
 **Release record:** Pin the reviewed commit and image digest at promotion. Historical baseline references are not evidence for the current candidate.
 
 ---
@@ -16,10 +18,10 @@
 | App | Next.js 16 (App Router) standalone build, port 3000 | Single Node/Bun process, server components + API routes |
 | Data | SQLite via Prisma (`db/custom.db`) | Operator-selected hosting; verify actual residency. Consistent database backups. Postgres portability gated in CI (schema applies cleanly to PostgreSQL on every push) |
 | Files | `public/` static + per-tenant document artifacts | Bundled in image; move to object storage at scale (§9) |
-| Mail | SMTP relay (`notifications@docurama.eu`) | Sender identity fixed to the verified sending domain. Delivery engine: `SMTP_URL` env (unset = outbox-only mode), retries with backoff, 5 attempts |
+| Mail | Operator-configured SMTP relay and verified sender identity | TLS required by default; outbox-only if unset; leased delivery with 5 attempts. Sender configuration changes require new-candidate qualification; SMTP acknowledgment is not inbox delivery. |
 | Webhooks | HMAC-signed event deliveries (`X-Docurama-Signature`) | Managed in Settings → API; retried with backoff by the background worker |
 | Health | `GET /api/health` | DB + storage + mail + webhook + Rekor posture; 503 when critical checks fail. Docker HEALTHCHECK and Helm probes target it |
-| Time-stamping | RFC 3161 TSA (DigiCert / Sectigo / FreeTSA presets) | Configured per workspace in Settings → eSign |
+| Time-stamping | Settings may record TSA choices | Metadata is not an implemented/validated RFC 3161 token or embedded PDF signature; unsupported stronger policies must fail closed and independent validation remains required. |
 | Ops | `download/DOCURAMA-DNS-EMAIL-PROVISIONING.md` + this plan | Restore, backup, update, rollback runbooks. K8s: `deploy/helm/docurama`; containers: hardened `Dockerfile` + `docker-compose.yml`; backups: `scripts/backup.sh` |
 
 Minimum server: 2 vCPU / 4 GB RAM / 40 GB SSD, Debian 12 or Ubuntu 24.04, EU region (Paris). One box carries app + DB; the design stays single-node until the Postgres/object-storage migration.
@@ -199,3 +201,5 @@ Go-live:
 - **Docker (hardened):** non-root uid 10001, `HEALTHCHECK` on `/api/health`, boot-time reviewed provider-specific `migrate deploy` with fail-closed startup (`DOCURAMA_SKIP_MIGRATIONS=1` only after a successful controlled migration step; legacy `DOCURAMA_SKIP_DB_PUSH` alias), demo mode off by default. `docker-compose.yml` ships named volumes for `/app/db` + `/app/storage`.
 - **Kubernetes (private cloud):** `helm install docurama deploy/helm/docurama`. Probes on `/api/health`, one RWO PVC (SQLite + documents), `Recreate` strategy, SMTP via existing Secret, `ROOT_DOMAIN` derived from the ingress host. Exactly one replica until the Postgres + object-storage migration; then `DOCURAMA_WORKER=off` on all but one.
 - **Self-hosted without K8s:** the §2 runbook remains the primary path; `docker compose up -d` is the one-command alternative behind your own TLS proxy.
+
+Operator acceptance for this candidate remains pending: explicit consent and current session/MFA policy, mailbox-bound recipient access, historical snapshot review/reissue, and independently verified completed document/evidence downloads. Stronger authentication or signature policies must fail closed when unsupported. PAdES, RFC 3161/TSA and Part 11 claims require their own applicable implementation and validation evidence.

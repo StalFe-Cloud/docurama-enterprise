@@ -7,11 +7,14 @@ import type { SessionUser } from "@/lib/auth";
 import { hashPasswordAsync, verifyPasswordAsync, recordAudit } from "@/lib/auth";
 import { requestClientIp } from "@/lib/request-metadata";
 import { isWorkspaceAdmin, settingsOperationAllowed } from "@/lib/settings-policy";
-import { smtpMode } from "@/lib/mail";
+import { configuredMailState, validateWorkspaceMailSender } from "@/lib/mail-configuration";
+import { MailSenderError } from "@/lib/mail-sender";
 import { jsonError, jsonOk, iso, isos } from "@/lib/serializers";
 import { generateTotpSecret, verifyTotp, otpauthUri, generateRecoveryCodes } from "@/lib/totp";
 import { issueSigningCertificate, shortThumbprint } from "@/lib/certificates";
 import { validateFilenameFormat } from "@/lib/esign";
+import { signatureAssuranceRestriction, SUPPORTED_SIGNATURE_LEVEL } from "@/lib/signing-policy";
+import { resolveConsentTerms, ConsentTermsError } from "@/lib/consent";
 import { verifySendingDomain, checkEmailPosture } from "@/lib/dns-check";
 import { providerByKey } from "@/lib/sms-providers";
 import { MCP_DEFAULT_TOOLS, mcpToolsCatalogue } from "@/lib/mcp";
@@ -226,9 +229,10 @@ export async function getSettingsSection(
 
     case "settings-notifications": {
       const n = await ensureNotificationSettings(tenantId);
+      const mailState = await configuredMailState(tenantId);
       return jsonOk({
         settings: {
-          smtpOverrideActive: false, transportSource: "SMTP_URL",
+          ...mailState,
           smtpHost: n.smtpHost, smtpPort: n.smtpPort, smtpUser: n.smtpUser,
           smtpPasswordMasked: mask(n.smtpPassword), smtpHasPassword: Boolean(n.smtpPassword),
           smtpFrom: n.smtpFrom, smtpSecure: n.smtpSecure,
@@ -891,7 +895,7 @@ export async function postSettingsOp(
         const res = await fetch(tsa.url, { method: "GET", signal: ctrl.signal, redirect: "manual" });
         const latency = Date.now() - started;
         status = "OK";
-        note = `Reachable - HTTP ${res.status} in ${latency} ms over ${tsa.url.startsWith("https") ? "TLS" : "plain HTTP"}. RFC 3161 token issuance runs in the sealing pipeline.`;
+        note = `Reachable - HTTP ${res.status} in ${latency} ms over ${tsa.url.startsWith("https") ? "TLS" : "plain HTTP"}. Reachability does not validate timestamp token issuance. This signing flow does not request or embed trusted timestamps.`;
       } finally {
         clearTimeout(timer);
       }
@@ -912,33 +916,67 @@ export async function postSettingsOp(
     // 21 CFR Part 11 compliance mode - lives on the Account tab but shares
     // the EsignPreferences row with the eSign tab.
     const prefs = await ensureEsignPrefs(tenantId);
-    const part11Mode = data.part11Mode === true;
-    const requireReauth = data.requireReauth === true;
-    const consentText = String(data.consentText ?? "").trim();
-    if (part11Mode && consentText.length < 40) {
-      return jsonError("Part 11 mode requires a signature agreement text of at least 40 characters");
+    const part11Mode = data.part11Mode === undefined ? prefs.part11Mode : data.part11Mode === true;
+    const requireReauth = data.requireReauth === undefined ? prefs.requireReauth : data.requireReauth === true;
+    if ([data.part11Mode, data.requireReauth].some(value => value !== undefined && typeof value !== "boolean")) {
+      return jsonError("Signer authentication restrictions must be explicit booleans", 422);
+    }
+    if (data.consentText !== undefined && data.consentText !== null && typeof data.consentText !== "string") {
+      return jsonError("Consent wording must be text or an explicit reset to the default", 422);
+    }
+    const suppliedConsent = data.consentText as string | null | undefined;
+    const consentText = suppliedConsent === undefined ? prefs.consentText : suppliedConsent?.trim() ? suppliedConsent : null;
+    const consentVersion = data.consentVersion === undefined ? prefs.consentVersion : data.consentVersion;
+    if (typeof consentVersion !== "string") return jsonError("Consent version must be text", 422);
+    let consent;
+    try { consent = resolveConsentTerms({ consentText, consentVersion }); }
+    catch (error) { if (error instanceof ConsentTermsError) return jsonError(error.message, 422); throw error; }
+    if (part11Mode && consent.text.length < 40) {
+      return jsonError("Additional signer restrictions require a signature agreement text of at least 40 characters");
     }
     await db.esignPreferences.update({
       where: { tenantId },
-      data: { part11Mode, requireReauth, consentText: consentText || null, updatedAt: new Date() },
+      data: {
+        ...(data.part11Mode !== undefined ? { part11Mode } : {}),
+        ...(data.requireReauth !== undefined ? { requireReauth } : {}),
+        ...(data.consentText !== undefined ? { consentText } : {}),
+        ...(data.consentVersion !== undefined ? { consentVersion } : {}),
+        updatedAt: new Date(),
+      },
     });
     await audit({
       actor, actorRole: me.role, action: "part11_mode.updated", resource: `tenant:${me.tenantSlug}`,
       severity: "WARNING", tenantName: me.tenantName,
       detail: `21 CFR Part 11 mode ${part11Mode ? "enabled" : "disabled"}${part11Mode ? ` · re-auth ${requireReauth ? "required" : "optional"}` : ""}`,
     });
-    return jsonOk({ ok: true, message: `Part 11 compliance mode ${part11Mode ? "enabled" : "disabled"} - ${prefs.consentVersion} agreement saved` });
+    return jsonOk({ ok: true, message: `Signer authentication restrictions ${part11Mode ? "enabled" : "disabled"} - ${consentVersion} agreement saved; this flow does not claim Part 11 compliance` });
   }
 
   if (op === "esign.save") {
     const format = String(data.filenameFormat ?? "");
     const check = validateFilenameFormat(format);
     if (!check.ok) return jsonError(check.error ?? "Invalid filename format");
-    const signatureLevel = ["simple", "advanced", "qualified"].includes(String(data.signatureLevel)) ? String(data.signatureLevel) : "advanced";
-    const part11Mode = data.part11Mode === true;
-    const consentText = String(data.consentText ?? "").trim();
-    if (part11Mode && consentText.length < 40) {
-      return jsonError("Part 11 mode requires a signature agreement text of at least 40 characters");
+    const existing = await db.esignPreferences.findUnique({ where: { tenantId } });
+    const signatureLevel = data.signatureLevel === undefined ? existing?.signatureLevel ?? SUPPORTED_SIGNATURE_LEVEL : String(data.signatureLevel);
+    const assurance = signatureAssuranceRestriction(signatureLevel);
+    if (assurance) return jsonError(assurance, 422);
+    const part11Mode = data.part11Mode === undefined ? existing?.part11Mode ?? false : data.part11Mode === true;
+    const requireReauth = data.requireReauth === undefined ? existing?.requireReauth ?? false : data.requireReauth === true;
+    if ([data.part11Mode, data.requireReauth].some(value => value !== undefined && typeof value !== "boolean")) {
+      return jsonError("Signer authentication restrictions must be explicit booleans", 422);
+    }
+    if (data.consentText !== undefined && data.consentText !== null && typeof data.consentText !== "string") {
+      return jsonError("Consent wording must be text or an explicit reset to the default", 422);
+    }
+    const suppliedConsent = data.consentText as string | null | undefined;
+    const consentText = suppliedConsent === undefined ? existing?.consentText ?? null : suppliedConsent?.trim() ? suppliedConsent : null;
+    const consentVersion = data.consentVersion === undefined ? existing?.consentVersion ?? "v1.0" : data.consentVersion;
+    if (typeof consentVersion !== "string") return jsonError("Consent version must be text", 422);
+    let consent;
+    try { consent = resolveConsentTerms({ consentText, consentVersion }); }
+    catch (error) { if (error instanceof ConsentTermsError) return jsonError(error.message, 422); throw error; }
+    if (part11Mode && consent.text.length < 40) {
+      return jsonError("Additional signer restrictions require a signature agreement text of at least 40 characters");
     }
     await db.esignPreferences.upsert({
       where: { tenantId },
@@ -947,82 +985,94 @@ export async function postSettingsOp(
         flattenFormFields: data.flattenFormFields !== false,
         filenameFormat: format,
         sealOnCompletion: data.sealOnCompletion !== false,
-        requireReauth: data.requireReauth === true,
-        signatureLevel,
-        part11Mode,
-        consentText: consentText || null,
+        ...(data.requireReauth !== undefined ? { requireReauth } : {}),
+        ...(data.signatureLevel !== undefined ? { signatureLevel } : {}),
+        ...(data.part11Mode !== undefined ? { part11Mode } : {}),
+        ...(data.consentText !== undefined ? { consentText } : {}),
+        ...(data.consentVersion !== undefined ? { consentVersion } : {}),
         updatedAt: new Date(),
       },
-      create: { tenantId, filenameFormat: format, signatureLevel, part11Mode, consentText: consentText || null },
+      create: { tenantId, filenameFormat: format, signatureLevel: SUPPORTED_SIGNATURE_LEVEL, requireReauth, part11Mode, consentText, consentVersion },
     });
     await audit({
       actor, actorRole: me.role, action: "esign_settings.updated", resource: `tenant:${me.tenantSlug}`,
       tenantName: me.tenantName,
       detail: `filename=${format} · level=${signatureLevel} · Part 11 ${part11Mode ? "on" : "off"}`,
     });
-    return jsonOk({ ok: true, message: "Digital signature preferences saved" });
+    return jsonOk({ ok: true, message: "Email-link signing preferences saved" });
   }
 
   // ── Notifications: SMTP, alerts, reminder jobs ──
   if (op === "notifications.save") {
     const n = await ensureNotificationSettings(tenantId);
-    const smtpHost = String(data.smtpHost ?? "").trim() || null;
-    const smtpPort = Math.min(65535, Math.max(1, Number(data.smtpPort ?? 587)));
-    const smtpFrom = String(data.smtpFrom ?? "").trim();
-    const smtpPassword = String(data.smtpPassword ?? "");
-    const digestTime = String(data.digestTime ?? "09:00");
-    const quietHoursStart = String(data.quietHoursStart ?? "21:00");
-    const quietHoursEnd = String(data.quietHoursEnd ?? "08:00");
-    const reminderMode = ["manual", "user_job", "platform_job"].includes(String(data.reminderMode)) ? String(data.reminderMode) : "manual";
-    const reminderIntervalDays = Math.min(30, Math.max(1, Number(data.reminderIntervalDays ?? 3)));
-    const reminderMaxCount = Math.min(20, Math.max(0, Number(data.reminderMaxCount ?? 5)));
-    const escalateAfterDays = Math.min(60, Math.max(1, Number(data.escalateAfterDays ?? 7)));
+    const smtpHost = data.smtpHost === undefined ? n.smtpHost : String(data.smtpHost ?? "").trim() || null;
+    const smtpPort = data.smtpPort === undefined ? n.smtpPort : Number(data.smtpPort);
+    let smtpFrom: string;
+    try { smtpFrom = await validateWorkspaceMailSender(tenantId, data.smtpFrom === undefined ? n.smtpFrom : data.smtpFrom); }
+    catch (error) { if (error instanceof MailSenderError) return jsonError(error.message, 422); throw error; }
+    const smtpPassword = data.smtpPassword === undefined ? n.smtpPassword : String(data.smtpPassword ?? "") || n.smtpPassword;
+    const digestTime = data.digestTime === undefined ? n.digestTime : String(data.digestTime);
+    const quietHoursStart = data.quietHoursStart === undefined ? n.quietHoursStart : String(data.quietHoursStart);
+    const quietHoursEnd = data.quietHoursEnd === undefined ? n.quietHoursEnd : String(data.quietHoursEnd);
+    const reminderMode = data.reminderMode === undefined ? n.reminderMode : String(data.reminderMode);
+    const reminderIntervalDays = data.reminderIntervalDays === undefined ? n.reminderIntervalDays : Number(data.reminderIntervalDays);
+    const reminderMaxCount = data.reminderMaxCount === undefined ? n.reminderMaxCount : Number(data.reminderMaxCount);
+    const escalateAfterDays = data.escalateAfterDays === undefined ? n.escalateAfterDays : Number(data.escalateAfterDays);
     if (smtpHost && !HOSTNAME_RE.test(smtpHost) && !/^\d{1,3}(\.\d{1,3}){3}$/.test(smtpHost)) {
-      return jsonError("SMTP host must be a hostname or IP address");
+      return jsonError("SMTP host must be a hostname or IP address", 422);
     }
+    if (!Number.isInteger(smtpPort) || smtpPort < 1 || smtpPort > 65535 ||
+        !Number.isInteger(reminderIntervalDays) || reminderIntervalDays < 1 || reminderIntervalDays > 30 ||
+        !Number.isInteger(reminderMaxCount) || reminderMaxCount < 0 || reminderMaxCount > 20 ||
+        !Number.isInteger(escalateAfterDays) || escalateAfterDays < 1 || escalateAfterDays > 60) {
+      return jsonError("SMTP port or reminder limits are invalid", 422);
+    }
+    if (!["manual", "user_job", "platform_job"].includes(reminderMode)) return jsonError("Reminder mode is invalid", 422);
     if (!TIME_RE.test(digestTime) || !TIME_RE.test(quietHoursStart) || !TIME_RE.test(quietHoursEnd)) {
-      return jsonError("Times must use the 24h HH:MM format");
+      return jsonError("Times must use the 24h HH:MM format", 422);
     }
-    if (!smtpFrom.includes("@")) return jsonError("From address must be a valid email");
-    await db.notificationSettings.update({
-      where: { tenantId },
-      data: {
-        smtpHost, smtpPort,
-        smtpUser: String(data.smtpUser ?? "").trim() || null,
-        smtpPassword: smtpPassword ? smtpPassword : n.smtpPassword, // empty = keep existing
-        smtpFrom, smtpSecure: data.smtpSecure !== false,
-        alertOnSent: data.alertOnSent !== false,
-        alertOnViewed: data.alertOnViewed === true,
-        alertOnSigned: data.alertOnSigned !== false,
-        alertOnCompleted: data.alertOnCompleted !== false,
-        alertOnDeclined: data.alertOnDeclined === true,
-        dailyDigest: data.dailyDigest === true,
-        digestTime,
-        reminderMode, reminderIntervalDays, reminderMaxCount,
-        quietHoursStart, quietHoursEnd,
-        skipWeekends: data.skipWeekends !== false,
-        escalateToSms: data.escalateToSms === true,
-        escalateAfterDays,
-        updatedAt: new Date(),
-      },
-    });
+    const updateData = {
+      ...(data.smtpHost !== undefined ? { smtpHost } : {}),
+      ...(data.smtpPort !== undefined ? { smtpPort } : {}),
+      ...(data.smtpFrom !== undefined ? { smtpFrom } : {}),
+      ...(data.smtpUser !== undefined ? { smtpUser: String(data.smtpUser ?? "").trim() || null } : {}),
+      ...(data.smtpPassword !== undefined && data.smtpPassword !== "" ? { smtpPassword } : {}),
+      ...(data.smtpSecure !== undefined ? { smtpSecure: data.smtpSecure !== false } : {}),
+      ...(data.alertOnSent !== undefined ? { alertOnSent: data.alertOnSent !== false } : {}),
+      ...(data.alertOnViewed !== undefined ? { alertOnViewed: data.alertOnViewed === true } : {}),
+      ...(data.alertOnSigned !== undefined ? { alertOnSigned: data.alertOnSigned !== false } : {}),
+      ...(data.alertOnCompleted !== undefined ? { alertOnCompleted: data.alertOnCompleted !== false } : {}),
+      ...(data.alertOnDeclined !== undefined ? { alertOnDeclined: data.alertOnDeclined === true } : {}),
+      ...(data.dailyDigest !== undefined ? { dailyDigest: data.dailyDigest === true } : {}),
+      ...(data.digestTime !== undefined ? { digestTime } : {}),
+      ...(data.reminderMode !== undefined ? { reminderMode } : {}),
+      ...(data.reminderIntervalDays !== undefined ? { reminderIntervalDays } : {}),
+      ...(data.reminderMaxCount !== undefined ? { reminderMaxCount } : {}),
+      ...(data.quietHoursStart !== undefined ? { quietHoursStart } : {}),
+      ...(data.quietHoursEnd !== undefined ? { quietHoursEnd } : {}),
+      ...(data.skipWeekends !== undefined ? { skipWeekends: data.skipWeekends !== false } : {}),
+      ...(data.escalateToSms !== undefined ? { escalateToSms: data.escalateToSms === true } : {}),
+      ...(data.escalateAfterDays !== undefined ? { escalateAfterDays } : {}),
+      updatedAt: new Date(),
+    };
+    await db.notificationSettings.update({ where: { tenantId }, data: updateData });
     await audit({
       actor, actorRole: me.role, action: "notification_settings.updated", resource: `tenant:${me.tenantSlug}`,
       tenantName: me.tenantName,
-      detail: `SMTP ${smtpHost ? `override (${smtpHost})` : "platform default"} · reminders=${reminderMode} every ${reminderIntervalDays}d (max ${reminderMaxCount})`,
+      detail: `Sender settings saved; workspace relay override inactive; reminders=${reminderMode}`,
     });
-    return jsonOk({ ok: true, message: "Notification settings saved. SMTP overrides are inactive; delivery uses operator SMTP_URL." });
+    return jsonOk({ ok: true, ...await configuredMailState(tenantId),
+      message: "Notification settings saved. Delivery uses the operator-managed relay; workspace relay fields remain inactive." });
   }
 
   if (op === "smtp.test") {
-    const mode = smtpMode();
     await ensureNotificationSettings(tenantId);
+    const mailState = await configuredMailState(tenantId);
     await db.notificationSettings.update({ where: { tenantId }, data: {
       smtpLastTestAt: new Date(), smtpLastTestStatus: "CONFIGURATION_ONLY",
     } });
-    return jsonOk({ ok: true, configurationOnly: true, delivered: false,
-      transportConfigured: mode.configured,
-      message: "No test message sent. Delivery uses operator SMTP_URL; per-workspace SMTP fields are stored but inactive.",
+    return jsonOk({ ok: true, configurationOnly: true, delivered: false, ...mailState,
+      message: "Configuration checked. No test message sent; mailbox acceptance requires a separately authorized operator test.",
     });
   }
 

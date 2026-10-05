@@ -4,6 +4,7 @@ import { createHash, generateKeyPairSync, sign, verify } from "node:crypto";
 import { NextRequest } from "next/server";
 import { canonicalJson } from "../src/lib/canonical-json";
 import { computeEnvelopeDigest } from "../src/lib/esign";
+import { readConsentSnapshot } from "../src/lib/consent";
 
 // Own process; synthetic in-memory rows, ephemeral evidence key, no services,
 // dotenv, stored database, original repository data or provider calls.
@@ -23,6 +24,8 @@ const publicKeyPem = keyPair.publicKey.export({ type: "spki", format: "pem" }).t
 const tenant = { id: "tenant-one", name: "Synthetic tenant", status: "ACTIVE", esignPrefs: null };
 const db = {
   tenant: { findUnique: async () => tenant }, member: { findFirst: async () => ({ id: "member-one" }) },
+  notificationSettings: { findUnique: async () => null },
+  platformSetting: { findUnique: async () => ({ smtpHost: "smtp.fixture.invalid", smtpFrom: "Fixture <notifications@example.test>" }) },
   template: { findFirst: async () => template, update: async () => {} },
   document: { findFirst: async () => ({ id: "document-one", tenantId: tenant.id, pageCount: 1, sha256: checksum, filename: "synthetic.pdf", storageKey: "synthetic-only" }) },
   envelope: {
@@ -53,7 +56,7 @@ mock.module("../src/lib/billing", () => ({ currentAllowance: async () => ({ used
 mock.module("../src/lib/webhooks", () => ({ queueEnvelopeEvent: async () => {}, retryFailedDeliveries: async () => {}, dispatchEnvelopeEvent: async () => {} }));
 mock.module("../src/lib/mail", () => ({ processOutbox: async () => {} }));
 mock.module("../src/lib/attestation", () => ({ pushAttestationForEnvelope: async () => ({ pushed: false }) }));
-mock.module("../src/lib/document-store", () => ({ readStoredBytes: async () => document }));
+mock.module("../src/lib/document-store", () => ({ MAX_UPLOAD_BYTES: 50 * 1024 * 1024, readStoredBytes: async () => document }));
 mock.module("../src/components/marketing/public-sign", () => ({ PublicSign: () => null }));
 mock.module("../src/lib/evidence-key", () => ({
   EVIDENCE_SIGNATURE_ALGORITHM: "RSASSA-PKCS1-v1_5-SHA-256",
@@ -76,7 +79,7 @@ const send = (route: { POST: (...args: any[]) => Promise<Response> } = dedicated
     recipients: [{ name: "Fixture Signer", email: "signer@example.test", role: "SIGNER" }], ...extra } }),
 }), { params: Promise.resolve({ section: "envelopes" }) });
 const signing = (extra: Record<string, unknown> = {}) => signApi.POST(new NextRequest("http://localhost/api/sign/synthetic", {
-  method: "POST", body: JSON.stringify({ op: "sign", consent: true, name: "Fixture Signer", font: "caveat", ...extra }),
+  method: "POST", body: JSON.stringify({ op: "sign", consent: true, consentDigest: readConsentSnapshot(envelope.consentSnapshot).digest, consentVersion: readConsentSnapshot(envelope.consentSnapshot).version, name: "Fixture Signer", font: "caveat", ...extra }),
 }), { params: Promise.resolve({ token: "synthetic" }) });
 function filesInZip(bytes: Buffer) {
   const files = new Map<string, Buffer>(); let offset = 0;
@@ -116,6 +119,22 @@ describe("immutable template contracts", () => {
     const manifest = JSON.parse(second.get("manifest.json")!.toString("utf8"));
     expect(manifest.payload.envelope.sha256).toBe(sealedChecksum);
     expect(verify("RSA-SHA256", Buffer.from(canonicalJson(manifest.payload)), publicKeyPem, Buffer.from(manifest.signature, "base64"))).toBe(true);
+  });
+  test("late Unicode export ledger remains signed while both completed PDF artifacts stay stable", async () => {
+    expect((await send()).status).toBe(200);expect((await signing()).status).toBe(200);
+    const before=filesInZip((await buildEvidencePack(envelope.id,tenant.id)).bytes);
+    for(const action of ["EVIDENCE_EXPORTED","ATTESTED","DOCUMENT_VIEWED"])events.push({
+      envelopeId:envelope.id,at:new Date(envelope.sealedAt),actor:"Later \u{1f680} Owner",action,detail:"Equal-clock later activity retained in current ledger"});
+    const after=filesInZip((await buildEvidencePack(envelope.id,tenant.id)).bytes);
+    expect(after.get("document/completed.pdf")).toEqual(before.get("document/completed.pdf"));
+    expect(after.get("completion/record.pdf")).toEqual(before.get("completion/record.pdf"));
+    const csv=after.get("evidence/event-ledger.csv")!.toString("utf8");
+    expect(csv).toContain("Later \u{1f680} Owner");
+    for(const action of ["EVIDENCE_EXPORTED","ATTESTED","DOCUMENT_VIEWED"])expect(csv).toContain(action);
+    const manifest=JSON.parse(after.get("manifest.json")!.toString("utf8"));
+    const ledger=manifest.payload.artifacts.find((a:any)=>a.path==="evidence/event-ledger.csv");
+    expect(ledger.sha256).toBe(createHash("sha256").update(after.get(ledger.path)!).digest("hex"));
+    expect(verify("RSA-SHA256",Buffer.from(canonicalJson(manifest.payload)),publicKeyPem,Buffer.from(manifest.signature,"base64"))).toBe(true);
   });
   test("template digest binds frozen body and locations, not just template identity", async () => {
     expect((await send()).status).toBe(200);

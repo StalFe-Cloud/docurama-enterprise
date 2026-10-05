@@ -1,39 +1,50 @@
 ---
 title: Core Concepts
-description: The essential building blocks of Docurama: envelopes, recipients, documents, seals and cryptographic evidence.
+description: Envelopes, recipients, immutable contracts, consent and completion evidence in the email-link signing flow.
 group: Getting started
 order: 2
-tags: [concepts, envelopes, seals]
+tags: [concepts, envelopes, evidence]
 ---
 
 # Core Concepts
 
-Docurama is designed around five foundational concepts that define how signatures are requested, verified and preserved.
+## The envelope and contract
 
-## 1. The Envelope
+An envelope holds the contract, recipients, field locations and event ledger.
+Sending an uploaded document retains its original checksum. Sending a text
+template freezes the authoritative text, template version and locations. Later
+template edits do not replace the contract being signed.
 
-An **Envelope** is the sovereign container for a signing workflow. Unlike basic PDF signers that mutate documents in place, Docurama treats an envelope as an immutable state machine:
-- **Title & Purpose:** What is being agreed upon.
-- **Document Payload:** The immutable underlying PDF file with its SHA-256 digest.
-- **Recipients List:** Ordered list of parties required to sign or review.
-- **Event Ledger:** Every action (creation, view, signature, reminder, void) recorded with UTC timestamps and IP hashes.
+## Recipients and routing
 
-## 2. The Recipient
+A `SIGNER` enters a typed name and assigned values. A `CC` receives a copy and
+cannot sign. Signers act in sequence: the next invitation is queued after the
+preceding signer completes. Each recipient has an individual bearer link;
+sharing it transfers access, so keep it private. An email link does not establish
+independently verified identity.
 
-A **Recipient** is an individual invited to take action on an envelope.
-- **Role:** Either `SIGNER` (must affix signature) or `CC` (receives completed copy).
-- **Routing Order:** Signers can be executed in sequence (Signer 1, then Signer 2) or in parallel.
-- **Unique Access Token:** Each recipient receives a cryptographically random access token (32 bytes entropy). Signers never share tokens.
+## Consent and adoption
 
-## 3. Cryptographic Seal & Verification Code
+New envelopes freeze the workspace's exact consent wording and version. The
+signer must explicitly accept those displayed terms. The durable adoption
+records that wording, version, digest, application time and submitted values.
+Changing workspace preferences does not change an existing envelope's terms.
 
-When the last signer completes their action, Docurama executes the **Sealing Routine**:
-1. Computes the final digest of the document and signer signatures.
-2. Applies a cryptographic timestamp conforming to RFC 3161.
-3. Generates a public code (e.g. `DOC-A1B2C3D4`) published on `verify.docurama.eu`.
+## Completion artifacts and digests
 
-## 4. Conformance Levels
+After all required signers complete, authorized participants can obtain a
+completed-document PDF and a separate signing-record PDF. The original-upload
+checksum remains distinct from the completed PDF's checksum. Contract/adoption
+evidence has a separate digest; evidence-pack manifests bind exported artifact
+bytes with their individual checksums.
 
-Docurama supports EU eIDAS conformance levels:
-- **Simple Electronic Signature (SES):** Email verification + audit trail.
-- **Advanced Electronic Signature (AES):** OTP SMS two-factor authentication, cryptographic binding, and PAdES-Baseline-T horodatage.
+A public code exposes the installation's reported completion record. A
+successful code lookup is not independent verification of the signer or every
+recorded event.
+
+## Supported assurance
+
+This flow provides email-link typed signing. It does not perform advanced or
+qualified signing, embed PAdES certificate signatures or obtain trusted
+timestamps. Existing stronger policies and unsupported reauthentication
+requirements fail closed. Read [the assurance limits](/docs/compliance/eidas).

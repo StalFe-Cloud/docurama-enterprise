@@ -8,16 +8,20 @@ let recipients: any[] = [];
 let outbox: any[] = [];
 let events: any[] = [];
 let hooks: any[] = [];
+let preferences: any;
 const me = { id: "sender", tenantId: "tenant", firstName: "Synthetic", lastName: "Sender", email: "sender@example.test", role: "ADMIN", tenantName: "Fixture" };
 const template = { id: "template", name: "Synthetic agreement", version: "1.0", bodyMarkdown: "Synthetic agreement terms.", pages: 1 };
 const clone = (value: any) => structuredClone(value);
-const hydrated = () => ({ ...clone(envelope), recipients: clone(recipients), createdBy: me, tenant: { status: "ACTIVE", esignPrefs: { requireReauth: false, part11Mode: false } } });
+const hydrated = () => ({ ...clone(envelope), document: null, events: clone(events), recipients: clone(recipients), createdBy: me, tenant: { status: "ACTIVE", esignPrefs: clone(preferences) } });
 const db: any = {
   member: { findFirst: async () => ({ id: "membership" }) },
   template: { findFirst: async () => template, update: async () => template },
   document: { findFirst: async () => null },
   domain: { findFirst: async () => null },
-  tenant: { findUnique: async () => ({ id: "tenant", name: "Fixture" }) },
+  tenant: { findUnique: async () => ({ id: "tenant", name: "Fixture", status: "ACTIVE", esignPrefs: clone(preferences) }) },
+  esignPreferences: { findUnique: async () => clone(preferences) },
+  notificationSettings: { findUnique: async () => null },
+  platformSetting: { findUnique: async () => ({ smtpHost: "smtp.fixture.invalid", smtpFrom: "Fixture <notifications@example.test>" }) },
   envelope: {
     create: async ({ data }: any) => (envelope = { id: "envelope", reminderCount: 0, lastRemindedAt: null, ...data }),
     findFirst: async ({ where }: any) => envelope && where.tenantId === "tenant" ? hydrated() : null,
@@ -53,10 +57,18 @@ mock.module("@/lib/transparency", () => ({ appendSealCommitment: async () => ({}
 mock.module("../src/app/api/workspace/[section]/route", () => ({ GET: async () => new Response("unused") }));
 const sendRoute = await import("../src/app/api/workspace/envelopes/route");
 const signRoute = await import("../src/app/api/sign/[token]/route");
-beforeEach(() => { envelope = null; recipients = []; outbox = []; events = []; hooks = []; });
+beforeEach(() => {
+  envelope = null; recipients = []; outbox = []; events = []; hooks = [];
+  preferences = { signatureLevel: "simple", requireReauth: false, part11Mode: false,
+    consentText: "Reviewed fixture terms: I adopt my typed signature for this synthetic agreement.", consentVersion: "fixture-v7" };
+});
 const request = (path: string, body: any) => new NextRequest(`http://localhost${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 const send = () => sendRoute.POST(request("/api/workspace/envelopes", { op: "send", data: { title: "Fixture contract", templateId: "template", recipients: [ { name: "Alpha", email: "alpha@example.test", role: "SIGNER" }, { name: "Beta", email: "beta@example.test", role: "SIGNER" }, { name: "Copy", email: "copy@example.test", role: "CC" } ] } }));
-const sign = (index: number, extra: any = {}) => signRoute.POST(request("/api/sign/fixture", { op: "sign", name: recipients[index].name, font: "caveat", consentAccepted: true, consent: true, ...extra }), { params: Promise.resolve({ token: recipients[index].accessToken }) });
+const sign = (index: number, extra: any = {}) => {
+  const terms = JSON.parse(envelope.consentSnapshot);
+  return signRoute.POST(request("/api/sign/fixture", { op: "sign", name: recipients[index].name, font: "caveat", consent: true,
+    consentVersion: terms.version, consentDigest: terms.digest, ...extra }), { params: Promise.resolve({ token: recipients[index].accessToken }) });
+};
 const mails = (template: string) => outbox.filter(row => row.template === template);
 const effects = () => ({ events: clone(events), hooks: clone(hooks), outbox: clone(outbox) });
 
@@ -107,4 +119,29 @@ test("invalid token cannot alter recipients or queue mail", async () => {
   await send(); const before = effects();
   const response = await signRoute.POST(request("/api/sign/invalid", { op: "sign", name: "Stranger", consentAccepted: true, consent: true }), { params: Promise.resolve({ token: "not-a-recipient-token" }) });
   expect(response.status).toBe(404); expect(effects()).toEqual(before);
+});
+
+test("send freezes tenant wording and signing records that version despite later preference changes", async () => {
+  const displayed = clone(preferences);
+  expect((await send()).status).toBe(200);
+  const frozen = JSON.parse(envelope.consentSnapshot);
+  expect(frozen.text).toBe(displayed.consentText);
+  expect(frozen.version).toBe(displayed.consentVersion);
+  preferences.consentText = "Changed terms for future envelopes only.";
+  preferences.consentVersion = "fixture-v8";
+  expect((await sign(0)).status).toBe(200);
+  const adoption = JSON.parse(recipients[0].signatureData);
+  expect(adoption.version).toBe(2);
+  expect(adoption.consent).toBe(frozen.text);
+  expect(adoption.consentVersion).toBe(frozen.version);
+  expect(adoption.consentDigest).toBe(frozen.digest);
+});
+
+test("stale or substituted consent acknowledgement preserves pending state and workflow effects", async () => {
+  expect((await send()).status).toBe(200);
+  for (const body of [{ consentDigest: "0".repeat(64) }, { consentVersion: "fixture-v6" }, { consentText: "Substitute wording" }]) {
+    const before = { envelope: clone(envelope), recipients: clone(recipients), effects: effects() };
+    expect((await sign(0, body)).status).toBe(400);
+    expect({ envelope: clone(envelope), recipients: clone(recipients), effects: effects() }).toEqual(before);
+  }
 });

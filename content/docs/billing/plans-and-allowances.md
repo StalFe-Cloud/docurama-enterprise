@@ -22,7 +22,7 @@ Prices are in euro per month. Enterprise is quoted individually and is not self-
 ## What every plan includes
 
 - **Unlimited signers and recipients.** Recipients never need a Docurama account and never consume a seat. An envelope addressed to one signer or to ten signers in routing order counts once against your allowance.
-- **Simple and Advanced eSignatures** with PAdES sealing from B-B up to B-LTA, RFC 3161 timestamps, and honest conformance reporting. Docurama is not a qualified trust service provider and never claims qualified signatures — see [eIDAS and legal admissibility](/docs/compliance/eidas).
+- **Email-link typed signing** with frozen contract terms, exact consent wording/version, recipient field values and separate completed-document and signing-record PDFs. This flow does not provide advanced or qualified assurance, embedded PAdES signatures or trusted timestamps. Review [the signing assurance limits](/docs/compliance/eidas).
 - **Envelope rollover on renewal**, capped at one monthly allowance (the math is below).
 - **Committed-term discounts:** 3 months −5%, 6 months −10%, 12 months −20%. The monthly term is the default and carries no engagement.
 

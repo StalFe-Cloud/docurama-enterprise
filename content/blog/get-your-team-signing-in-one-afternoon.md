@@ -11,7 +11,7 @@ You do not need a project plan to adopt eSignatures — you need one focused aft
 
 ## Minutes 0–10: workspace and signature
 
-Sign up and the wizard walks you through the essentials — name your organization, adopt your signature (draw it, type it in one of three handwriting fonts, or upload a stamp). The signature you adopt here is what appears on every envelope you sign. Enable two-factor authentication when the wizard offers it; on Business and Enterprise you can require it for every member from Settings → Users.
+Sign up, name your organization and configure your account. In the public email-link signing flow, each signer enters a typed signature name and explicitly adopts it for the contract. An account signature or selected handwriting style does not guarantee that a handwritten rendering appears in every completed PDF.
 
 ## Minutes 10–20: invite the team
 
@@ -21,18 +21,18 @@ Settings → Users → invite your teammates by email, assigning roles as you go
 
 Two settings do the brand work:
 
-1. **Sending domain** (Settings → Account). Add your domain; we verify it over live DNS (TXT) before any mail leaves from it. Signing invitations arrive from `contracts@yourcompany.com`, not from us — better deliverability, better trust, and the signer portal shows a verified-sender badge that helps recipients spot phishing.
+1. **Sending domain and SMTP identity.** Configure an authorized SMTP relay and sender address. A workspace sender override requires a currently verified sending domain; DNS verification does not configure the relay or establish mailbox delivery. Test actual delivery to controlled inboxes before using it with recipients.
 2. **Contract templates.** Instead of uploading PDFs repeatedly, turn your NDA, quotation and supply agreement into templates with recipient roles and routing order. The [template library](/modeles-de-contrats) has French-law starters you can adapt in minutes.
 
 ## Minutes 35–45: the first real envelope
 
-Pick something friendly — an NDA with a partner, not the 80-page supply agreement. Documents → New envelope: choose the template or upload a PDF, add recipients in routing order, write a one-line personal message, send. Your recipient gets a personal link to a one-page signing experience: document preview (watermarked, so nobody screenshots a clean copy before signing), signature adoption, eIDAS consent, done.
+Pick something friendly — an NDA with a partner, not the 80-page supply agreement. Documents → New envelope: choose the template or upload a PDF, add recipients in routing order, write a one-line personal message, send. Your recipient gets a personal link to a one-page signing experience: document review, typed signature adoption and explicit consent.
 
 Then watch three things happen:
 
-- Each signer's action lands in the envelope's event ledger — opened, viewed, signed, sealed.
-- On completion, the envelope seals with a PAdES-conformance signature and an RFC 3161 timestamp.
-- The document gets a public verification code — send it to your counterparty so *they* can prove it too.
+- Each signer's action lands in the envelope's event ledger — viewed, signed and completed.
+- On completion, download the completed document PDF and separate signing record PDF. This flow records email-link signing and digest evidence; it does not embed PAdES signatures or obtain independent timestamps.
+- The document gets a public verification code — send it to your counterparty so they can inspect the reported record.
 
 Export the evidence pack once, open `verify.html` offline, and you will understand the product better than any demo could.
 

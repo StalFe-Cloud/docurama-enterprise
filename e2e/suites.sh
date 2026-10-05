@@ -34,6 +34,12 @@ fi
 # in their own process so mocks cannot affect the HTTP regression suites.
 bun --no-env-file test e2e/contract-snapshot.test.ts
 bun --no-env-file test e2e/final-document.test.ts
+bun --no-env-file test --timeout 30000 e2e/consent.test.ts
+bun --no-env-file test --timeout 30000 e2e/signing-assurance.test.ts
+bun --no-env-file test --timeout 30000 e2e/mail-sender.test.ts
+bun --no-env-file test --timeout 30000 e2e/mail-settings.test.ts
+bun --no-env-file test --timeout 30000 e2e/storage-read-limits.test.ts
+bun --no-env-file test --timeout 90000 e2e/signing-preflight-isolation.test.mjs
 bun --no-env-file test e2e/signing-email.test.ts
 bun --no-env-file test e2e/signing-email-smtp.test.ts
 bun --no-env-file test e2e/mail-signing-gate.test.ts

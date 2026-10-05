@@ -1,5 +1,7 @@
 # Deployment Guide — Docurama
 
+**Engineering checkpoint (2026-10-04 UTC):** reviewed source `25ae19c50e26a423e9d2386e3c76ecaf713c71f3` passed all seven CI checks. [Exact-head runtime evidence](https://github.com/StalFe-Cloud/docurama-enterprise/actions/runs/37244852380) records API 89/89, MCP 15/15 and browser 31/31 on SQLite and PostgreSQL; the SQLite suite also passed visual 7/7 and required real SeaweedFS 7/7. Native backup/restore and schema-drift checks passed for both providers. The browser suite includes desktop/mobile two-signer completion and actual completed-PDF and completion-record-PDF downloads with hash and PDF checks. This is a prior-source checkpoint: subsequent source changes require fresh CI, and qualification of the approved image digest and customer installation remains pending. Do not mark production or stronger signature-assurance acceptance complete from this checkpoint.
+
 Docurama is a Next.js 16 + Prisma application (Bun toolchain). Build a separate image for each database provider. Deployment examples require a reviewed release, protected runtime configuration and installation-specific acceptance evidence.
 
 | Platform | Target | Section |
@@ -22,18 +24,15 @@ Standard Next.js deployment. **Build caveat:** the repo's `bun run build` script
 ## 2. Docker single host (private cloud)
 
 ```bash
-cp .env.example .env            # edit: DATABASE_URL stays file:/app/db/custom.db (absolute, in-volume)
-docker compose up -d            # app only, local filesystem storage
-docker compose --profile s3 up -d          # + SeaweedFS S3 object storage (bucket auto-creates)
-docker compose --profile s3 --profile mail up -d   # + Mailpit SMTP sink (eval only)
+cp .env.example .env            # populate protected SMTP_URL/SMTP_FROM and ROOT_DOMAIN
+docker compose up -d           # approved SQLite deployment; no provider profiles are bundled
 ```
 
-- Image: non-root (uid 10001), `HEALTHCHECK` on `/api/health`, entrypoint runs reviewed provider-specific `prisma migrate deploy` on boot and refuses to start if it fails.
-- Host mounts: `./db` and `./storage` (override with `DB_DIR`/`STORAGE_DIR`); `PORT_BIND` defaults to `0.0.0.0:3002`.
-- With the s3 profile: set `S3_ENDPOINT=http://seaweed:8333`, `S3_BUCKET=docurama`, `S3_ACCESS_KEY_ID=docurama`, `S3_SECRET_ACCESS_KEY=…` in the app environment (compose file comments show the block).
-- With the mail profile: `SMTP_URL=smtp://mailpit:1025?tls=off`, inbox UI at `http://127.0.0.1:8025`.
-- TLS: put Caddy or nginx in front and terminate TLS there (the container speaks plain HTTP on :3000). `ROOT_DOMAIN` must be set for vanity-subdomain routing.
-- Worker: single replica runs the in-process worker; do not scale this service beyond one without Postgres + `DOCURAMA_WORKER=off`.
+- Image: non-root (uid 10001), `HEALTHCHECK` on `/api/health`, and reviewed provider-specific migrations that must succeed before startup.
+- The supplied Enterprise Compose file uses `./db` and `./storage`, port `3003`, selfhost mode and closed public registration. Override mount/port/database settings only in a reviewed protected Compose override; Core's profile and mount variables are not supported here.
+- SMTP settings are optional. Set an operator-verified `SMTP_FROM` or configure the privileged platform SMTP sender with a real host. Configure storage integrations explicitly; the Enterprise Compose file does not bundle Core's SeaweedFS, Mailpit or PostgreSQL profiles.
+- Put an approved TLS proxy in front and set `ROOT_DOMAIN` for the intended installation. Keep one SQLite replica and coordinate the worker before any scale-out.
+- Provision the initial administrator offline per `INSTALLATION-BOOTSTRAP.md`; authenticate and create the first organization before mailbox-bound invitations. Uninvited registration stays closed.
 
 ### 2.1 PostgreSQL
 
@@ -41,11 +40,11 @@ Prisma cannot read `datasource.provider` from an environment variable, so the
 provider is fixed **at build time**. One image targets one database; pointing a
 SQLite-built image at a `postgresql://` URL does not work.
 
-```bash
-DB_PROVIDER=postgresql DATABASE_URL=postgresql://docurama:docurama@postgres:5432/docurama   docker compose --profile postgres up -d --build
-```
-
-`--build` is required on first use, and again if you switch back to SQLite.
+The Enterprise Compose file has no PostgreSQL profile and defaults to a SQLite image.
+Use an approved override that selects `build.args.DB_PROVIDER: postgresql` and the
+matching protected `DATABASE_URL`, or an already qualified PostgreSQL image. The
+database server and its lifecycle must be approved separately; changing the runtime
+URL alone cannot change the build provider. Rebuild/requalify when switching providers.
 `scripts/schema-for.mjs` emits `prisma/schema.postgresql.prisma` from the single
 source schema, changing only the provider line — it fails loudly if anything
 else would have to differ, which guards schema portability. The entrypoint applies the reviewed SQL history
@@ -142,12 +141,17 @@ behavior. SMTP acceptance remains separate from confirmed recipient delivery.
 Chart: `deploy/helm/docurama` (see `values.yaml`).
 
 ```bash
-kubectl create secret generic docurama-smtp --from-literal=SMTP_URL='smtp://user:pass@relay:587'
+# Protected file contains SMTP_URL and operator-verified SMTP_FROM.
+# Populate it through the approved secret-management channel, outside Git.
+kubectl create secret generic docurama-smtp --from-env-file=/secure/docurama-smtp.env
 helm install docurama deploy/helm/docurama \
   --set ingress.hosts[0].host=app.example.com \
   --set rootDomain=example.com \
-  --set smtp.existingSecret=docurama-smtp
+  --set smtp.existingSecret=docurama-smtp \
+  --set smtp.fromSecretKey=SMTP_FROM
 ```
+
+Choose `smtp.from` for a non-secret verified mailbox or `smtp.fromSecretKey` for a key in `smtp.existingSecret`; selecting both fails chart rendering. A selected sender key is required in the Secret. Blank values omit the sender environment entry, preserving the privileged platform SMTP configuration or outbox-only operation. Do not duplicate a selected sender through `extraEnv`. SMTP relay credentials and `ROOT_DOMAIN` never determine the sender identity.
 
 Key values: `replicaCount: 1` (**SQLite mode must stay single-replica** — the DB lives on the RWO PVC; the app itself is stateless); `persistence` (20Gi PVC, `dbSubPath: db`, `storageSubPath: storage`); external Postgres via `extraEnv` → `DATABASE_URL` + `persistence.enabled: false` + S3 storage for multi-replica; `s3.*` block (endpoint/bucket/region/`forcePathStyle: true` for SeaweedFS/MinIO/R2, creds via `s3.existingSecret`); ingress className `nginx` with cert-manager annotation; probes hit `/api/health` (liveness 25 s/30 s, readiness 10 s/10 s); resources requests 250 m/512 Mi, memory limit 1 Gi; `skipDbPush: true` is the chart's legacy skip value; use it only after a dedicated reviewed migration Job succeeds. Use the same provider image, database and migration history for Job and app.
 
@@ -172,12 +176,13 @@ Key values: `replicaCount: 1` (**SQLite mode must stay single-replica** — the 
 | `S3_BUCKET` / `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | Bucket + credentials (partial config stays on local storage, loudly warned) |
 | `S3_REGION` | Region label (default `us-east-1`) |
 | `S3_AUTO_CREATE_BUCKET` | Create bucket on first use (default `1`) |
-| `SMTP_URL` | `smtp://user:pass@host:587` / `smtps://…:465` / append `?tls=off` for test relays. Unset = outbox-only |
+| `SMTP_FROM` | Explicit operator-verified sender mailbox. Without it, configure the privileged platform SMTP sender; SMTP URL credentials or ROOT_DOMAIN are not sender identities. Tenant overrides require a verified sending domain. New-source sender behavior remains qualification-pending. |
+| `SMTP_URL` | `smtp://user:pass@host:587` requires STARTTLS by default; `smtps://...:465` uses implicit TLS. `?tls=off` is for isolated local test relays only. Unset = outbox-only. |
 | `DOCURAMA_WORKER` | `off` disables the in-process worker (all-but-one replica, external crons) |
 | `NEXT_PUBLIC_DEMO_MODE` | Demo credential buttons on sign-in. **Must be unset/false in production** |
 | `ROOT_DOMAIN` | Base domain for vanity subdomain routing (default `docurama.eu`) |
 | `REKOR_API_URL` | Rekor log for transparency witnessing (default public instance; point at a private Rekor if needed) |
-| `REKOR_WITNESS` | `off` disables witnessing entirely (air-gapped) |
+| `REKOR_WITNESS` | `off` disables external witnessing; required by the AWS Private Cloud blueprint. This setting alone does not make an installation air-gapped. |
 | `PAYMENT_PROVIDER` | `stripe` (with `STRIPE_SECRET_KEY`) enables Stripe; anything else = manual bank-transfer mode |
 | `STRIPE_SECRET_KEY` | Stripe API key |
 | `STRIPE_WEBHOOK_SECRET` | Verifies `/api/billing/webhook` signatures (`whsec_…`) |
@@ -196,7 +201,7 @@ Key values: `replicaCount: 1` (**SQLite mode must stay single-replica** — the 
 ## 7. Post-deploy verification checklist
 
 1. `curl -fsS https://app.<root>/api/health` → **200**, `status: "ok"`, storage backend as intended, `mail.mode: "smtp"`.
-2. Signup smoke test: create an account at `/welcome`, confirm the verification mail lands (outbox drains).
+2. Public SaaS: create a synthetic account and confirm verification mail reaches the intended inbox. Dedicated selfhost/private_cloud: provision the initial administrator offline per `INSTALLATION-BOOTSTRAP.md`, create the first organization after authentication, and test invitations while uninvited signup remains denied.
 3. Send and sign a test envelope end-to-end (send → sign link → seal).
 4. Verify the sealed envelope on the public portal (`https://verify.<root>`, envelope code).
 5. Stripe mode: webhook endpoint `https://app.<root>/api/billing/webhook` registered in the Stripe dashboard for `checkout.session.completed`, `invoice.paid`, `invoice.payment_failed`, `customer.subscription.deleted`; `STRIPE_WEBHOOK_SECRET` set; one test card payment completes.
@@ -221,3 +226,5 @@ does not undo SQL or data changes. Reuse an evolved database with the prior imag
 only after compatibility has been rehearsed. Otherwise stop writes and execute the
 reviewed restore or forward repair, accounting for writes since the recovery point.
 Recheck health, authentication, tenant isolation, documents and evidence after recovery.
+
+Operator acceptance for this candidate remains pending: explicit consent and current session/MFA policy, mailbox-bound recipient access, historical snapshot review/reissue, and independently verified completed document/evidence downloads. Stronger authentication or signature policies must fail closed when unsupported. PAdES, RFC 3161/TSA and Part 11 claims require their own applicable implementation and validation evidence.

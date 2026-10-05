@@ -18,8 +18,9 @@ function sqliteGate(): TransactionGate | null {
   return gate;
 }
 
-/** Callbacks contain database work only: a serialization conflict can replay
- * the callback. Do not nest this helper; pass the existing transaction client.
+/** A serialization conflict can replay database work and bounded read-only
+ * source validation. External delivery and mutating I/O stay outside callbacks.
+ * Do not nest this helper; pass the existing transaction client.
  * The SQLite turn is process-local admission control, NOT a distributed lock.
  * Serializable isolation and conditional writes remain mandatory on both DBs. */
 export async function serializableTransaction<T>(work: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {

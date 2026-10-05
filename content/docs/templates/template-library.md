@@ -6,11 +6,11 @@ order: 2
 tags: [templates, contracts, french-law]
 ---
 
-Not every team has a lawyer on retainer for an NDA. The French contract library gives you a curated catalogue of French-law contract templates you can send in minutes — and when you send one, signers read the actual contract text, not just a PDF thumbnail.
+The contract library provides starting text to review and adapt for your agreement. Sending from a supported text template freezes its terms for signers to review; the library does not determine whether those terms or this signing method suit your transaction.
 
 ## What the library is
 
-The library is a public catalogue at **`/modeles-de-contrats`** on the marketing site, also reachable from the workspace template gallery. It contains French-law contract templates covering the everyday cases — from mutual NDAs to supply agreements — drafted to be usable as-is and reviewed by us before publication.
+The library is a public catalogue at **`/modeles-de-contrats`** on the marketing site, also reachable from the workspace template gallery. It includes starter text for agreements such as NDAs and supply contracts. Review and adapt the terms before sending; catalogue inclusion does not certify legal suitability or professional review.
 
 ## Using a template from the library
 
@@ -28,16 +28,15 @@ When you send an envelope from a template that carries contract text, the signer
 Around that text sits the standard signer experience:
 
 - the signers rail with live status of every recipient,
-- a **per-recipient watermark** on the document preview,
-- the adopt-signature step with handwriting fonts,
-- the **eIDAS consent** statement,
+- typed-name adoption and assigned recipient values,
+- the exact frozen consent wording and version,
 - and the option to decline with a reason.
 
-The envelope keeps a link to the source template in its evidence chain, so months later you can trace any signed copy back to the exact template version that produced it.
+The envelope freezes the template text, version and field locations at send time. Changing or deleting the source template does not change those captured terms.
 
 ## Templates and legal advice
 
-An honest note: the library templates are drafted under French law and reviewed by us, but they are **starting points, not legal advice**. For high-stakes agreements — employment terminations, share deals, anything litigious — have your counsel review the text before you send it. Docurama provides Simple and Advanced eSignatures with PAdES sealing and honest conformance reporting; the legal weight of a contract depends on far more than the signature on it. See [eIDAS and legal admissibility](/docs/compliance/eidas).
+Templates are starting points to review with the appropriate advisers for your agreement. The current email-link flow records typed adoption, consent and digest evidence; it does not provide advanced or qualified signing, embedded PAdES signatures or independent timestamps. See [the signing assurance limits](/docs/compliance/eidas).
 
 ## The library and your workspace
 

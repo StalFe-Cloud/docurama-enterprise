@@ -14,14 +14,14 @@ export async function generateMetadata(): Promise<Metadata> {
   const me = await getSessionUser();
   if (me) return {};
   return {
-    title: "Docurama: Sign documents. Prove everything.",
+    title: "Docurama: Sign documents. Record evidence.",
     description:
-      "EU-built eSignatures with cryptographic evidence: X.509 sealing, RFC 3161 timestamps, GDPR, eIDAS-aligned and 21 CFR Part 11 workflows.",
+      "Email-link document signing with typed adoption, immutable contract terms, explicit consent and digest evidence.",
     alternates: { canonical: "/" },
     openGraph: {
-      title: "Docurama: Sign documents. Prove everything.",
+      title: "Docurama: Sign documents. Record evidence.",
       description:
-        "EU-built eSignatures with cryptographic evidence: X.509 sealing, RFC 3161 timestamps, GDPR, eIDAS-aligned and 21 CFR Part 11 workflows.",
+        "Email-link document signing with typed adoption, immutable contract terms, explicit consent and digest evidence.",
       siteName: "Docurama",
       images: ["/brand/og-image.png"],
       type: "website",
@@ -61,7 +61,7 @@ export default async function Home() {
             "@type": "Product",
             name: "Docurama eSignature",
             description:
-              "EU-built eSignatures with cryptographic evidence: X.509 sealing, RFC 3161 timestamps, GDPR, eIDAS-aligned and 21 CFR Part 11 workflows.",
+              "Email-link document signing with typed adoption, immutable contract terms, explicit consent and digest evidence.",
             brand: { "@type": "Brand", name: "Docurama" },
             offers: PLAN_ORDER.filter((c) => c !== "ENTERPRISE").map((code) => {
               const p = PLAN_CATALOG[code];

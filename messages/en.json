@@ -4,12 +4,12 @@
     "tagline": "Sign, Seal, Verify",
     "legalName": "Docurama SAS",
     "address": "1 Rue Marguerin, 75014 Paris, France",
-    "euDataResidency": "EU data residency. Paris, France."
+    "euDataResidency": "Confirm data location for the selected deployment."
   },
   "nav": {
     "product": "Product",
     "examples": "Examples",
-    "compliance": "Compliance",
+    "compliance": "Assurance",
     "pricing": "Pricing",
     "developers": "Developers",
     "faq": "FAQ",
@@ -22,38 +22,38 @@
     "verifyDocument": "Verify a document"
   },
   "hero": {
-    "title": "Every document, signed and sealed under EU law",
-    "subtitle": "The enterprise e-signature portal with PAdES cryptographic sealing, RFC 3161 timestamps and an audit trail built for review.",
+    "title": "Send contracts, capture consent, review the completed record",
+    "subtitle": "Email-link signing with frozen contract terms, typed-name adoption and completion evidence built for review.",
     "startFree": "Start free trial",
     "verifyDoc": "Verify a document",
-    "caption": "The StålFe demo workspace replayed end to end: a mill certificate goes to the foundry, is signed, sealed and proven with cryptographic evidence."
+    "caption": "An illustrative workspace shows a mill certificate sent for signing, adopted by name and completed with an evidence record. Synthetic values demonstrate the flow."
   },
   "trust": {
-    "summary": "EU data residency. GDPR, eIDAS-aligned and 21 CFR Part 11 workflows. Public status at status.docurama.eu, platform security at security.docurama.eu."
+    "summary": "Email-link signing, captured consent and private completion records. Hosting, delivery and assurance scope require acceptance for the selected installation."
   },
   "features": {
-    "bentoTitle": "A complete evidence pipeline, not just a signature in a corner",
-    "bentoSubtitle": "Docurama binds identity, document bytes and cryptographic time into a single PAdES-sealed PDF that verifies offline without calling our servers.",
+    "bentoTitle": "Completed documents and recorded signing evidence",
+    "bentoSubtitle": "Frozen terms, recipient-bound values and captured consent accompany a completed PDF and a separate completion record.",
     "sendAndSign": "Send and eSign",
     "sendAndSignDesc": "Multi-signer envelopes with routing order, carbon copies and reminders. Signers never need an account.",
-    "certsAndSealing": "Certificates and sealing",
-    "certsAndSealingDesc": "One-click RSA-2048 signing certificates per workspace. Seal with PAdES conformance from B-B to B-LTA.",
-    "timestamps": "RFC 3161 timestamps",
-    "timestampsDesc": "Every signature anchored to an independent Timestamp Authority. Presets for DigiCert, Sectigo, GlobalSign, or your own TSA."
+    "certsAndSealing": "Completed documents and evidence",
+    "certsAndSealingDesc": "Download a completed document and a separate completion record containing captured signer values and frozen terms.",
+    "timestamps": "Recorded signing times",
+    "timestampsDesc": "Signing events and completion evidence record application times. Independent trusted timestamping is outside this release."
   },
   "pricing": {
     "title": "Predictable pricing with no envelope surprise bills",
-    "subtitle": "Every plan includes unlimited signers, live verification and certificate management. Upgrade when you need higher volumes or regulated compliance modes.",
+    "subtitle": "Choose a plan for your team size and sending volume; confirm provider integrations and assurance scope before launch.",
     "solo": "Solo",
     "starter": "Starter",
     "smart": "Smart Team",
     "business": "Business",
     "enterprise": "Enterprise",
-    "soloBlurb": "The full Starter feature set, sized and priced for one person.",
-    "starterBlurb": "The same 50-envelope allowance as Solo, with 3 seats.",
+    "soloBlurb": "One seat and 30 envelopes per month.",
+    "starterBlurb": "Three seats and 100 envelopes per month.",
     "smartBlurb": "For teams signing at volume with their own domain and API.",
     "businessBlurb": "For departments and multi-team operations at scale.",
-    "enterpriseBlurb": "For regulated teams with audit obligations.",
+    "enterpriseBlurb": "Discuss deployment and assurance requirements.",
     "perMonth": "/mo",
     "monthlyNoEngagement": "Monthly — no engagement, cancel anytime",
     "termDiscount": "−{pct}% for a {months}-month term",
@@ -62,11 +62,11 @@
     "contactSales": "Contact enterprise sales"
   },
   "compliance": {
-    "title": "Built for regulated European enterprises",
-    "subtitle": "Docurama SAS is governed by French and EU law. We never transfer your documents across borders.",
-    "eidas": "eIDAS Compliance",
-    "gdpr": "GDPR / RGPD",
-    "part11": "21 CFR Part 11",
+    "title": "Review the supported signing scope",
+    "subtitle": "Data location and integration acceptance depend on the approved installation. Stronger signing services and regulated-use qualification are separate requirements.",
+    "eidas": "Signing assurance",
+    "gdpr": "Privacy controls",
+    "part11": "Regulated-use review",
     "legalHub": "Compliance & Legal Hub",
     "frenchTemplates": "French Legal Templates"
   },

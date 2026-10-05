@@ -1,32 +1,43 @@
 ---
 title: Document Verification Portal
-description: How public verification works on verify.docurama.eu without requiring an account.
+description: Inspect the reported envelope or self-hosted attestation record using its public code.
 group: Verification
 order: 1
-tags: [verification, public, pades]
+tags: [verification, public, evidence]
 ---
 
 # Document Verification Portal
 
-The verification portal at `verify.docurama.eu` allows any recipient, counterparty or auditor to verify the authenticity of a sealed document using its public code.
+The public code retrieves the installation's reported envelope record without
+requiring an account. Private completed-document and signing-record PDFs remain
+available only through authorized participant or workspace access.
 
-## Verification States
+## Verification states
 
-When a code is queried, the engine returns one of four definitive states:
-
-| Status | Meaning |
+| Status | What the installation reports |
 | --- | --- |
-| `VERIFIED` | Document is sealed with a valid cryptographic digest, timestamp and listed signers. |
-| `NOT_SEALED` | Document exists but is currently pending signatures or in draft. |
-| `VOIDED` | Document was revoked or canceled before completion by the issuer. |
-| `NOT_FOUND` | No document matches this code in the ledger. |
+| `VERIFIED` | Local envelope completed with a recorded sealing time and digest. |
+| `NOT_SEALED` | Local envelope lacks the required completion/seal record. |
+| `VOIDED` | Envelope was voided by the issuer. |
+| `NOT_FOUND` | No matching local record or received attestation exists. |
+| `VERIFIED_ATTESTED` | Signed fingerprint submitted by a registered self-hosted instance. |
 
-## SHA-256 Digest Verification
+These states report stored facts. A lookup does not recompute the completed PDF,
+verify official signer identity or validate a regulated signature level.
 
-Every completed envelope displays its SHA-256 digest on the verification page. Anyone holding the downloaded PDF can verify its integrity locally:
+## Checksum scope
 
-```bash
-sha256sum signed-contract.pdf
-```
+For uploads, the envelope checksum remains the original file's checksum. The
+completed PDF and separate signing-record PDF each have their own checksum in
+the evidence pack. For text templates, the envelope digest binds recorded terms
+and adoption, rather than the completed PDF's bytes.
 
-The resulting hexadecimal output must match the SHA-256 digest recorded in the verification portal.
+Compare each file against its own manifest entry. For example,
+`sha256sum document/completed.pdf` must be compared with the entry for that
+artifact, not the original upload's digest. The included offline verifier can
+check the signed manifest and individual artifacts; inspect its actual verdict
+and the key used.
+
+The current flow does not create PAdES certificate signatures or independent
+trusted timestamps. Read [the assurance limits](/docs/compliance/eidas) and
+[the verification tutorial](/docs/getting-started/tutorial-verify-a-document).

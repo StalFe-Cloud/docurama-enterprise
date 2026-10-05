@@ -33,6 +33,7 @@ import { BrandLogo } from "@/components/brand/logo";
 import { PortalProviders } from "@/components/portal/providers";
 import { SignDocumentPreview, type SignDocument } from "@/components/marketing/sign-document-preview";
 import { cn } from "@/lib/utils";
+import type { ConsentTerms } from "@/lib/consent";
 
 export type SignPageState =
   | { phase: "invalid" }
@@ -44,6 +45,7 @@ export type SignPageState =
   | { phase: "wait"; title: string; code: string; tenantName: string; aheadName: string; document: SignDocument | null }
   | {
       phase: "active";
+      consent: ConsentTerms;
       title: string; code: string; tenantName: string;
       message: string | null; pages: number; senderName: string;
       senderDomainVerified: string | null;
@@ -106,11 +108,12 @@ function SignInner({ token, state }: { token: string; state: SignPageState }) {
   };
 
   const sign = async () => {
+    if (state.phase !== "active") return;
     if (!name.trim() || name.trim().length < 2) { setError("Please type your full name to sign."); return; }
     if (!consent) { setError("Please confirm you have read and agree to sign electronically."); return; }
     setBusy("sign"); setError(null);
     try {
-      const r = await post({ op: "sign", name: name.trim(), font, consent, values });
+      const r = await post({ op: "sign", name: name.trim(), font, consent, values, consentDigest: state.consent.digest, consentVersion: state.consent.version });
       setSealed(!!r.sealed);
       setPhase("signed");
     } catch (e) { setError(e instanceof Error ? e.message : "Signing failed"); }
@@ -459,8 +462,8 @@ function SignInner({ token, state }: { token: string; state: SignPageState }) {
                     className="mt-0.5 size-4 accent-primary"
                   />
                   <Label htmlFor="consent" className="cursor-pointer text-sm font-normal leading-relaxed text-muted-foreground">
-                    I confirm that I have reviewed this document and consent to sign electronically.
-                    My typed name and signing activity will be recorded with the document&apos;s completion evidence.
+                    <span className="whitespace-pre-wrap" data-testid="consent-text">{state.consent.text}</span>
+                    <span className="mt-1 block text-xs" data-testid="consent-version">Consent version: {state.consent.version}</span>
                   </Label>
                 </div>
 

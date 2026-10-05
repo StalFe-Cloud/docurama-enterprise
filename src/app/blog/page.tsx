@@ -11,10 +11,10 @@ export const metadata: Metadata = {
   alternates: { canonical: "/blog" },
   title: "Blog · Docurama",
   description:
-    "Product news, eIDAS and eSignature deep dives, security engineering and self-hosting guides from the Docurama team.",
+    "Product updates, signing evidence, security engineering and self-hosting guides from the Docurama team.",
   openGraph: {
     title: "Docurama Blog",
-    description: "Product news, eIDAS deep dives, security engineering and self-hosting guides.",
+    description: "Product updates, signing evidence, security engineering and self-hosting guides.",
     siteName: "Docurama",
     type: "website",
   },
@@ -61,8 +61,8 @@ export default function BlogIndexPage() {
             Evidence-grade signing, explained.
           </h1>
           <p className="mt-3 text-sm leading-relaxed text-muted-foreground sm:text-base">
-            Product announcements, eIDAS and PAdES deep dives, security engineering notes and
-            self-hosting guides — written by the team building Docurama in Paris.
+            Product announcements, signing evidence, security engineering notes and
+            self-hosting guides — written by the Docurama team.
           </p>
         </div>
 

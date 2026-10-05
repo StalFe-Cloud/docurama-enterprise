@@ -9,7 +9,7 @@ draft: false
 
 eSignature pricing in Europe tends toward two failure modes: enterprise opacity ("talk to sales" before you can see a euro), or metered anxiety (a per-envelope fee that makes you think twice before sending the NDA that protects you). We built Docurama's pricing to be boring in the best way: predictable, generous with time, and honest about what you are buying.
 
-## Five plans, one rule: buy seats, not surprises
+## Plans for individuals and teams
 
 | Plan | Price | Seats | Envelopes / month |
 |---|---|---|---|
@@ -40,6 +40,6 @@ Unlimited signers and recipients. The public verification portal. Evidence packs
 
 ## The Enterprise tier is a conversation, not a maze
 
-SSO, BYO certificates, self-hosting or on-premises deployment, custom volumes, QSCD integration, 21 CFR Part 11 workflows — these genuinely vary per organization, so they are priced per reality. The [enterprise pipeline](/enterprise) reaches an engineer-led pilot process with a fixed scope, not a lead-scoring funnel.
+Single sign-on, self-hosting, on-premises deployment and custom volumes require deployment-specific planning. Discuss these requirements through the [enterprise pipeline](/enterprise). The current email-link signing flow is not qualified signing and does not certify regulated compliance.
 
 That is the whole philosophy: prices you can calculate in your head, allowances that respect how months actually work, and evidence that is never paywalled. The full catalogue lives on the [pricing page](/marketing#pricing) — and yes, the FAQ there answers the Solo-versus-Starter question in two sentences.

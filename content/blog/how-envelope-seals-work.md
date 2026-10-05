@@ -1,58 +1,32 @@
 ---
-title: "How envelope seals work: digests, timestamps, transparency proofs and offline verification"
-description: "A technical deep dive into Docurama's evidence chain — document digests, PAdES sealing, RFC 3161 timestamps, the append-only transparency log, and evidence packs you can verify with zero network access."
+title: "How envelope evidence works: contract snapshots, typed adoption and digests"
+description: "What Docurama records and exports: contract snapshots, consent, completed PDFs and checksum evidence."
 date: 2026-09-17
 author: "Docurama Engineering"
 tags: [security, engineering, evidence]
 draft: false
 ---
 
-Most eSignature products show you a green checkmark. This post explains what is actually behind Docurama's — the full chain from *click* to *court-proof evidence*, and how anyone can verify it without trusting us.
+Docurama's current signing flow records an email-link signature. This post describes the artifacts it produces and the limits of those artifacts.
 
-## 1. The digest: what exactly was signed
+## 1. Contract and adoption
 
-When an envelope is created, Docurama computes a SHA-256 digest over the document bytes when a real file is attached — or, for template-sent envelopes, a canonical digest over the code, title, page count, creation time, recipients (order, email, status, signature timestamps) and the full event ledger. Any mutation anywhere in that set changes the digest. This is the object-level anchor everything else builds on.
+An envelope sent from a template uses a server-generated snapshot of the contract terms. An uploaded document retains its file checksum. Recipient adoption records include a typed signature name, explicit consent and the submitted field values. These records connect the signing action to the contract being reviewed.
 
-## 2. The seal: PAdES with honest conformance levels
+## 2. Completion artifacts
 
-When the last signer completes, the envelope is sealed:
+After the required signers complete, Docurama provides a completed document PDF and a separate signing record PDF. The signing record reports the recorded recipients, actions, consent and digest evidence. A typed signature representation is not a scanned handwritten signature, and a selected style does not guarantee handwriting-font rendering in every PDF viewer.
 
-- Document integrity is fixed against the digest.
-- Signer identities, consent wording and timestamps are embedded in the signature manifest.
-- Sealing runs at the PAdES conformance level your workspace selected — B-B, B-T, B-LT or B-LTA — and the level is *recorded as data*, not implied. A B-B envelope never gets described as B-LTA in any evidence output.
+These PDFs are generated artifacts. The current email-link flow does not embed a PAdES certificate signature or call an independent RFC 3161 timestamp authority. It does not perform advanced or qualified signing. Application timestamps reflect the server's clock.
 
-The signing certificate is a per-workspace RSA-2048 key with a self-signed X.509 certificate; workspaces that DNS-verify their sending domain get it embedded as a `subjectAltName`, closing the loop between domain verification and cryptographic identity.
+## 3. Digests and evidence exports
 
-## 3. The timestamp: an independent witness
+SHA-256 digests allow the recorded artifacts to be compared with their expected bytes. Evidence packs include an envelope record, event ledger, generated artifacts and a signed manifest. The manifest authenticates the exported record with the instance's key; it does not establish the recipient's independently verified identity.
 
-Every seal is anchored to an RFC 3161 timestamp from a Timestamp Authority you choose (DigiCert, Sectigo, GlobalSign, or your own TSA — HTTPS only). The TSA countersigns the digest, meaning the *existence of the signed document at that moment* is attested by a third party, not by us. This is what makes "signed before the deadline" a provable claim.
+The pack's offline verifier checks the manifest signature and artifact checksums locally. A successful verification means those checks passed for the supplied pack and key. It does not certify a regulated signature level, the truth of every event, or legal enforceability.
 
-## 4. The transparency log: publicly auditable seals
+## 4. Transparency and deployment
 
-Completed seals are hashed into an append-only, CT-style transparency registry. Each entry gets an inclusion proof — a Merkle path from your seal to a published checkpoint. Two properties follow:
+Where a transparency entry or self-hosted attestation is available, its proof can be inspected alongside the envelope record. Availability depends on the deployment and configured integration. The existence of a setting does not mean an external witness or timestamp was obtained for a particular envelope.
 
-- **Anyone can audit the registry** and detect a rewritten history.
-- **Your counterparty can prove your seal existed** without asking us.
-
-The portal key that signs checkpoints is itself witnessed in Sigstore Rekor, so even the registry's integrity has an external anchor.
-
-## 5. The evidence pack: verification with zero trust and zero network
-
-One click on a completed envelope exports a ZIP containing:
-
-- the sealed document, byte-exact;
-- the event ledger as CSV;
-- a machine-readable envelope record;
-- a bilingual print-ready certificate;
-- a signed manifest (RSA-SHA-256 over canonical JSON);
-- and an `verify.html` file.
-
-Open `verify.html` in any browser — on a plane, in a SCIF, in 2041. It re-verifies the manifest signature with WebCrypto and every artifact's SHA-256 *locally*. If the banner says VALID and 7/7 artifacts OK, you have proof that the pack is authentic and complete, without a single request to Docurama. Our test suite proves this in a real Chromium on every release.
-
-## 6. Self-hosted instances get the same proof
-
-A self-hosted Docurama can push a signed, GDPR-minimal attestation (code, digest, dates, conformance level, signer count — zero personal data) to a public verification portal at seal time. The portal stores it with TOFU key pinning, and verifiers see a `VERIFIED_ATTESTED` result with the instance's registry facts. On-prem does not mean unverifiable.
-
-## Try it
-
-Open the [live examples](/#examples), complete a signing flow, and export the evidence pack yourself. Then check the same document on the [verification portal](https://docurama.eu/verify). Everything in this post is one click away — that is rather the point.
+Use the [verification portal](/verify) to inspect the facts reported for your document, and export the evidence pack to retain a copy. Check the actual artifacts and integration results rather than assuming a guarantee from a label.

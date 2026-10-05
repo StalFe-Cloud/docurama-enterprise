@@ -5,6 +5,7 @@ import { randomUUID, createHmac } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import { hashPasswordAsync } from "../src/lib/password-async";
 import { shiftUtcMonth } from "../src/lib/monthly-period";
+import { readConsentSnapshot } from "../src/lib/consent";
 
 const database = process.env.DATABASE_URL ?? "";
 if (process.env.CI !== "true" || process.env.DOCURAMA_VERIFICATION_DATABASE !== "1" ||
@@ -80,6 +81,8 @@ afterAll(async () => {
 test("production login and signing reach the local SMTP and webhook receivers", async () => {
   const id = randomUUID();
   const tenant = await db.tenant.create({ data: { name: "Runtime CI fixture", slug: `runtime-${id}`, planCode: "STARTER", status: "ACTIVE" } });
+  await db.esignPreferences.create({ data: { tenantId: tenant.id, signatureLevel: "simple", requireReauth: false, part11Mode: false,
+    consentText: "I reviewed this isolated runtime fixture agreement and consent to sign it electronically.", consentVersion: "runtime-fixture-v1" } });
   const password = "DisposableRuntimeFixture123!";
   const user = await db.user.create({ data: { email: `runtime-${id}@example.test`, firstName: "Runtime", lastName: "Fixture",
     passwordHash: await hashPasswordAsync(password), status: "ACTIVE", activeTenantId: tenant.id } });
@@ -97,10 +100,12 @@ test("production login and signing reach the local SMTP and webhook receivers", 
   const sent = await post("/api/workspace/envelopes", { op: "send", data: { title: `Runtime ${id}`, templateId: template.id, recipients: [{ name: "CI Signer", email: "signer@example.test" }] } }, token);
   expect(sent.status).toBe(200);
   const envelope = await db.envelope.findFirstOrThrow({ where: { tenantId: tenant.id }, include: { recipients: true } });
+  const consent = readConsentSnapshot(envelope.consentSnapshot);
   const signer = envelope.recipients[0];
   await waitFor(async () => messages.some((message) => message.includes(signer.accessToken!)), "SMTP invitation");
   expect((await post(`/api/sign/${signer.accessToken}`, { op: "view" })).status).toBe(200);
-  const signed = await post(`/api/sign/${signer.accessToken}`, { op: "sign", name: "CI Signer", consent: true });
+  const signed = await post(`/api/sign/${signer.accessToken}`, { op: "sign", name: "CI Signer", consent: true,
+    consentDigest: consent.digest, consentVersion: consent.version });
   expect(signed.status).toBe(200);
   expect(signed.body.envelopeStatus).toBe("COMPLETED");
   await waitFor(async () => deliveries.some((delivery) => {

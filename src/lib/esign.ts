@@ -83,18 +83,16 @@ export const DEFAULT_CONSENT_TEXT =
   "My typed name and signing activity will be recorded with the document's completion evidence.";
 
 export const SIGNATURE_MANIFESTATION_FIELDS = [
-  { field: "Printed name", example: "Alexandra Fischer", regulation: "21 CFR §11.50(a)(1)" },
-  { field: "Date & time (UTC)", example: "2026-09-14 16:42:07 UTC", regulation: "21 CFR §11.50(a)(2)" },
-  { field: "Meaning", example: "Approval, reviewed and agreed", regulation: "21 CFR §11.50(a)(3)" },
-  { field: "Signer identity", example: "alex@stalfe.example (authenticated)", regulation: "21 CFR §11.100(c)" },
-  { field: "Document hash", example: "SHA-256: 3a2f…9c41", regulation: "Integrity control" },
-  { field: "RFC 3161 timestamp", example: "TSA: timestamp.digicert.com, genTime 16:42:09 UTC", regulation: "Long-term validation" },
+  { field: "Typed name", example: "Alexandra Fischer", regulation: "Recorded adoption" },
+  { field: "Date & time (UTC)", example: "2026-09-14 16:42:07 UTC", regulation: "Application server clock" },
+  { field: "Signing method", example: "Email-link typed signing", regulation: "Bearer recipient link" },
+  { field: "Recipient email", example: "signer@example.test", regulation: "Not independent identity verification" },
+  { field: "Consent wording and version", example: "Exact terms reviewed by the signer", regulation: "Frozen consent record" },
+  { field: "Contract and adoption digests", example: "SHA-256 integrity evidence", regulation: "No certificate signature or trusted timestamp" },
 ];
 
 export const ESIGN_LEVELS: { key: string; label: string; description: string }[] = [
-  { key: "simple", label: "Simple (SES)", description: "Basic eIDAS electronic signature - email-to-sign flows" },
-  { key: "advanced", label: "Advanced (AdES)", description: "Uniquely linked to the signer, tamper-evident, PAdES conformance" },
-  { key: "qualified", label: "Qualified (QES)", description: "Qualified certificate + qualified timestamp (QSCD) - highest eIDAS level" },
+  { key: "simple", label: "Email-link typed signing", description: "Typed name and recorded consent; no certificate signature, qualified assurance or PAdES conformance" },
 ];
 
 /* ── Envelope sealing ──────────────────────────────────────────────────────── */

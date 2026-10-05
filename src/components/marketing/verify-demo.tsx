@@ -153,7 +153,7 @@ export function VerifyDemo() {
                     Foundry Partner Qualification · Nordjärm Gjuteri AB
                   </span>
                 </span>
-                <span style={{ marginLeft: "auto", fontSize: 8.5, fontWeight: 700, borderRadius: 5, padding: "2px 7px", background: EMERALD_SOFT, color: EMERALD, flexShrink: 0 }}>PAdES B-LT</span>
+                <span style={{ marginLeft: "auto", fontSize: 8.5, fontWeight: 700, borderRadius: 5, padding: "2px 7px", background: EMERALD_SOFT, color: EMERALD, flexShrink: 0 }}>Email link</span>
               </div>
 
               <div style={{ height: 1, background: HAIR, margin: "11px 0" }} />
@@ -164,8 +164,8 @@ export function VerifyDemo() {
                   <p style={{ fontSize: 9.5, color: INK, fontFamily: "var(--font-geist-mono), monospace", marginTop: 2 }}>Sep 2, 2026 · 10:14 CET</p>
                 </div>
                 <div>
-                  <p style={{ fontSize: 8, fontWeight: 700, letterSpacing: ".08em", color: FAINT }}>TIMESTAMP</p>
-                  <p style={{ fontSize: 9.5, color: INK, fontFamily: "var(--font-geist-mono), monospace", marginTop: 2 }}>RFC 3161 · DigiCert</p>
+                  <p style={{ fontSize: 8, fontWeight: 700, letterSpacing: ".08em", color: FAINT }}>TIME SOURCE</p>
+                  <p style={{ fontSize: 9.5, color: INK, fontFamily: "var(--font-geist-mono), monospace", marginTop: 2 }}>Application clock</p>
                 </div>
                 <div style={{ gridColumn: "1 / -1" }}>
                   <p style={{ fontSize: 8, fontWeight: 700, letterSpacing: ".08em", color: FAINT }}>SHA-256 DIGEST</p>

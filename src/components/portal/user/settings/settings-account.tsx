@@ -462,21 +462,23 @@ function Part11Card({ part11, consentText }: { part11: AccountData["part11"]; co
     part11Mode: part11.part11Mode,
     requireReauth: part11.requireReauth,
     consentText,
+    consentVersion: part11.consentVersion,
   });
 
   const dirty =
     state.part11Mode !== part11.part11Mode ||
     state.requireReauth !== part11.requireReauth ||
-    state.consentText !== consentText;
+    state.consentText !== consentText ||
+    state.consentVersion !== part11.consentVersion;
 
   return (
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
-          <Landmark className="h-4 w-4 text-muted-foreground" aria-hidden /> Regulatory compliance &amp; 21 CFR Part 11
+          <Landmark className="h-4 w-4 text-muted-foreground" aria-hidden /> Signer authentication and consent
         </CardTitle>
         <CardDescription>
-          Life-sciences mode: signature manifestations, signer consent capture, re-authentication before signing and computer-generated audit trails.
+          Manage required signer restrictions and the consent shown in new envelopes. This email-link flow does not provide signer reauthentication or claim 21 CFR Part 11 compliance.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
@@ -484,21 +486,20 @@ function Part11Card({ part11, consentText }: { part11: AccountData["part11"]; co
           <ToggleRow
             checked={state.part11Mode}
             onCheckedChange={(v) => setState({ ...state, part11Mode: v })}
-            label="21 CFR Part 11 mode"
-            desc="Enforce §11.10 controls: validated signature manifestations, consent agreement and tamper-evident audit records"
+            label="Additional signer restrictions (stored Part 11 policy)"
+            desc="Enabling this policy blocks email-link signing until the required authentication and controls are implemented"
           />
           <ToggleRow
             checked={state.requireReauth}
             onCheckedChange={(v) => setState({ ...state, requireReauth: v })}
             label="Re-authenticate before signing"
-            desc="Signers re-enter credentials (or OTP) at the moment of signature - §11.100(c) signature uniqueness"
-            disabled={!state.part11Mode}
+            desc="Require additional signer authentication. This flow cannot provide it, so enabling this policy blocks signing"
           />
         </div>
 
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
-            <Label htmlFor="consent">Signature agreement shown before signing ({part11.consentVersion})</Label>
+            <Label htmlFor="consent">Signature agreement shown before signing</Label>
             <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => setState({ ...state, consentText: DEFAULT_CONSENT_TEXT })}>
               Reset to default
             </Button>
@@ -512,12 +513,20 @@ function Part11Card({ part11, consentText }: { part11: AccountData["part11"]; co
             aria-describedby="consent-hint"
           />
           <p id="consent-hint" className="text-xs text-muted-foreground">
-            Every signer&apos;s acceptance is recorded with timestamp and IP. Versioned - changing the text requires signers to re-consent.
+            New envelopes freeze the exact wording and version. Existing envelopes retain their original consent; completed records do not change when these preferences are saved.
           </p>
         </div>
 
+        <div className="space-y-1.5">
+          <Label htmlFor="consent-version">Consent version for new envelopes</Label>
+          <Input id="consent-version" value={state.consentVersion} maxLength={128}
+            onChange={(e) => setState({ ...state, consentVersion: e.target.value })}
+            className="h-11" aria-describedby="consent-version-hint" />
+          <p id="consent-version-hint" className="text-xs text-muted-foreground">Use a distinct version when changing wording. The evidence also binds the exact wording with its digest.</p>
+        </div>
+
         <div className="space-y-2 rounded-lg border bg-muted/40 p-4">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Signature manifestation - what gets affixed to every signed document</p>
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Recorded signing evidence</p>
           <ul className="grid gap-2 sm:grid-cols-2">
             {SIGNATURE_MANIFESTATION_FIELDS.map((f) => (
               <li key={f.field} className="rounded-lg bg-card p-2.5 text-xs">
@@ -531,17 +540,17 @@ function Part11Card({ part11, consentText }: { part11: AccountData["part11"]; co
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-xs text-muted-foreground">
             <ShieldCheck className="mr-1 inline h-3.5 w-3.5 align-[-2px]" aria-hidden />
-            Also in scope: eIDAS level is set in Settings → eSign; audit trails are exportable from Admin → Audit Log; retention policies from Admin → Compliance.
+            The supported signing method is selected in Settings → eSign. Required restrictions stay enabled until an administrator explicitly changes them; these settings do not certify regulatory compliance.
           </p>
           <Button
             className="h-11"
-            disabled={!dirty || act.isPending || (state.part11Mode && state.consentText.trim().length < 40)}
+            disabled={!dirty || act.isPending || !state.consentVersion.trim() || (state.part11Mode && state.consentText.trim().length < 40)}
             onClick={() => act.mutate({
               op: "part11.save",
-              data: { part11Mode: state.part11Mode, requireReauth: state.requireReauth, consentText: state.consentText },
+              data: { part11Mode: state.part11Mode, requireReauth: state.requireReauth, consentText: state.consentText, consentVersion: state.consentVersion },
             })}
           >
-            <Save className="h-4 w-4" aria-hidden /> Save compliance settings
+            <Save className="h-4 w-4" aria-hidden /> Save signer settings
           </Button>
         </div>
       </CardContent>

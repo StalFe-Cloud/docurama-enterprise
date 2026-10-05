@@ -2,6 +2,9 @@ import { buildSigningEmail } from "@/lib/signing-email";
 import { requestApplicationOrigin } from "@/lib/request-origin";
 import { validateEnvelopeFields, EnvelopeFieldsError } from "@/lib/envelope-fields";
 import { freezeTemplateContract, ContractSnapshotError } from "@/lib/contract-snapshot";
+import { freezeConsentTerms, readConsentSnapshot, ConsentTermsError } from "@/lib/consent";
+import { signerAuthenticationRestriction } from "@/lib/signing-policy";
+import { resolveConfiguredMailSender, MailSenderError } from "@/lib/mail-sender";
 import { NextRequest } from "next/server";
 import { randomBytes } from "node:crypto";
 import type { Prisma } from "@prisma/client";
@@ -77,6 +80,15 @@ export async function POST(req: NextRequest) {
       await currentAllowance(me.tenantId, now);
       const envelope = await serializableTransaction(async (tx) => {
         const tenantId = await requireActiveMembership(tx, me);
+        const tenant = await tx.tenant.findUnique({ where: { id: tenantId }, select: {
+          status: true, esignPrefs: { select: { requireReauth: true, part11Mode: true,
+            signatureLevel: true, consentText: true, consentVersion: true } },
+        } });
+        if (!tenant) throw jsonError("Workspace is no longer available", 403);
+        const restriction = signerAuthenticationRestriction(tenant);
+        if (restriction) throw jsonError(restriction, 409);
+        const consentSnapshot = freezeConsentTerms(tenant.esignPrefs);
+        const fromEmail = await resolveConfiguredMailSender(tx, { tenantId, required: false });
         const document = documentId ? await tx.document.findFirst({ where: { id: documentId, tenantId } }) : null;
         if (documentId && !document) throw jsonError("Document not found in this workspace", 404);
         const template = templateId ? await tx.template.findFirst({
@@ -92,7 +104,7 @@ export async function POST(req: NextRequest) {
         const code = `DOC-${randomBytes(4).toString("hex").toUpperCase()}`;
         const created = await tx.envelope.create({ data: {
           publicCode: code, title, titleLower: foldForSearch(title), tenantId, createdById: me.id,
-          fields: fieldsJson, documentId, templateId, contractSnapshot, status: "SENT", message: String(data.message ?? "").slice(0, 10_000),
+          fields: fieldsJson, documentId, templateId, contractSnapshot, consentSnapshot, status: "SENT", message: String(data.message ?? "").slice(0, 10_000),
           pages: document?.pageCount ?? template?.pages ?? 1, sha256: document?.sha256, createdAt: now,
         } });
         if (template) await tx.template.update({ where: { id: template.id }, data: {
@@ -112,7 +124,8 @@ export async function POST(req: NextRequest) {
             kind: item.role === "SIGNER" ? "invite" : "copy", locale: item.locale ?? template?.locale,
             title, senderName: actor, recipientName: item.name,
             message: created.message, linkUrl: `${origin}/sign/${tokens[index]}`,
-          }), envelopeId: created.id, recipientId: recipientIds[index], toEmail: item.email, createdAt: now }];
+          }), envelopeId: created.id, recipientId: recipientIds[index], toEmail: item.email, createdAt: now,
+            ...(fromEmail ? { fromEmail } : {}) }];
         });
         await tx.mailOutbox.createMany({ data: queued });
         await tx.envelopeEvent.createMany({ data: [
@@ -135,6 +148,14 @@ export async function POST(req: NextRequest) {
         const envelope = await tx.envelope.findFirst({ where: { id, tenantId }, include: { recipients: true } });
         if (!envelope) throw jsonError("Envelope not found", 404);
         if (!["SENT", "PARTIALLY_SIGNED"].includes(envelope.status)) throw jsonError("Reminders can only be sent for active envelopes");
+        readConsentSnapshot(envelope.consentSnapshot);
+        const tenant = await tx.tenant.findUnique({ where: { id: tenantId }, select: {
+          status: true, esignPrefs: { select: { requireReauth: true, part11Mode: true, signatureLevel: true } },
+        } });
+        if (!tenant) throw jsonError("Workspace is no longer available", 403);
+        const restriction = signerAuthenticationRestriction(tenant);
+        if (restriction) throw jsonError(restriction, 409);
+        const fromEmail = await resolveConfiguredMailSender(tx, { tenantId, required: false });
         if (envelope.lastRemindedAt && now.getTime() - envelope.lastRemindedAt.getTime() < 6 * 3_600_000) {
           throw jsonError("A reminder was already sent recently - please wait before sending another.");
         }
@@ -145,6 +166,7 @@ export async function POST(req: NextRequest) {
             senderName: actor, recipientName: item.name, message: envelope.message,
             linkUrl: `${origin}/sign/${item.accessToken}` }),
           envelopeId: envelope.id, recipientId: item.id, toEmail: item.email, createdAt: now,
+          ...(fromEmail ? { fromEmail } : {}),
         })) });
         await tx.envelope.update({ where: { id }, data: { lastRemindedAt: now, reminderCount: { increment: 1 } } });
         await tx.envelopeEvent.create({ data: { envelopeId: id, actor, action: "REMINDED", at: now,
@@ -181,6 +203,8 @@ export async function POST(req: NextRequest) {
     if (error instanceof Response) return error;
     if (error instanceof EnvelopeFieldsError) return jsonError(error.message, 400);
     if (error instanceof ContractSnapshotError) return jsonError(error.message, 400);
+    if (error instanceof ConsentTermsError) return jsonError(error.message, 409);
+    if (error instanceof MailSenderError) return jsonError(error.message, 409);
     console.error("[envelopes POST]", error);
     return jsonError("Operation failed", 500);
   }

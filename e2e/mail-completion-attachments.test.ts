@@ -6,10 +6,12 @@ import { PDFDocument } from "pdf-lib";
 import { freezeTemplateContract } from "../src/lib/contract-snapshot";
 import { computeEnvelopeEvidenceDigest } from "../src/lib/esign";
 import { captureSignatureData } from "../src/lib/signature-data";
+import { resolveConsentTerms } from "../src/lib/consent";
 import { validateEnvelopeFields } from "../src/lib/envelope-fields";
 let row: Record<string, unknown>;
 let envelope: ReturnType<typeof fixtureEnvelope>;
 mock.module("../src/lib/db", () => ({ db: {
+  notificationSettings: { findUnique: async () => null },
   mailOutbox: {
     findMany: async () => [{ ...row }],
     updateMany: async ({ where, data }: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
@@ -21,7 +23,8 @@ mock.module("../src/lib/db", () => ({ db: {
   },
   envelope: { findUnique: async () => envelope },
 } }));
-mock.module("../src/lib/document-store", () => ({ readStoredBytes: async () => { throw new Error("Unexpected upload read"); } }));
+mock.module("../src/lib/document-store", () => ({ MAX_UPLOAD_BYTES: 50 * 1024 * 1024, readStoredBytes: async () => { throw new Error("Unexpected upload read"); } }));
+process.env.SMTP_FROM = "Synthetic Sender <sender@approved.test>";
 const { processOutbox } = await import("../src/lib/mail");
 const { buildFinalDocument } = await import("../src/lib/final-document");
 const signers = [
@@ -29,12 +32,13 @@ const signers = [
   { id: "second", name: "Second Synthetic Signer", email: "second@example.invalid", role: "SIGNER", status: "SIGNED", order: 2, signedAt: new Date(2000) },
 ];
 function fixtureEnvelope() {
+  const consent = resolveConsentTerms(null);
   const fields = validateEnvelopeFields(signers.map((r,index) => ({ id: "signature"+index, type: "signature", pageNumber: 1, x: 10, y: 30+index*15, width: 80, height: 8, recipientIndex: index, recipientEmail: r.email, required: true })), { pageCount: 1, recipients: signers });
-  const recipients = [...signers.map(r=>({...r, signatureData: JSON.stringify(captureSignatureData({name:r.name,consent:true}, fields, r.email, r.signedAt))})),
+  const recipients = [...signers.map(r=>({...r, signatureData: JSON.stringify(captureSignatureData({name:r.name,consent:true,consentDigest:consent.digest,consentVersion:consent.version}, fields, r.email, r.signedAt, consent))})),
     { id: "copy", name: "Synthetic Copy", email: "copy@example.invalid", role: "CC", status: "PENDING", order: 3, signedAt: null, signatureData: null }];
   const value = { id: "envelope", tenantId: "tenant", publicCode: "DOC-SYNTHETIC", title: "Synthetic original agreement", status: "COMPLETED", pages: 1,
     createdAt: new Date(0), sealedAt: new Date(2000), sha256: null, evidenceSha256: "", documentId: null, document: null as {tenantId:string;storageKey:string} | null,
-    templateId: "template", fields: JSON.stringify(fields), contractSnapshot: freezeTemplateContract({id:"template",name:"Synthetic",version:"1",bodyMarkdown:"Original synthetic terms",pages:1},fields),
+    templateId: "template", consentSnapshot: JSON.stringify(consent), fields: JSON.stringify(fields), contractSnapshot: freezeTemplateContract({id:"template",name:"Synthetic",version:"1",bodyMarkdown:"Original synthetic terms",pages:1},fields),
     recipients, events: [{at:new Date(2000),actor:"Synthetic signer",action:"SIGNED",detail:"Synthetic completion"}],
     tenant: {status:"ACTIVE"}, createdBy: {email:"sender@example.invalid"} };
   value.evidenceSha256 = computeEnvelopeEvidenceDigest({...value,documentSha256:null,events:[]});
@@ -79,6 +83,8 @@ test("completion sends two actual PDF attachments to bound recipient and sender"
     }
     expect(smtp.messages).toHaveLength(3);
     for(const message of smtp.messages){
+      expect(message).toContain("From: Synthetic Sender <sender@approved.test>");
+      expect(message).toContain("Message-ID: <synthetic-completion@outbox.docurama>");
       const attachments=attachmentBytes(message);expect(attachments).toHaveLength(2);
       expect(attachments[0]!.filename).toBe("DOC-SYNTHETIC-completed.pdf");
       expect(attachments[1]!.filename).toBe("DOC-SYNTHETIC-completion-record.pdf");

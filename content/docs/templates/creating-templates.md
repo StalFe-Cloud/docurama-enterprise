@@ -30,7 +30,7 @@ The fastest route for common French-law contracts is the [French contract librar
 
 ## Roles and routing order
 
-Routing order is **enforced**, not advisory. When an envelope is sent, each recipient receives a personal `/sign/{token}` link by email, and recipient two cannot sign until recipient one has. On the signer portal, each recipient sees the document with a **per-recipient watermark**, the signers rail with live status, and the standard signing experience: adopt a signature, eIDAS consent, or decline with a reason.
+Signing is sequential. Sending queues the first signer invitation and copy-recipient notices; the next signer invitation is queued after the preceding signer completes. A later signer cannot bypass that order with their link. Signers review the contract, enter a typed name and assigned values, then explicitly accept the displayed consent or decline with a reason.
 
 CC recipients are not part of the routing order — they receive a copy of the completed envelope.
 
@@ -41,7 +41,6 @@ CC recipients are not part of the routing order — they receive a copy of the c
 | Solo | 2 |
 | Starter | 2 |
 | Business | Unlimited |
-| Business | Unlimited |
 | Enterprise | Unlimited |
 
 If you hit the two-template limit on Solo or Starter, clean up templates you no longer send, or upgrade from **Settings → Billing** — Business and above include unlimited templates.
@@ -50,4 +49,4 @@ If you hit the two-template limit on Solo or Starter, clean up templates you no 
 
 From the **Templates** section, choose a template and start a send. The dialog arrives pre-filled — title, message, roles and routing — and you only enter the actual recipient emails. Any per-envelope edits (a name, a clause, a title) apply to that envelope only; the template is untouched.
 
-Sent envelopes keep a link to the source template in their evidence chain, so you can always answer "which version of the contract produced this signed copy?" months later.
+Sending freezes the authoritative template text, version and field locations in the envelope. Later edits or deletion of the source template do not substitute new terms into an existing envelope. Historical envelopes without a valid snapshot require review and reissue.

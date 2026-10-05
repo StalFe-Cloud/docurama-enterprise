@@ -75,6 +75,9 @@ async function snapshot(client) {
   for (const rows of parts) assert.equal(rows.length, 1, 'Every fixture group must actually exist');
   return JSON.stringify(parts, (_key, value) => typeof value === 'bigint' ? value.toString() : value);
 }
+const historicalConsent = "  Exact earlier tenant consent.\nPreserved without replacing its advanced policy.  ";
+await legacy.$executeRaw`INSERT INTO "EsignPreferences" ("id", "tenantId", "signatureLevel", "consentText", "consentVersion", "requireReauth", "part11Mode") VALUES ('migrationprefs', 'migrationtenant', 'advanced', ${historicalConsent}, 'legacy-policy-v7', ${true}, ${true})`;
+const beforePreferences = JSON.stringify(await legacy.$queryRaw`SELECT "id", "tenantId", "signatureLevel", "consentText", "consentVersion", "requireReauth", "part11Mode", "updatedAt" FROM "EsignPreferences" ORDER BY "id"`);
 const before = await snapshot(legacy);
 await legacy.$disconnect();
 let restoreUrl;
@@ -103,6 +106,15 @@ for (const url of [sourceUrl, restoreUrl]) {
   prisma(['migrate', 'deploy', '--schema', schema], url);
   const upgraded = open(url);
   assert.equal(await snapshot(upgraded), before, 'Upgrade must preserve legacy records and payload bytes');
+  assert.equal(JSON.stringify(await upgraded.$queryRaw`SELECT "id", "tenantId", "signatureLevel", "consentText", "consentVersion", "requireReauth", "part11Mode", "updatedAt" FROM "EsignPreferences" ORDER BY "id"`), beforePreferences,
+    'Upgrade must preserve advanced policy, exact historical consent and restriction flags');
+  const newTenant = await upgraded.tenant.create({ data: { name: 'New policy fixture', slug: 'migration-new-policy', status: 'ACTIVE' } });
+  const newPreferences = await upgraded.esignPreferences.create({ data: { tenantId: newTenant.id } });
+  assert.equal(newPreferences.signatureLevel, 'simple', 'Only newly created preferences receive the supported default');
+  assert.equal(newPreferences.consentText, null);
+  assert.equal(newPreferences.consentVersion, 'v1.0');
+  await upgraded.tenant.delete({ where: { id: newTenant.id } });
+
   const subscription = await upgraded.subscription.findUniqueOrThrow({ where: { id: 'migrationsub' } });
   assert.equal(subscription.usageAnchorAt, null);
   assert.equal(subscription.usagePeriodStart, null);
@@ -113,6 +125,7 @@ for (const url of [sourceUrl, restoreUrl]) {
   assert.equal(audit.tenantId, null);
   const envelope = await upgraded.envelope.findUniqueOrThrow({ where: { id: 'migrationenvelope' } });
   assert.equal(envelope.contractSnapshot, null, 'Do not invent historical contract terms');
+  assert.equal(envelope.consentSnapshot, null, 'Do not invent or backfill historical accepted consent terms');
   assert.equal(envelope.evidenceSha256, null, 'Do not invent a historical adoption seal');
   const recipient = await upgraded.recipient.findUniqueOrThrow({ where: { id: 'migrationrecipient' } });
   assert.equal(recipient.signatureData, null, 'Do not invent historical signer adoption');

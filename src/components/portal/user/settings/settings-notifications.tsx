@@ -18,6 +18,9 @@ type NotifData = {
     smtpHost: string | null; smtpPort: number; smtpUser: string | null;
     smtpPasswordMasked: string | null; smtpHasPassword: boolean;
     smtpFrom: string; smtpSecure: boolean;
+    configuredFrom: string | null; senderTrusted: boolean; senderError: string | null;
+    transportConfigured: boolean; transportSource: "SMTP_URL" | "PLATFORM_SETTINGS" | "OUTBOX_ONLY";
+    smtpOverrideActive: false; deliveryConfigured: boolean;
     smtpLastTestAt: string | null; smtpLastTestStatus: string | null;
     alertOnSent: boolean; alertOnViewed: boolean; alertOnSigned: boolean;
     alertOnCompleted: boolean; alertOnDeclined: boolean;
@@ -97,26 +100,32 @@ function SmtpCard({ s }: { s: NotifData["settings"] }) {
           <Mail className="h-4 w-4 text-muted-foreground" aria-hidden /> Email delivery (SMTP)
         </CardTitle>
         <CardDescription>
-          Per-organization relay override. Leave the host empty to send through the platform relay (Docurama Sign &lt;notifications@docurama.eu&gt;) - the verified, authenticated route.
+          Messages use the operator-managed relay. A custom From address requires a verified sending domain owned by this workspace.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        <div className="rounded-lg border p-3 text-sm space-y-1">
+          <p>Configured sender: {s.configuredFrom ?? "Not configured"}</p>
+          <p className="text-muted-foreground">Transport: {s.transportSource === "SMTP_URL" ? "Operator environment relay" : s.transportSource === "PLATFORM_SETTINGS" ? "Platform relay settings" : "Outbox only"}. Workspace relay overrides are inactive.</p>
+          {s.senderError && <p role="alert" className="text-destructive">{s.senderError}</p>}
+          <p className="text-xs text-muted-foreground">Configuration does not confirm delivery to a destination mailbox.</p>
+        </div>
         <div className="grid gap-4 lg:grid-cols-2">
           <div className="space-y-1.5">
-            <Label htmlFor="smtp-host">SMTP host <span className="text-xs text-muted-foreground">(empty = platform relay)</span></Label>
-            <Input id="smtp-host" value={form.smtpHost} onChange={(e) => setForm({ ...form, smtpHost: e.target.value })} className="h-11 font-mono text-sm" placeholder="smtp.yourcompany.com" />
+            <Label htmlFor="smtp-host">SMTP host <span className="text-xs text-muted-foreground">(stored, inactive)</span></Label>
+            <Input disabled id="smtp-host" value={form.smtpHost} onChange={(e) => setForm({ ...form, smtpHost: e.target.value })} className="h-11 font-mono text-sm" placeholder="smtp.yourcompany.com" />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="smtp-port">Port</Label>
-            <Input id="smtp-port" type="number" min={1} max={65535} value={form.smtpPort} onChange={(e) => setForm({ ...form, smtpPort: Number(e.target.value) })} className="h-11" />
+            <Input disabled id="smtp-port" type="number" min={1} max={65535} value={form.smtpPort} onChange={(e) => setForm({ ...form, smtpPort: Number(e.target.value) })} className="h-11" />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="smtp-user">Username</Label>
-            <Input id="smtp-user" value={form.smtpUser} onChange={(e) => setForm({ ...form, smtpUser: e.target.value })} className="h-11" autoComplete="off" />
+            <Input disabled id="smtp-user" value={form.smtpUser} onChange={(e) => setForm({ ...form, smtpUser: e.target.value })} className="h-11" autoComplete="off" />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="smtp-pass">Password {s.smtpHasPassword && <span className="text-xs text-muted-foreground">(saved: {s.smtpPasswordMasked})</span>}</Label>
-            <Input id="smtp-pass" type="password" value={form.smtpPassword} onChange={(e) => setForm({ ...form, smtpPassword: e.target.value })} className="h-11" autoComplete="new-password" placeholder={s.smtpHasPassword ? "Leave empty to keep" : ""} />
+            <Input disabled id="smtp-pass" type="password" value={form.smtpPassword} onChange={(e) => setForm({ ...form, smtpPassword: e.target.value })} className="h-11" autoComplete="new-password" placeholder={s.smtpHasPassword ? "Leave empty to keep" : ""} />
           </div>
           <div className="space-y-1.5 lg:col-span-2">
             <Label htmlFor="smtp-from">From address</Label>
@@ -126,7 +135,7 @@ function SmtpCard({ s }: { s: NotifData["settings"] }) {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             {s.smtpLastTestAt && (
-              <>Last test: <StatusBadge status={s.smtpLastTestStatus === "OK" ? "ACTIVE" : "FAILED"} /> {fmtDate(s.smtpLastTestAt)}</>
+              <>Last configuration check: <StatusBadge status={s.smtpLastTestStatus === "CONFIGURATION_ONLY" ? "PENDING" : s.smtpLastTestStatus === "OK" ? "ACTIVE" : "FAILED"} /> {fmtDate(s.smtpLastTestAt)}</>
             )}
           </div>
           <div className="flex gap-2">
@@ -136,10 +145,10 @@ function SmtpCard({ s }: { s: NotifData["settings"] }) {
               onClick={async () => { setTesting(true); await act.mutateAsync({ op: "smtp.test" }).catch(() => undefined); setTesting(false); }}
             >
               <RefreshCw className={cn("h-4 w-4", testing && "animate-spin")} aria-hidden />
-              {testing ? "Testing…" : "Test connection"}
+              {testing ? "Checking…" : "Check configuration"}
             </Button>
             <Button className="h-11" disabled={act.isPending} onClick={() => act.mutate({ op: "notifications.save", data: form })}>
-              <Save className="h-4 w-4" aria-hidden /> Save SMTP
+              <Save className="h-4 w-4" aria-hidden /> Save sender
             </Button>
           </div>
         </div>

@@ -88,7 +88,7 @@ export function ExampleNda() {
     <div ref={viewRef} className="demo-root">
       <DemoCanvas
         w={W} h={H}
-        label="Live example: a mutual NDA between StålFe and Gusswerk Rheinland routes through two signers in order. StålFe signs first, the turn passes to Gusswerk, and the envelope completes when both parties have signed."
+        label="Illustrative example with synthetic values: a mutual NDA between StålFe and Gusswerk Rheinland routes through two signers in order. StålFe signs first, the turn passes to Gusswerk, and the envelope completes when both parties have signed."
       >
         <div style={{ position: "absolute", inset: 0, background: "#fafaf9" }}>
           <DemoChrome url="app.docurama.eu/documents/DOC-2M4T8K" />
@@ -242,7 +242,7 @@ export function ExampleNda() {
               {/* Completion stamp in the gutter between blocks */}
               {st.completed && (
                 <div style={{ position: "absolute", left: 300, top: 268 }}>
-                  <RoundStamp show text="COMPLETED" sub="PAdES B-LT" size={82} />
+                  <RoundStamp show text="COMPLETED" sub="EMAIL LINK" size={82} />
                 </div>
               )}
             </div>

@@ -23,9 +23,11 @@
  */
 
 import { createHash, randomBytes } from "crypto";
-import { createWriteStream } from "fs";
+import { createWriteStream, createReadStream } from "fs";
 import { mkdir, rm, readdir, readFile, stat, writeFile } from "fs/promises";
 import path from "path";
+import { abortableMetadata, withStorageReadLimits, readLimitedByteStream, throwIfReadAborted, StorageReadError, type StorageReadLimits } from "@/lib/storage-read";
+export type { StorageReadLimits } from "@/lib/storage-read";
 import { db } from "@/lib/db";
 import {
   s3Mode,
@@ -146,15 +148,21 @@ export async function readDocumentBytes(docId: string, tenantId: string): Promis
 }
 
 /** Read by the storageKey persisted on the Document row (either backend). */
-export async function readStoredBytes(storageKey: string): Promise<Buffer> {
+export async function readStoredBytes(storageKey: string, limits?: StorageReadLimits): Promise<Buffer> {
   const mode = activeS3();
   if (mode) {
-    // Same shape check resolveStorageKey applies, without needing a path.
-    const parts = storageKey.split("/");
-    if (parts.length !== 3 || parts[0] !== DOCUMENT_DIR_NAME) throw new Error("Invalid storage key");
-    return s3GetBytes(mode, storageKey);
+    // Validate all key segments before either backend reads authoritative bytes.
+    resolveStorageKey(storageKey);
+    return s3GetBytes(mode, storageKey, limits);
   }
-  return readFile(resolveStorageKey(storageKey));
+  const file = resolveStorageKey(storageKey);
+  if (!limits) return readFile(file);
+  return withStorageReadLimits(limits, async (bound) => {
+    const info = await abortableMetadata(stat(file), bound.signal);
+    throwIfReadAborted(bound.signal);
+    if (bound.maxBytes !== undefined && info.size > bound.maxBytes) throw new StorageReadError("Stored source exceeds the supported size limit.");
+    return readLimitedByteStream(createReadStream(file, { signal: bound.signal }), bound);
+  });
 }
 
 /** Why an upload was refused. The route maps these onto status codes. */

@@ -6,10 +6,11 @@ order: 1
 tags: [overview, introduction]
 ---
 
-Docurama is an electronic signature platform built and hosted in the European
-Union by Docurama SAS (Paris). It wraps a document, its recipients and its full
-event ledger into an **envelope**, collects signatures, seals the result, and
-publishes a public verification code that anyone can check without an account.
+Docurama provides email-link document signing. An **envelope** holds the
+contract, ordered recipients and event ledger. Signers adopt a typed name and
+explicitly accept the displayed consent. Completed envelopes provide private
+document and signing-record PDFs, plus a public code for inspecting the reported
+record. Hosting, storage and integration locations depend on the installation.
 
 This documentation describes what the platform does today. Where a capability
 is designed but not yet wired end to end, the page says so in a status note
@@ -44,11 +45,11 @@ is host-aware, so each surface has a stable address:
 
 ## What Docurama is not
 
-Docurama is not an accredited Qualified Trust Service Provider. It supports
-workflows aligned with the eIDAS Qualified Electronic Signature level, but a
-qualified signature in the legal sense requires a qualified certificate issued
-by an accredited EU QTSP. See [eIDAS signature levels](/docs/compliance/eidas)
-for what that means in practice.
+The current flow does not provide advanced or qualified signing, an embedded
+PDF certificate signature or an independent trusted timestamp. Possession of an
+email link does not establish independently verified identity. Review
+[the signing assurance limits](/docs/compliance/eidas) before selecting this
+workflow for your document requirements.
 
 ## Reading this documentation as an agent
 

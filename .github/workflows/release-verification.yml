@@ -137,6 +137,7 @@ jobs:
             -e DATABASE_URL=file:/app/db/runtime.db -e PORT=3031 -e HOSTNAME=127.0.0.1 \
             -e NEXT_PUBLIC_DEMO_MODE=false -e DOCURAMA_WORKER=on -e REKOR_WITNESS=off \
             -e SMTP_URL='smtp://127.0.0.1:3502?tls=off' \
+            -e SMTP_FROM='Docurama CI <notifications@fixture.test>' \
             -e DOCURAMA_WEBHOOK_INTERNAL_ORIGINS=http://127.0.0.1:3501 \
             docurama-verification:${{ github.sha }}
           for attempt in $(seq 1 60); do

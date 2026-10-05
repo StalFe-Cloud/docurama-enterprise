@@ -260,6 +260,7 @@ model Envelope {
   documentId        String?   // the signed artefact; null while an envelope is a DRAFT
   fields            String? // Validated recipient-bound field locations
   evidenceSha256    String?   // Separate immutable contract/adoption/value seal; sha256 remains uploaded file checksum
+  consentSnapshot   String?   // Immutable server-resolved exact consent text/version/digest frozen at send
   contractSnapshot  String?   // Immutable server-generated template terms and signature location hints at send
   templateId        String?   // template the envelope was sent from (signer preview + evidence chain)
   status            String    @default("DRAFT") // DRAFT | SENT | PARTIALLY_SIGNED | COMPLETED | VOIDED | DECLINED | EXPIRED
@@ -624,7 +625,7 @@ model EsignPreferences {
   filenameFormat         String   @default("{title} - {signer} ({date})")
   sealOnCompletion       Boolean @default(true)
   requireReauth          Boolean @default(false) // 21 CFR Part 11: re-authenticate before signing
-  signatureLevel         String   @default("advanced") // simple | advanced | qualified (eIDAS)
+  signatureLevel         String   @default("simple") // simple | advanced | qualified (eIDAS)
   part11Mode             Boolean @default(false)
   consentText            String?
   consentVersion         String   @default("v1.0")

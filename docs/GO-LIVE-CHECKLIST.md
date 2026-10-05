@@ -1,5 +1,7 @@
 # Go-Live Checklist — Docurama (all platforms)
 
+**Engineering checkpoint (2026-10-04 UTC):** reviewed source `25ae19c50e26a423e9d2386e3c76ecaf713c71f3` passed all seven CI checks. [Exact-head runtime evidence](https://github.com/StalFe-Cloud/docurama-enterprise/actions/runs/37244852380) records API 89/89, MCP 15/15 and browser 31/31 on SQLite and PostgreSQL; the SQLite suite also passed visual 7/7 and required real SeaweedFS 7/7. Native backup/restore and schema-drift checks passed for both providers. The browser suite includes desktop/mobile two-signer completion and actual completed-PDF and completion-record-PDF downloads with hash and PDF checks. This is a prior-source checkpoint: subsequent source changes require fresh CI, and qualification of the approved image digest and customer installation remains pending. Do not mark production or stronger signature-assurance acceptance complete from this checkpoint.
+
 Master gate. Every box ticks before launch day; sign-off per section. Companion runbooks: `DEPLOYMENT.md`, `OPERATIONS-RUNBOOK.md`, `PAYMENTS.md`, `SSO.md`, `SECURITY.md`.
 
 ## 1. Product & content
@@ -7,7 +9,7 @@ Master gate. Every box ticks before launch day; sign-off per section. Companion 
 - [ ] Functional signing journey using synthetic data: authoritative document/template snapshot -> sender confirmation -> correct SIGNER/CC invitations -> earlier/later-recipient waiting behavior -> partial/all-signers completion -> completed-copy notification -> final document and separately authenticated completion/evidence record. Verify the final document visibly contains the intended adopted signer marks and locked terms; a status change, snapshot artifact or original-PDF download alone is insufficient. Historical template envelopes without a valid snapshot require reviewed reissue and must not be silently reconstructed.
 - [ ] Recipient/email semantics and sequence: send only the eligible first signer plus CC notice; remind eligible pending signer only; first-sign waiting receipt and next invitation once; final notices for signers/CC/sender; repeat/early attempts leave no duplicate effects. `Recipient.DELIVERED` is link-opened and `MailOutbox.SENT` is SMTP acknowledgment, neither proves inbox delivery. Verify multipart HTML/plain messaging, escaping, mailbox-bound access and trace associations with synthetic addresses.
 
-- [ ] Signing acceptance: independent completed-PDF signature, TSA response and certificate-chain validation. The reviewed evidence/digest path does not prove embedded PDF signing; PAdES/RFC 3161/Part 11 claims remain blocked until implementation and applicable validation.
+- [ ] Signing acceptance for the selected launch scope: email-link access, typed-name adoption, exact displayed consent/version, frozen terms, recipient-bound field values, completed-PDF and completion-record downloads and evidence integrity. Advanced/Qualified signing, PAdES, trusted RFC 3161 timestamps and Part 11 enforcement remain unavailable; advertising or enabling them requires separate implementation and applicable independent qualification.
 
 - [ ] Pricing ladder verified end-to-end: **Solo €12 / Starter €29 / Business €79 / Enterprise sales-led** (€349 catalogue anchor); term switch −5/−10/−20% math correct (e.g. Starter 12 mo = €278.40); no "most popular" badges. Negotiated Enterprise overrides are delivered: a WON lead converts to a tenant whose subscription carries `seatLimitOverride` / `envelopeLimitOverride` / `monthlyEurOverride`, and `src/lib/billing.ts` enforces those over the catalogue (admin op `lead.convert`; `e2e/lead-conversion.test.ts`). The pricing ladder itself still needs end-to-end verification.
 - [ ] Legal pages reviewed by counsel: `/privacy` (processing mapped to the real data model), `/terms` (billing terms incl. 35-day months + rollover cap), DPA route to legal@.
@@ -28,7 +30,7 @@ not evidence that it executed successfully on this revision.
 - [ ] `bunx tsc --noEmit` clean (0 errors — the build enforces types; gate also runs in CI, `.github/workflows/e2e.yml`).
 - [ ] `eslint` clean.
 - [ ] Production build green — CI `production-image` builds the image and boots it against an empty scratch database, asserting `/api/health` and a rendered `/blog`. (A local `bun run build` needs network for `next/font/google`; the containerised build is the authoritative gate.)
-- [ ] Full E2E battery green via `bash e2e/run.sh`: the Playwright browser suites (`e2e/browser/`, 30 tests covering the 29 journeys that were Maestro flows) + `api`, `evidence`, `transparency`, `rekor`, `mcp`, `plans`, `webhooks`, `visual`, `mail`, `billing`, `sso`, `bot-guard`, `lead-conversion` suites (configured required SeaweedFS currently blocks before warm/seed/probe pending Linux ownership/cleanup repair and integration evidence; an explicit optional skip cannot satisfy the required S3 gate).
+- [ ] Full E2E battery green for the new candidate: API, evidence, transparency, Rekor, MCP, plans, webhooks, visual, mail, billing, SSO, bot-guard, lead-conversion, required SeaweedFS and 31 browser tests. The prior checkpoint above passed; optional storage/browser skips do not satisfy these gates. Fresh CI and exact-image qualification remain pending for subsequent source changes.
 - [ ] PostgreSQL runtime gate green — CI `postgres` generates the PostgreSQL client, seeds, boots the app against PostgreSQL 16 and runs the HTTP + browser suites against it.
 
 > Section 2 is the only section engineering can sign off alone. Sections 3–7
@@ -69,7 +71,7 @@ not evidence that it executed successfully on this revision.
 
 Smoke test, in order, on production:
 
-1. Signup → verification email received → onboarding completes.
+1. SaaS with public registration enabled: signup, verification mail received, onboarding complete. Dedicated selfhost/private_cloud: initialize the schema, provision the administrator offline per `INSTALLATION-BOOTSTRAP.md`, authenticate, create the first organization, then accept a mailbox-bound invitation. Uninvited signup must remain denied; never seed demo accounts.
 2. First envelope: upload/send → signer link opens (public signer portal) → sign → **seal**.
 3. Verify: public portal (`verify.<root>`) shows **VERIFIED** + SHA-256 digest + signers.
 4. Evidence pack export opens offline and validates its digest/attestation chain. Independently validate the completed PDF, TSA response and certificate chain before any PAdES/RFC 3161 assertion; metadata labels alone are insufficient.
@@ -80,8 +82,10 @@ Support inboxes staffed: **support@, sales@, billing@, privacy@, security@, abus
 ## 7. Post-launch (first two weeks)
 
 - [ ] Watch the **PAST_DUE queue** daily (admin Billing) — dunning mails flowing, retry-payment only after settled invoices.
-- [ ] Watch outbox **FAILED** rows (terminal after 5 attempts) and mail latency.
+- [ ] Watch outbox **FAILED** rows (terminal after 5 attempts in this edition) and mail latency. `SENT` records SMTP acceptance, not recipient inbox delivery.
 - [ ] Watch **webhook delivery failures** (`checks.webhooks.failing`, delivery log; 1 m/5 m/15 m/30 m retry schedule).
-- [ ] Confirm **transparency checkpoints** and Rekor witnessing stay current (`checks.rekor.witnessed: true`).
+- [ ] Confirm pinned transparency checkpoint identity and historical consistency. For SaaS with approved Rekor witnessing enabled, verify witnessing stays current. The AWS Private Cloud blueprint requires `REKOR_WITNESS=off`; do not enable public witnessing merely to make a health check green.
 - [ ] Error-rate review: server logs for 5xx, admin Ops Health trends, security-event feed for anomalies.
 - [ ] Retro at day 14: pricing funnel, incident count, checklist corrections folded back into this document.
+
+Operator acceptance for this candidate remains pending: explicit consent and current session/MFA policy, mailbox-bound recipient access, historical snapshot review/reissue, and independently verified completed document/evidence downloads. Stronger authentication or signature policies must fail closed when unsupported. PAdES, RFC 3161/TSA and Part 11 claims require their own applicable implementation and validation evidence.

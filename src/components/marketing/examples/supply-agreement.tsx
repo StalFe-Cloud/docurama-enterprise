@@ -81,7 +81,7 @@ export function ExampleSupplyAgreement() {
     <div ref={viewRef} className="demo-root">
       <DemoCanvas
         w={W} h={H}
-        label="Live example: the annual supply agreement is sent from a template in one pass. Title and both signers come prefilled, both parties sign in sequence, and the sealed copy carries a public verification code."
+        label="Illustrative example with synthetic values: the annual supply agreement is sent from a template in one pass. Title and both signers come prefilled, both parties sign in sequence, and the sealed copy carries a public verification code."
       >
         <div style={{ position: "absolute", inset: 0, background: "#fff" }}>
           <DemoChrome url="app.docurama.eu/templates" />
@@ -341,10 +341,10 @@ export function ExampleSupplyAgreement() {
             >
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <p style={{ fontSize: 11.5, fontWeight: 600, color: INK }}>Sealed and archived</p>
-                <span style={{ fontSize: 8.5, fontWeight: 700, borderRadius: 5, padding: "2px 7px", background: "#dff3eb", color: EMERALD }}>PAdES B-LT</span>
+                <span style={{ fontSize: 8.5, fontWeight: 700, borderRadius: 5, padding: "2px 7px", background: "#dff3eb", color: EMERALD }}>Email link</span>
               </div>
               <p style={{ fontSize: 9.5, color: MUTED, lineHeight: 1.7, marginTop: 6 }}>
-                Both signatures captured · RFC 3161 timestamp applied · public
+                Both signatures captured · completion evidence recorded · public
                 verification code <span style={{ color: INK, fontFamily: "var(--font-geist-mono), monospace" }}>DOC-4N7Q2K</span>.
               </p>
               <div style={{ display: "flex", gap: 8, marginTop: 10 }}>

@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { FILENAME_TOKENS, FILENAME_PRESETS, TSA_PRESETS, ESIGN_LEVELS, previewFilename, validateFilenameFormat } from "@/lib/esign";
+import { SUPPORTED_SIGNATURE_LEVEL } from "@/lib/signing-policy";
 
 type EsignData = {
   certificates: {
@@ -79,7 +80,7 @@ function CertificatesCard({ certs }: { certs: EsignData["certificates"] }) {
             <Award className="h-4 w-4 text-muted-foreground" aria-hidden /> Signing certificates - X.509 / PKCS#12
           </CardTitle>
           <CardDescription>
-            Real RSA-2048 certificates issued by OpenSSL in one click, exactly like the DNS flow: request → provision → activate → download the encrypted .p12.
+            Certificate identity and bundle management. These records are not used to sign completed PDFs and do not enable advanced, qualified or PAdES assurance.
           </CardDescription>
         </div>
         <Button size="sm" className="h-10" onClick={() => setCreate(true)}>
@@ -91,7 +92,7 @@ function CertificatesCard({ certs }: { certs: EsignData["certificates"] }) {
           <div className="rounded-lg border border-dashed p-6 text-center">
             <FileSignature className="mx-auto mb-2 h-8 w-8 text-muted-foreground" aria-hidden />
             <p className="text-sm text-muted-foreground">
-              No signing certificates yet - create one and provision it in a single click. Signatures sealed without a workspace certificate use the platform certificate.
+              No certificate records yet. Email-link typed signing does not use a workspace or platform signing certificate.
             </p>
           </div>
         ) : (
@@ -140,7 +141,7 @@ function CertificatesCard({ certs }: { certs: EsignData["certificates"] }) {
                     <ConfirmDialog
                       trigger={<Button size="sm" variant="outline" className="h-10 text-destructive hover:text-destructive"><Ban className="h-4 w-4" aria-hidden /> Revoke</Button>}
                       title={`Revoke “${c.commonName}”?`}
-                      description="New signatures stop using this certificate immediately. Completed documents and their evidence stay valid."
+                      description="Revoke this stored certificate record. This signing flow does not use certificates for document signatures."
                       confirmLabel="Revoke certificate"
                       onConfirm={() => act.mutateAsync({ op: "cert.revoke", id: c.id })}
                     />
@@ -304,7 +305,7 @@ function TsaCard({ tsa }: { tsa: EsignData["tsa"] }) {
           <Clock className="h-4 w-4 text-muted-foreground" aria-hidden /> RFC 3161 Timestamp Authority (TSA)
         </CardTitle>
         <CardDescription>
-          Trusted timestamps bound into every sealed document for long-term validation (PAdES B-LT / B-LTA). Presets point at public authorities.
+          Stored timestamp service configuration. Completed PDFs do not contain trusted timestamp tokens; this configuration does not enable PAdES or qualified signing.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -367,8 +368,8 @@ function TsaCard({ tsa }: { tsa: EsignData["tsa"] }) {
             <ToggleRow
               checked={form.enabled}
               onCheckedChange={(v) => setForm({ ...form, enabled: v })}
-              label="Timestamp every sealed document"
-              desc="Required for PAdES B-LTA conformance and eIDAS qualified workflows"
+              label="Store timestamp service preference"
+              desc="Reserved configuration; the current signing flow does not request or embed trusted timestamps"
             />
             <div className="rounded-lg border p-3 text-xs text-muted-foreground">
               <p className="font-medium text-foreground">Last test</p>
@@ -405,7 +406,7 @@ function TsaCard({ tsa }: { tsa: EsignData["tsa"] }) {
   );
 }
 
-// ── Sealing preferences ──────────────────────────────────────────────────────
+// ── Export and signing preferences ──────────────────────────────────────────────────────
 
 function PreferencesCard({ prefs }: { prefs: EsignData["prefs"] }) {
   const act = useSettingsAct(["settings-esign", "settings-account"]);
@@ -422,10 +423,10 @@ function PreferencesCard({ prefs }: { prefs: EsignData["prefs"] }) {
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
-          <FileSignature className="h-4 w-4 text-muted-foreground" aria-hidden /> Sealing preferences
+          <FileSignature className="h-4 w-4 text-muted-foreground" aria-hidden /> Export and signing preferences
         </CardTitle>
         <CardDescription>
-          How documents are sealed and named. The filename format applies to every participant&apos;s download with live preview.
+          Stored export preferences and supported signing method. The filename pattern preview does not certify the completed document.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
@@ -433,26 +434,30 @@ function PreferencesCard({ prefs }: { prefs: EsignData["prefs"] }) {
           <ToggleRow
             checked={form.allowMultipleSignatures}
             onCheckedChange={(v) => setForm({ ...form, allowMultipleSignatures: v })}
-            label="Multiple digital signatures"
-            desc="Allow several signers to cryptographically sign the same document (parallel or ordered)"
+            label="Multiple signer preference"
+            desc="Email-link typed signing records each signer in sequence; this is not a certificate signature"
           />
           <ToggleRow
             checked={form.flattenFormFields}
             onCheckedChange={(v) => setForm({ ...form, flattenFormFields: v })}
             label="Flatten form fields"
-            desc="Convert interactive form fields into permanent content after signing - nothing editable remains"
+            desc="Stored export preference; this flow does not certify removal of editable PDF form fields"
           />
           <ToggleRow
             checked={form.sealOnCompletion}
             onCheckedChange={(v) => setForm({ ...form, sealOnCompletion: v })}
             label="Seal on completion"
-            desc="Apply the cryptographic seal and evidence PDF as soon as the last signer finishes"
+            desc="Record document and adoption integrity evidence after the last signer; no certificate signature or PAdES claim"
           />
           <div className="space-y-1.5">
-            <Label htmlFor="sig-level">eIDAS signature level</Label>
+            <Label htmlFor="sig-level">Supported signing method</Label>
+            {prefs.signatureLevel !== SUPPORTED_SIGNATURE_LEVEL && (
+              <p className="text-xs text-destructive" role="alert">The stored {prefs.signatureLevel} policy is unsupported and blocks signing. An administrator must review and explicitly select email-link typed signing to change it.</p>
+            )}
             <Select value={form.signatureLevel} onValueChange={(v) => setForm({ ...form, signatureLevel: v })}>
               <SelectTrigger id="sig-level" className="h-11"><SelectValue /></SelectTrigger>
               <SelectContent>
+                {prefs.signatureLevel !== SUPPORTED_SIGNATURE_LEVEL && <SelectItem value={prefs.signatureLevel} disabled>Stored unsupported policy: {prefs.signatureLevel}</SelectItem>}
                 {ESIGN_LEVELS.map((l) => (
                   <SelectItem key={l.key} value={l.key}>{l.label} - {l.description}</SelectItem>
                 ))}
@@ -511,11 +516,11 @@ function PreferencesCard({ prefs }: { prefs: EsignData["prefs"] }) {
 
         <div className="flex items-center justify-between border-t pt-4">
           <p className="text-xs text-muted-foreground">
-            {prefs.part11Mode ? "21 CFR Part 11 mode is ON (Settings → Account) - re-authentication and consent apply." : "Part 11 mode is off - enable it in Settings → Account for life-sciences workflows."}
+            {prefs.part11Mode ? "Part 11 signer restrictions are enabled and block this flow until supported authentication is available." : "Email-link typed signing does not claim Part 11 compliance. Additional signer authentication restrictions remain in Account settings."}
           </p>
           <Button
             className="h-11"
-            disabled={!formatCheck.ok || act.isPending}
+            disabled={!formatCheck.ok || form.signatureLevel !== SUPPORTED_SIGNATURE_LEVEL || act.isPending}
             onClick={() => act.mutate({ op: "esign.save", data: form })}
           >
             <Save className="h-4 w-4" aria-hidden /> Save preferences

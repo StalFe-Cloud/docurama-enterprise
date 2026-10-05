@@ -21,6 +21,7 @@
  */
 
 import type { S3Client } from "@aws-sdk/client-s3";
+import { withStorageReadLimits, readLimitedByteStream, throwIfReadAborted, StorageReadError, type StorageReadLimits } from "@/lib/storage-read";
 
 type S3Sdk = typeof import("@aws-sdk/client-s3");
 
@@ -160,10 +161,24 @@ export function ensureBucket(mode: Extract<S3Mode, { configured: true }>): Promi
 }
 
 /** Fetch an object's bytes. Throws when the key does not exist. */
-export async function s3GetBytes(mode: Extract<S3Mode, { configured: true }>, key: string): Promise<Buffer> {
-  const [client, sdk] = await Promise.all([clientFor(mode), loadSdk()]);
-  const got = await client.send(new sdk.GetObjectCommand({ Bucket: mode.bucket, Key: key }));
-  return Buffer.from(await got.Body!.transformToByteArray());
+export async function s3GetBytes(mode: Extract<S3Mode, { configured: true }>, key: string, limits?: StorageReadLimits): Promise<Buffer> {
+  if (!limits) {
+    const [client, sdk] = await Promise.all([clientFor(mode), loadSdk()]);
+    const got = await client.send(new sdk.GetObjectCommand({ Bucket: mode.bucket, Key: key }));
+    return Buffer.from(await got.Body!.transformToByteArray());
+  }
+  return withStorageReadLimits(limits, async (bound) => {
+    const [client, sdk] = await Promise.all([clientFor(mode), loadSdk()]);
+    throwIfReadAborted(bound.signal);
+    const got = await client.send(new sdk.GetObjectCommand({ Bucket: mode.bucket, Key: key }), { abortSignal: bound.signal });
+    if (bound.maxBytes !== undefined && got.ContentLength !== undefined && got.ContentLength > bound.maxBytes) {
+      const body = got.Body as { destroy?: () => unknown; cancel?: () => Promise<unknown> } | undefined;
+      body?.destroy?.();
+      if (body?.cancel) void body.cancel().catch(() => undefined);
+      throw new StorageReadError("Stored source exceeds the supported size limit.");
+    }
+    return readLimitedByteStream(got.Body as Parameters<typeof readLimitedByteStream>[0], bound);
+  });
 }
 
 export async function s3PutBytes(

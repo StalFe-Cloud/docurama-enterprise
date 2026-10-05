@@ -1,5 +1,5 @@
 ---
-title: "Self-hosting Docurama: Docker, Kubernetes and everything an enterprise needs"
+title: "Self-hosting Docurama: deployment options and acceptance checks"
 description: "A practical tour of running Docurama on your own infrastructure — single-host Docker Compose with SeaweedFS, Kubernetes with Helm, SMTP relay, SSO and attested verification for on-prem instances."
 date: 2026-09-16
 author: "Docurama Engineering"
@@ -7,7 +7,7 @@ tags: [self-hosting, deployment, enterprise]
 draft: false
 ---
 
-Some contracts will never be allowed to leave your infrastructure — defense, healthcare, banking, or simply a security policy written in blood. Docurama was designed from day one to run entirely on your metal, with the same evidence guarantees as the cloud SaaS at [docurama.eu](https://docurama.eu).
+Docurama can run in infrastructure you control. Validate storage, mail, networking, backup and external integrations for that installation before using it with customer contracts.
 
 ## What a self-hosted stack looks like
 
@@ -17,7 +17,7 @@ The complete stack is one Next.js application plus three pluggable services:
 |---|---|---|
 | Application | docurama.eu | Your container / Helm release |
 | Database | Managed | SQLite (default) or PostgreSQL |
-| Object storage | EU S3 | Local POSIX, or any S3-compatible backend (SeaweedFS, MinIO, Ceph, AWS S3) |
+| Object storage | Configured backend | Local POSIX, or any S3-compatible backend (SeaweedFS, MinIO, Ceph, AWS S3) |
 | Mail delivery | Managed relay | Your SMTP relay (`SMTP_URL`) or the always-inspectable outbox |
 
 Everything is configured through environment variables — the full reference lives in `.env.example` and in the [deployment documentation](/docs/self-hosting/deployment).
@@ -56,13 +56,13 @@ helm install docurama deploy/helm/docurama \
 ## The enterprise features that matter on-prem
 
 - **Single sign-on.** OIDC (Entra ID, Google Workspace, Okta, Keycloak) and SAML 2.0, configured per email domain in Settings → SSO. IdP-verified users are JIT-provisioned into the right workspace.
-- **Your own certificates.** Per-workspace RSA-2048 signing certificates, or bring your own keys for sealing.
+- **Evidence keys and certificate settings.** Validate their purpose in your deployment. These settings do not make the current email-link flow perform PAdES, advanced or qualified certificate signing.
 - **Payments out-of-band.** The billing engine runs in manual mode: workspaces request activation, transfers are approved in the admin console, and the full ledger is audited. No Stripe dependency.
-- **Attested verification.** Set `EVIDENCE_PORTAL_URL` and your instance pushes GDPR-minimal, signed attestations at seal time — counterparties and auditors can verify your on-prem documents on the public portal without touching your network.
-- **Backups.** `scripts/backup.sh` produces a consistent SQLite + object-storage snapshot with retention rotation; wire it to cron or your GitOps pipeline.
+- **Attestation integration.** A configured evidence portal can receive signed instance attestations. Check the actual integration result for each envelope; this is not independent identity verification or trusted timestamping.
+- **Backups.** Run the database and object-storage backup procedure for the configured backend. Verify a restore into a separate recovery destination and monitor the scheduled job before relying on it.
 
 ## Operational honesty
 
 Our [operations runbook](/docs/self-hosting/operations) documents the boring-but-critical parts: health checks, mail outbox inspection, renewal-worker cadence, upgrade procedure and rollback. The same document our own operators use runs your instance — self-hosting should never mean second-class documentation.
 
-If any of this sounds like it needs a conversation — volume pricing, custom SLAs, QSCD integration — the [enterprise page](/enterprise) reaches a human, not a funnel.
+Use the [enterprise page](/enterprise) to discuss deployment requirements. Stronger signing assurance requires separate implementation and qualification; no qualified-signing integration is promised.

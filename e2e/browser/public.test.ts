@@ -58,7 +58,7 @@ describe("public surfaces", () => {
       await goto(page, "/");
       // 30s: this page cold-compiles slowly and the hero animates in.
       await seeText(page, /Sign documents/, 30_000);
-      await seeText(page, "Prove everything.");
+      await seeText(page, "Record evidence.");
       await seeText(page, "Product");
       await seeText(page, "Pricing");
       await seeText(page, "Documentation");
@@ -96,8 +96,8 @@ describe("public surfaces", () => {
       await goto(page, "/blog");
       await seeText(page, "Evidence-grade signing, explained.", 30_000);
 
-      await clickText(page, /Docurama is live/);
-      await seeText(page, /Docurama is live: sign documents, prove everything/);
+      await clickText(page, "Docurama: sign documents and inspect recorded evidence");
+      await seeText(page, "Docurama: sign documents and inspect recorded evidence");
       await seeText(page, "Docurama Team");
 
       // Markdown body rendered, not raw markdown text.

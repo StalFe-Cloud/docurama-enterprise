@@ -38,7 +38,7 @@ jobs:
           docker run -d --name docurama-ci -p 127.0.0.1:3030:3000 -e DATABASE_URL=file:/app/db/smoke.db -e REKOR_WITNESS=off -e DOCURAMA_WORKER=off docurama-ci:${{ github.sha }}
           for attempt in $(seq 1 40); do
             if curl -fsS http://127.0.0.1:3030/api/health; then
-              curl -fsS http://127.0.0.1:3030/blog | grep -q 'Docurama is live'
+              curl -fsS http://127.0.0.1:3030/blog | grep -F 'Docurama: sign documents and inspect recorded evidence' >/dev/null
               docker exec -e DOCURAMA_BOOTSTRAP_EMAIL=admin@container.test -e DOCURAMA_BOOTSTRAP_PASSWORD=DisposableContainerTest123 docurama-ci bun /app/bootstrap-admin.js --empty-installation
               exit 0
             fi

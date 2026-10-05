@@ -6,7 +6,7 @@ import { MarkdownBody } from "../src/components/docs/markdown-body";
 
 test("frontmatter quotes are parsed before blog headings and authors are rendered", () => {
   const post = getBlogPost("docurama-is-live");
-  expect(post?.title).toBe("Docurama is live: sign documents, prove everything");
+  expect(post?.title).toBe("Docurama: sign documents and inspect recorded evidence");
   expect(post?.author).toBe("Docurama Team");
   expect(listBlogPosts().some((p) => p.slug === post?.slug)).toBe(true);
 });

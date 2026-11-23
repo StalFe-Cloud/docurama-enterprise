@@ -7,6 +7,11 @@
 > **Cryptographic Standards:** PAdES (ETSI EN 319 142-1/-2), RFC 3161 TSA, SHA-256, RSA-2048/4096  
 > **Compliance Frameworks:** eIDAS (Regulation EU 910/2014), GDPR (Regulation EU 2016/679), FDA 21 CFR Part 11
 
+* **StalFe Cloud Ecosystem:**
+  * [Docurama Cloud (SaaS)](https://github.com/StalFe-Cloud/docurama) — Multi-tenant public cloud platform.
+  * [Docurama Enterprise](https://github.com/StalFe-Cloud/docurama-enterprise) — Sovereign on-premises and self-hosted edition.
+  * [Docurama Private Cloud](https://github.com/StalFe-Cloud/docurama-private-cloud) — Dedicated AWS tenant VPC infrastructure blueprints.
+
 ---
 
 ## Table of Contents

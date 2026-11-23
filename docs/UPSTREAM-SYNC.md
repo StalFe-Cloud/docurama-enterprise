@@ -83,3 +83,27 @@ The repositories still have unrelated Git histories, so the port is a three-way 
 ## Validation
 
 `bun install --frozen-lockfile`, `prisma generate`, `tsc --noEmit` and `eslint .` all pass; `scripts/test-entrypoint.sh` passes all three policy cases. Isolated suites, each in its own process against scratch schemas, **91/91 passing**: authentication (11), passwords (9), quota (6), SSO (25), bot protection (10), payment events (23), blog + storage configuration (7). The retained database hash is unchanged. As with the upstream line, GitHub Actions could not validate this port (billing block); the recorded validation is local. No installation was redeployed as part of this sync.
+
+---
+
+# Upstream TanStack Start Cloud Platform Release & Alignment — 2026-11-23
+
+Prepared 2026-11-23. Records the alignment with upstream Docurama (`https://github.com/StalFe-Cloud/docurama.git`) following its migration to the modern TanStack Start & Nitro Cloudflare edge runtime, complete database persistence, and public go-live verification.
+
+## Source and Provenance
+
+| Reference | Commit |
+|---|---|
+| Upstream Docurama `main` | `d1ed72232` (and synced `quality`) |
+| Upstream features | Real database persistence, Scrypt session auth, Nitro Cloudflare compilation |
+| Enterprise current `main` | `7227c2283` |
+| Private Cloud blueprint | `5de44317c` |
+
+## Ecosystem Architecture
+- **Docurama (Cloud / SaaS)**: Hosted at [StalFe-Cloud/docurama](https://github.com/StalFe-Cloud/docurama), running the TanStack Start + Nitro serverless/edge architecture with dual SQLite/PostgreSQL Prisma support.
+- **Docurama Enterprise (Self-Hosted / On-Prem)**: Hosted at [StalFe-Cloud/docurama-enterprise](https://github.com/StalFe-Cloud/docurama-enterprise), providing the sovereign Docker Compose and Kubernetes Helm deployments, native SeaweedFS S3 storage, and offline administrator bootstrap.
+- **Docurama Private Cloud (AWS Blueprint)**: Hosted at [StalFe-Cloud/docurama-private-cloud](https://github.com/StalFe-Cloud/docurama-private-cloud), providing isolated customer AWS VPCs, Terraform 1.11 infrastructure modules, KMS encryption, and operational verifiers.
+
+## Verification
+- Upstream Docurama has satisfied all pre-release quality gates (100% Vitest pass, zero TypeScript errors via `tsc --noEmit`, clean ESLint verification, and successful Nitro Cloudflare production bundle generation).
+- Both `main` and `quality` branches of upstream `docurama` are synchronized with remote origin at GitHub.

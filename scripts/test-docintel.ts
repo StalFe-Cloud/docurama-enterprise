@@ -14,7 +14,7 @@ const frenchNda = `
 ACCORD DE CONFIDENTIALITÉ ET DE NON-DIVULGATION
 
 ENTRE LES SOUSSIGNÉS :
-La société DOCURAMA SAS, au capital de 50.000 euros, immatriculée au RCS de Paris sous le numéro 912 345 678,
+La société VOIRIA SASU, immatriculée au RCS de Paris sous le numéro SIREN 131 914 012,
 ci-après dénommée "La Société",
 
 ET :

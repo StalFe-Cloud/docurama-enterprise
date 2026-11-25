@@ -59,7 +59,7 @@ export function AdminUsers() {
           <p className="truncate text-sm">{u.tenantName}</p>
           {u.tenantPlan && <StatusBadge status={u.tenantPlan} className="mt-0.5" />}
         </div>
-      ) : <span className="text-sm text-muted-foreground">Docurama SAS</span>,
+      ) : <span className="text-sm text-muted-foreground">VOIRIA SASU (Docurama)</span>,
     },
     {
       key: "2fa", header: "2FA",

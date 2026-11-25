@@ -54,7 +54,7 @@ export default async function LegalDocsPage() {
             Politiques de Sécurité, RGPD & Engagements eIDAS
           </h1>
           <p className="text-base text-muted-foreground max-w-3xl">
-            Docurama SAS met en œuvre des workflows de signature électronique alignés eIDAS, avec un traitement et un hébergement des données dans l'Union européenne. Docurama n'est pas un prestataire de services de confiance qualifié et n'émet pas de certificats qualifiés.
+            Docurama est un produit de VOIRIA (VOIRIA SASU) qui met en œuvre des workflows de signature électronique alignés eIDAS, avec un traitement et un hébergement des données dans l'Union européenne. Docurama n'est pas un prestataire de services de confiance qualifié et n'émet pas de certificats qualifiés.
           </p>
         </div>
 
@@ -102,7 +102,7 @@ export default async function LegalDocsPage() {
 
                 <div className="flex items-center justify-between text-xs text-muted-foreground pt-2">
                   <span>Référentiels associés : <code className="font-mono text-foreground">{doc.controlRefs || "ISO 27001 / RGPD"}</code></span>
-                  <span>Docurama SAS · Paris, France</span>
+                  <span>VOIRIA SASU (Docurama) · Paris, France</span>
                 </div>
               </section>
             ))

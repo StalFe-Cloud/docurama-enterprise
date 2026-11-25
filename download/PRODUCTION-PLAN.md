@@ -1,7 +1,7 @@
 # Docurama Portal — Production Plan
 
 **Target:** `https://app.docurama.eu` (workspace) · `https://admin.docurama.eu` (platform console) · `https://verify.docurama.eu` (public verification)
-**Entity:** Docurama SAS — 1 Rue Marguerin, 75014 Paris, France
+**Entity:** VOIRIA SASU (Docurama) — 1 Rue Marguerin, 75014 Paris, France
 **Delivery line:** `quality` branch on `github.com/StalFe-Cloud/docurama` (source of truth)
 **Baseline:** commit `6905ec0` + the production-settings increment delivered in this release
 

@@ -132,7 +132,7 @@ function VerifyInner() {
         <p className="mt-6 text-xs leading-relaxed text-muted-foreground">
           This lookup displays the recorded checksum, server completion time and signer roster.
           Use the evidence pack to validate its signed manifest and exported artifacts.
-          The document file itself is never exposed. Docurama SAS - 1 Rue Marguerin, 75014 Paris, France.
+          The document file itself is never exposed. Docurama is a product of VOIRIA (VOIRIA SASU - 1 Rue Marguerin, 75014 Paris, France · SIREN 131 914 012).
         </p>
       </main>
     </div>

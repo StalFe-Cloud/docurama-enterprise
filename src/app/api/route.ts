@@ -8,7 +8,8 @@ export function GET() {
   return NextResponse.json({
     name: "Docurama API",
     version: "1.0.0",
-    company: "Docurama SAS",
+    company: "VOIRIA SASU",
+    product: "Docurama (a product of VOIRIA)",
     documentation: "https://docs.docurama.eu",
     status: "https://status.docurama.eu",
     endpoints: {

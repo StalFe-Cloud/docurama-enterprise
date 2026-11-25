@@ -204,7 +204,7 @@ export function getDocsNav(): NavGroup[] {
 export function generateLlmsTxt(): string {
   const all = walkDocs(DOCS_DIR);
   let out = `# Docurama Documentation Corpus (llms.txt)\n\n`;
-  out += `Docurama SAS is an electronic signature platform hosted in Paris, France.\n`;
+  out += `Docurama is a product of VOIRIA (VOIRIA SASU), hosted in Paris, France.\n`;
   out += `This document provides the full documentation context for autonomous agents.\n\n---\n\n`;
 
   for (const file of all) {

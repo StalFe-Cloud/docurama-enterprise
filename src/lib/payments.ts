@@ -88,7 +88,7 @@ export function centsToEur(cents: number): string {
 
 // ─── Checkout ────────────────────────────────────────────────────────────────
 
-const MANUAL_INSTRUCTIONS = `Transfer the term total to Docurama SAS (SEPA / bank transfer) with the payment reference shown below as the communication. Your plan activates as soon as our billing team confirms the transfer (usually one business day). Questions: billing@docurama.eu.`;
+const MANUAL_INSTRUCTIONS = `Transfer the term total to VOIRIA SASU (Docurama, SEPA / bank transfer) with the payment reference shown below as the communication. Your plan activates as soon as our billing team confirms the transfer (usually one business day). Questions: billing@docurama.eu.`;
 
 export interface CheckoutResult {
   mode: PaymentMode;

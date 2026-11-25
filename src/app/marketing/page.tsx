@@ -19,7 +19,8 @@ export default function MarketingPreviewPage() {
           __html: JSON.stringify({
             "@context": "https://schema.org",
             "@type": "Organization",
-            name: "Docurama SAS",
+            name: "VOIRIA SASU",
+            alternateName: "Docurama",
             url: "https://docurama.eu",
             logo: "https://docurama.eu/brand/docurama-mark.svg",
             email: "support@docurama.eu",

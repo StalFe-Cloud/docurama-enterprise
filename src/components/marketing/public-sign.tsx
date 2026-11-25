@@ -524,7 +524,7 @@ function SignInner({ token, state }: { token: string; state: SignPageState }) {
 
       <footer className="border-t bg-background">
         <div className="mx-auto flex max-w-3xl flex-wrap items-center justify-between gap-2 px-4 py-4 text-xs text-muted-foreground sm:px-6">
-          <span>Docurama SAS · Paris, France · EU data residency</span>
+          <span>VOIRIA SASU (Docurama) · Paris, France · EU data residency</span>
           <Link href="/verify" className="inline-flex items-center gap-1 hover:text-foreground">
             <ChevronLeft className="h-3 w-3" aria-hidden /> Verify another document
           </Link>

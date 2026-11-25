@@ -2,7 +2,7 @@
 
 **Current installation guidance:** use [ENTERPRISE-SELFHOST.md](ENTERPRISE-SELFHOST.md) and [the recorded upstream source port](docs/UPSTREAM-SYNC.md). This repository review is not a production deployment certification. Historical hostnames, infrastructure diagrams and compliance/provider descriptions below require installation-specific verification; they do not establish live service availability, air-gap isolation or PAdES conformance.
 
-> **Docurama SAS** · 1 Rue Marguerin, 75014 Paris, France  
+> **Docurama** is a sovereign European electronic signature and completion evidence platform engineered and operated by **VOIRIA** (**VOIRIA SASU** · 1 Rue Marguerin, 75014 Paris, France · SIREN 131 914 012 · R.C.S. Paris · TVA FR90131914012)  
 > **Jurisdiction:** French Republic & European Union Law · **Data Residency:** Paris, France (EU-West)  
 > **Cryptographic Standards:** PAdES (ETSI EN 319 142-1/-2), RFC 3161 TSA, SHA-256, RSA-2048/4096  
 > **Compliance Frameworks:** eIDAS (Regulation EU 910/2014), GDPR (Regulation EU 2016/679), FDA 21 CFR Part 11
@@ -559,4 +559,4 @@ Promote only a reviewed, validated revision and deploy it through the installati
 
 ---
 
-*© 2026 Docurama SAS · 1 Rue Marguerin, 75014 Paris, France · All rights reserved.*
+*© 2026 VOIRIA SASU (Docurama is a product of VOIRIA) · 1 Rue Marguerin, 75014 Paris, France · SIREN 131 914 012 · All rights reserved.*

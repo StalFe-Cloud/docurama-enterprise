@@ -2,7 +2,10 @@
   "brand": {
     "name": "Docurama",
     "tagline": "Signer, Sceller, Vérifier",
-    "legalName": "Docurama SAS",
+    "legalName": "VOIRIA SASU",
+    "company": "VOIRIA",
+    "productNotice": "Docurama est un produit de VOIRIA",
+    "siren": "131 914 012",
     "address": "1 Rue Marguerin, 75014 Paris, France",
     "euDataResidency": "Vérifiez la localisation des données pour le déploiement choisi."
   },

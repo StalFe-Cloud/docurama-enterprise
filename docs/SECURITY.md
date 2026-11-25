@@ -45,7 +45,7 @@ Configure **both** `NEXT_PUBLIC_TURNSTILE_SITE_KEY` at build time and `TURNSTILE
 The implemented evidence path records a SHA-256 document/ledger digest, RSA-signed attestation and append-only transparency log, with optional Rekor witnessing. A completion record or conformance label does not prove that the output PDF contains an embedded PAdES signature or an RFC 3161 timestamp. Independent validation of a completed PDF, TSA response and certificate chain remains a release gate. Do not claim B-B/B-T/B-LT/B-LTA or Part 11 compliance from the metadata alone.
 ## 6. Data protection
 
-EU residency end-to-end (Docurama SAS, Paris; EU hosting and EU TSAs). DSAR tooling in the admin console (Legal & DSAR section: run/cancel, DMCA resolution with recorded notes). Retention policies and legal holds are first-class models (per-tenant retention rules, hold-scoped purge suppression). Consent records (GDPR Art. 7) are captured at signup with versioned references.
+EU residency end-to-end (VOIRIA SASU / Docurama, Paris; EU hosting and EU TSAs). DSAR tooling in the admin console (Legal & DSAR section: run/cancel, DMCA resolution with recorded notes). Retention policies and legal holds are first-class models (per-tenant retention rules, hold-scoped purge suppression). Consent records (GDPR Art. 7) are captured at signup with versioned references.
 
 ## 7. Incident response
 

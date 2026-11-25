@@ -121,7 +121,7 @@ export default function BlogIndexPage() {
 
       <footer className="border-t">
         <div className="mx-auto flex max-w-5xl flex-col items-center gap-2 px-4 py-8 text-xs text-muted-foreground sm:flex-row sm:justify-between sm:px-6">
-          <p>© 2026 Docurama SAS · Paris, France</p>
+          <p>© 2026 VOIRIA SASU (Docurama) · Paris, France</p>
           <div className="flex gap-4">
             <Link href="/docs" className="hover:text-foreground">Documentation</Link>
             <Link href="/privacy" className="hover:text-foreground">Privacy</Link>

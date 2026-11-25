@@ -27,13 +27,13 @@ export const metadata: Metadata = {
   metadataBase: new URL("https://docurama.eu"),
   title: "Docurama: Enterprise Portal and Admin Console",
   description:
-    "Docurama platform console by Docurama SAS (Paris, France): document signing, PAdES cryptographic verification, tenant administration, compliance operations and trust analytics.",
+    "Docurama platform console by VOIRIA SASU (Docurama is a product of VOIRIA, Paris, France): document signing, PAdES cryptographic verification, tenant administration, compliance operations and trust analytics.",
   // Favicon (app/icon.svg) and touch icon (app/apple-icon.png) are resolved
   // automatically from the app directory by the Next.js file conventions.
   openGraph: {
     title: "Docurama: Sign, Seal, Verify",
     description:
-      "The enterprise portal for signed, sealed and verifiable documents. Docurama SAS, 1 Rue Marguerin, 75014 Paris, France.",
+      "The enterprise portal for signed, sealed and verifiable documents. Docurama is a product of VOIRIA (VOIRIA SASU, 1 Rue Marguerin, 75014 Paris, France).",
     siteName: "Docurama",
     images: ["/brand/og-image.png"],
     type: "website",

@@ -3,7 +3,7 @@
 /**
  * Admin - Email & DNS provisioning for docurama.eu.
  *
- * One console for the Docurama SAS digital identity:
+ * One console for the VOIRIA SASU (Docurama) digital identity:
  *  - Company identity card (legal entity, Paris address, fill-in registry data).
  *  - The 12 role-based mailboxes/aliases (transactional, business, legal/privacy,
  *    RFC 5321/2142) with provision / round-trip test actions.
@@ -120,7 +120,7 @@ export function AdminProvisioning() {
     <div className="space-y-6">
       <PageHeader
         title="Email & DNS"
-        description="Docurama SAS digital identity on docurama.eu - mailboxes, sub-domains, DNS deliverability records (SPF, DKIM, DMARC, MTA-STS) and the exportable zone file."
+        description="VOIRIA SASU digital identity on docurama.eu (Docurama is a product of VOIRIA) - mailboxes, sub-domains, DNS deliverability records (SPF, DKIM, DMARC, MTA-STS) and the exportable zone file."
         actions={
           <Button
             variant="outline" size="sm" className="h-11"
@@ -470,7 +470,7 @@ function ZoneTab({ data }: { data: ProvisioningData | undefined }) {
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Company identity - Docurama SAS</CardTitle>
+          <CardTitle className="text-base">Company identity - VOIRIA SASU</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="grid gap-x-8 gap-y-4 sm:grid-cols-2">

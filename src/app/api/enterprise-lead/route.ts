@@ -88,7 +88,7 @@ export async function POST(req: NextRequest) {
       ``,
       `Triage in the admin console: Enterprise leads (id ${lead.id}).`,
       ``,
-      `Docurama SAS - 1 Rue Marguerin, 75014 Paris, France`,
+      `VOIRIA SASU (Docurama) - 1 Rue Marguerin, 75014 Paris, France`,
     ].join("\n"),
   });
 

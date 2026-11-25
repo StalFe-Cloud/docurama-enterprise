@@ -154,7 +154,7 @@ function InvitePageInner() {
                 )}
 
                 <p className="text-xs leading-relaxed text-muted-foreground">
-                  Docurama SAS - 1 Rue Marguerin, 75014 Paris, France · EU data residency ·
+                  Docurama is a product of VOIRIA (VOIRIA SASU) - 1 Rue Marguerin, 75014 Paris, France · EU data residency ·
                   Questions? <a className="underline underline-offset-2" href="mailto:support@docurama.eu">support@docurama.eu</a>
                 </p>
               </>

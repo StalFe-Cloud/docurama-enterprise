@@ -442,7 +442,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         ]);
 
         const bundle = {
-          exportType: "Docurama SAS - ISMS / SOC 2 / ISO 27001 Auditor Bundle",
+          exportType: "VOIRIA SASU (Docurama) - ISMS / SOC 2 / ISO 27001 Auditor Bundle",
           exportedAt: new Date().toISOString(),
           exportedBy: `${admin.firstName} ${admin.lastName}`,
           platformAuditChain: {

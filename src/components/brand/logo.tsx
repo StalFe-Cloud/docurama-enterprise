@@ -13,9 +13,17 @@ import { cn } from "@/lib/utils";
  * Tagline:  "SIGN • SEAL • VERIFY"
  */
 
-export const BRAND_LEGAL_NAME = "Docurama SAS";
+export const BRAND_NAME = "Docurama";
+export const BRAND_COMPANY = "VOIRIA";
+export const BRAND_LEGAL_NAME = "VOIRIA SASU";
+export const BRAND_PRODUCT_NOTICE = "Docurama is a product of VOIRIA";
 export const BRAND_ADDRESS = "1 Rue Marguerin, 75014 Paris, France";
-export const BRAND_LEGAL_LINE = `${BRAND_LEGAL_NAME} - ${BRAND_ADDRESS}`;
+export const BRAND_SIREN = "131 914 012";
+export const BRAND_SIRET = "131 914 012 00011";
+export const BRAND_RCS = "Paris";
+export const BRAND_RCS_LINE = "131 914 012 R.C.S. Paris";
+export const BRAND_TVA = "FR90131914012";
+export const BRAND_LEGAL_LINE = `${BRAND_LEGAL_NAME} (${BRAND_PRODUCT_NOTICE}) - ${BRAND_ADDRESS} (SIREN ${BRAND_SIREN})`;
 
 /** Icon-only brand mark. Adapts to light/dark via CSS custom properties. */
 export function BrandMark({ className }: { className?: string }) {

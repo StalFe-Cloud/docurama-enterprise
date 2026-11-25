@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
         `This link is single-use and will expire in 1 hour.`,
         `If you didn't request a password reset, you can safely ignore this email; your password remains unchanged.`,
         ``,
-        `Docurama SAS · 1 Rue Marguerin, 75014 Paris, France`,
+        `VOIRIA SASU (Docurama) · 1 Rue Marguerin, 75014 Paris, France`,
       ].join("\n"),
       linkUrl: resetUrl,
     },

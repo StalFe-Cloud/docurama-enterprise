@@ -180,7 +180,7 @@ function renderCertificateHtml(e: FullEnvelope): string {
       : "PAdES conformance: not asserted. No PAdES PDF signature or trusted timestamp was created by this signing flow."}
     The evidence-key signature authenticates the exported artifacts; it does not certify signer identity,
     qualified-signature status or regulatory compliance.</span></p>
-    <p>Docurama SAS · 1 Rue Marguerin, 75014 Paris, France · docurama.eu — Généré le / Generated on ${escapeHtml(fmtFr(new Date()))}</p>
+    <p>VOIRIA SASU (Docurama) · 1 Rue Marguerin, 75014 Paris, France · docurama.eu — Généré le / Generated on ${escapeHtml(fmtFr(new Date()))}</p>
   </footer>
 </div>
 </body>
@@ -477,7 +477,7 @@ CONFIANCE / TRUST
   The manifest signature authenticates the exported artifacts; it does not create
   a qualified PDF signature or a trusted timestamp.
 
-Docurama SAS · 1 Rue Marguerin, 75014 Paris, France · docurama.eu
+VOIRIA SASU (Docurama) · 1 Rue Marguerin, 75014 Paris, France · docurama.eu
 `;
 }
 

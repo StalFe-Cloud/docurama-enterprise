@@ -152,7 +152,7 @@ export const SMS_PROVIDERS: SmsProvider[] = [
     fields: [
       { key: "apiKey", label: "API key v3", hint: "xkeysib-…" },
     ],
-    notes: "French vendor - pairs well with Docurama SAS for invoicing and DPD.",
+    notes: "French vendor - pairs well with VOIRIA SASU (Docurama) for invoicing and DPD.",
   },
   {
     key: "smsmode",

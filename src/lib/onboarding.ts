@@ -197,7 +197,7 @@ export async function issueEmailVerification(userId: string, email: string, orig
       ``,
       `This link expires in 24 hours. If you didn't create a Docurama account, you can ignore this message.`,
       ``,
-      `Docurama SAS - 1 Rue Marguerin, 75014 Paris, France`,
+      `VOIRIA SASU (Docurama) - 1 Rue Marguerin, 75014 Paris, France`,
     ].join("\n"),
     linkUrl: link,
   });
@@ -299,7 +299,7 @@ async function queueInvitationMail(input: { email: string; invitedBy: string; or
       ``,
       `The invitation expires in 14 days. If you weren't expecting it, you can ignore this email.`,
       ``,
-      `Docurama SAS - 1 Rue Marguerin, 75014 Paris, France`,
+      `VOIRIA SASU (Docurama) - 1 Rue Marguerin, 75014 Paris, France`,
     ].join("\n"),
     linkUrl: link,
   });

@@ -26,7 +26,7 @@ const DEMO_MODE = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
 
 const DEMO_ACCOUNTS = [
   {
-    label: "Platform Admin - Docurama SAS",
+    label: "Platform Admin - VOIRIA SASU (Docurama)",
     email: "admin@docurama.eu",
     password: "StalFe2026!Admin",
     desc: "Full admin control panel: tenants, compliance, billing, ops",

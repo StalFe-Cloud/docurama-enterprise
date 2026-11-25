@@ -27,7 +27,7 @@ export const COMPLIANCE_DOCUMENTS_SEED: ComplianceDocumentSeed[] = [
     bodyMarkdown: `# POLITIQUE DE SÉCURITÉ DES SYSTÈMES D'INFORMATION (PSSI)
 
 ### 1. OBJET ET CHAMP D'APPLICATION
-La présente Politique de Sécurité des Systèmes d'Information (« PSSI ») fixe les directives stratégiques, organisationnelles et techniques de Docurama SAS pour assurer la confidentialité, l'intégrité, la disponibilité et la traçabilité des données hébergées et traitées sur la plateforme.
+La présente Politique de Sécurité des Systèmes d'Information (« PSSI ») fixe les directives stratégiques, organisationnelles et techniques de VOIRIA SASU (éditeur de Docurama) pour assurer la confidentialité, l'intégrité, la disponibilité et la traçabilité des données hébergées et traitées sur la plateforme.
 Elle s'applique sans exception à l'ensemble du personnel, des prestataires, des administrateurs et des tiers accédant aux infrastructures de production.
 
 ### 2. PRINCIPES DIRECTEURS
@@ -53,7 +53,7 @@ Des tests d'intrusion (pentests) indépendants sont diligentés annuellement. To
     bodyMarkdown: `# POLITIQUE GÉNÉRALE DE PROTECTION DES DONNÉES (RGPD)
 
 ### 1. ENGAGEMENT DE CONFORMITÉ
-Docurama SAS applique scrupuleusement le Règlement (UE) 2016/679 (RGPD) et la loi Informatique et Libertés du 6 janvier 1978 modifiée.
+VOIRIA SASU (éditeur de Docurama) applique scrupuleusement le Règlement (UE) 2016/679 (RGPD) et la loi Informatique et Libertés du 6 janvier 1978 modifiée.
 
 ### 2. PRINCIPES APPLIQUÉS AUX TRAITEMENTS
 - **Licéité et transparence :** Chaque traitement repose sur une base légale déterminée (exécution contractuelle, obligation légale ou consentement).
@@ -256,7 +256,7 @@ Des accords DPA conformes à l'article 28 du RGPD sont systématiquement signés
     bodyMarkdown: `# DÉCLARATION D'APPLICABILITÉ ET RAPPORT D'AUDIT ISMS
 
 ### 1. SYNTHÈSE DE CONFORMITÉ
-Le Système de Management de la Sécurité de l'Information (SMSI) de Docurama SAS est documenté, mis en œuvre et audité conformément aux exigences de la norme ISO/IEC 27001:2022.
+Le Système de Management de la Sécurité de l'Information (SMSI) de VOIRIA SASU (Docurama) est documenté, mis en œuvre et audité conformément aux exigences de la norme ISO/IEC 27001:2022.
 Tous les contrôles applicables des clauses 5 (Organisationnel), 6 (Personnes), 7 (Physique) et 8 (Technologique) sont déployés et monitorés en continu.
 `,
   },

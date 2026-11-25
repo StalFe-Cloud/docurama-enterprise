@@ -1,6 +1,6 @@
 # Docurama Competitive Strategy and Innovation Roadmap
 
-**Docurama SAS** · 1 Rue Marguerin, 75014 Paris, France · docurama.eu
+**VOIRIA SASU (Docurama)** · 1 Rue Marguerin, 75014 Paris, France · docurama.eu
 
 Prepared September 2026 for the quality branch. This document tears down the
 major competitors, states where Docurama wins today, and lays out a ranked

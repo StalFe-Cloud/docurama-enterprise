@@ -329,7 +329,7 @@ function Wizard() {
 
       <footer className="border-t bg-background py-6">
         <p className="mx-auto max-w-6xl px-4 text-xs text-muted-foreground sm:px-6">
-          Docurama SAS - 1 Rue Marguerin, 75014 Paris, France · EU data residency ·
+          Docurama is a product of VOIRIA (VOIRIA SASU) - 1 Rue Marguerin, 75014 Paris, France · EU data residency ·
           Questions during setup? <a className="underline underline-offset-2" href="mailto:support@docurama.eu">support@docurama.eu</a>
         </p>
       </footer>

@@ -10,10 +10,10 @@ tags:
 - launchApp
 
 - assertVisible: Demo accounts - one click to enter
-- assertVisible: Platform Admin - Docurama SAS
+- assertVisible: Platform Admin - VOIRIA SASU (Docurama)
 
 # One click, no typing
-- tapOn: Platform Admin - Docurama SAS
+- tapOn: Platform Admin - VOIRIA SASU (Docurama)
 
 # PLATFORM_ADMIN lands in the admin shell (overview section)
 - extendedWaitUntil:

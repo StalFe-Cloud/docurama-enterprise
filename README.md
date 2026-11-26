@@ -559,4 +559,11 @@ Promote only a reviewed, validated revision and deploy it through the installati
 
 ---
 
+## License & Security
+
+- **License:** [Business Source License 1.1 (BUSL-1.1)](LICENSE) — converts to Apache 2.0 on 2030-01-01. Commercial production inquiries: `legal@voiria.com`.
+- **Security Disclosures:** See [SECURITY.md](SECURITY.md) or write to `security@docurama.eu`.
+
+---
+
 *© 2026 VOIRIA SASU (Docurama is a product of VOIRIA) · 1 Rue Marguerin, 75014 Paris, France · SIREN 131 914 012 · All rights reserved.*
